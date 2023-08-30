@@ -1,0 +1,46 @@
+# time discretization
+dt            = 1e-5
+num_steps     = 6000
+time_scheme   = explicit_rk4
+dual_time     = false
+res_tol       = 1e-5
+
+# space discretization
+x_initial   = 0
+x_final     = 1
+cell_number = 1000 
+
+# inlet BC
+press_inlet      = 1
+temp_inlet       = 300
+vel_inlet        = 0
+rho_inlet        = 1
+mass_frac_inlet  = [1.0, 0.0]
+
+# outlet BC
+press_outlet      = 0.1
+temp_outlet       = 300
+vel_outlet        = 0
+rho_outlet        = 0.125
+mass_frac_outlet = [1.0, 0.0]
+
+# gas model
+gas_model = ideal gas model
+
+# ROM
+calc_rom   = false
+rom_method = lspg
+pod_energy = 99.999
+
+# Hyper-Reduction
+hyper = false
+hyper_method= gappy_pod
+
+# Visualization
+
+variable1 = Density
+variable2 = Pressure
+variable3 = Temprature
+variable4 = Velocity
+
+
