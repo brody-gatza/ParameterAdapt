@@ -1,13 +1,13 @@
 # time discretization
-dt            = 5e-5
-num_steps     = 3000
+dt            = 1e-6
+num_steps     = 10000
 time_scheme   = explicit_fd_euler
 dual_time     = false
 res_tol       = 1e-5
 
 # space discretization
 x_initial   = 0
-x_final     = 1
+x_final     = 0.01
 cell_number = 512 
 
 # inlet BC
@@ -26,11 +26,11 @@ mass_frac_outlet = [1.0, 0.0]
 
 # Initial Condition
 
-x_interval_ic = [[0,0.5],[0.5,1]]
-press_ic      = [1,0.1]
+x_interval_ic = [[0,6.28],[6.28,10]]
+press_ic      = [5000,5000]
 temp_ic       = [300,300]
-vel_ic        = [0.1,0.1]
-rho_ic        = [1,0.1]
+vel_ic        = [0,0]
+rho_ic        = [0.1,0.1]
 mass_frac_ic  = [[1.0, 0.0],[1.0, 0.0]]
 
 # gas model
@@ -48,8 +48,8 @@ hyper_method= gappy_pod
 # Visualization
 
 variable1 = Density
-variable2 = Pressure
-variable3 = Velocity
+variable2 = None
+variable3 = None
 variable4 = None
 
 

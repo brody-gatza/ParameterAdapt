@@ -1,6 +1,17 @@
 
 import customtkinter
+import ast
+from tkinter import ttk
+import importlib
+
+
+import solver_functions
+import non_linear_terms
+import time_integrator_functions
+import visualization_functions
 import ui_solver_bridge
+import rom_functions
+
 
 class UI(customtkinter.CTk):
 
@@ -79,7 +90,7 @@ class UI(customtkinter.CTk):
         self.time_scheme_label.grid(row=3,column=0,padx=15,pady=10)
 
         self.time_scheme_entry_var = customtkinter.StringVar()
-        self.time_scheme_options = ['Explicit - RK4' , 'Implicit - BDF']
+        self.time_scheme_options = ['Explicit - FD Euler' , 'Implicit - BD Euler']
         self.time_scheme = customtkinter.CTkOptionMenu(self.time_descritization_frame , values=self.time_scheme_options , 
                                                        variable=self.time_scheme_entry_var , command = self.time_scheme_callback)
         self.time_scheme.grid(row=3,column=1,padx=15,pady=10)
@@ -244,7 +255,7 @@ class UI(customtkinter.CTk):
         self.rom_method_checkbox.grid(row=1,column=0,padx=5, pady=10)
         
         self.rom_method_entry_var = customtkinter.StringVar()
-        self.rom_method_options = ['Galerking','LSPG']
+        self.rom_method_options = ['Galerkin','LSPG']
         self.rom_method = customtkinter.CTkOptionMenu(self.rom_frame , values=self.rom_method_options , state='disabled')
         self.rom_method.grid(row=1,column=1,padx=5, pady=10)
 
@@ -272,23 +283,35 @@ class UI(customtkinter.CTk):
         self.input_file_frame.grid_columnconfigure(2,weight=1)
         self.input_file_frame.grid(row=2,column=0,columnspan=3,pady=10 , sticky = 'new')
         
+        self.working_dir_label = customtkinter.CTkLabel(self.input_file_frame , text='Working Directory')
+        self.working_dir_label.grid(row=0,column=0,pady=10)
+
+        self.working_dir_entry_var = customtkinter.StringVar()
+        self.working_dir = customtkinter.CTkEntry(self.input_file_frame , textvariable=self.working_dir_entry_var)
+        self.working_dir.grid(row=0,column=1,pady=10,sticky='ew') 
+
+        self.working_dir_button = customtkinter.CTkButton(self.input_file_frame , text='Open' , command=self.working_dir_callback)
+        self.working_dir_button.grid(row=0,column=2)  
+        
         self.input_file_label = customtkinter.CTkLabel(self.input_file_frame , text='Input Files')
-        self.input_file_label.grid(row=0,column=0,pady=10)   
+        self.input_file_label.grid(row=1,column=0,pady=10)   
 
-        self.input_file = customtkinter.CTkEntry(self.input_file_frame , placeholder_text= 'Enter the Input File Path')
-        self.input_file.grid(row=0,column=1,pady=10,sticky='ew')    
-
-        self.FOM_file_label = customtkinter.CTkLabel(self.input_file_frame , text='FOM Result')
-        self.FOM_file_label.grid(row=1,column=0,pady=10)  
-
-        self.FOM_file = customtkinter.CTkEntry(self.input_file_frame , placeholder_text= 'Enter the FOM Result Path')
-        self.FOM_file.grid(row=1,column=1,pady=10,sticky='ew')
+        self.input_file = customtkinter.CTkEntry(self.input_file_frame)
+        self.input_file.grid(row=1,column=1,pady=10,sticky='ew')   
 
         self.input_file_button = customtkinter.CTkButton(self.input_file_frame , text='Open' , command=self.input_file_open_callback)
-        self.input_file_button.grid(row=0,column=2)
+        self.input_file_button.grid(row=1,column=2)
+
+        self.FOM_file_label = customtkinter.CTkLabel(self.input_file_frame , text='FOM Result')
+        self.FOM_file_label.grid(row=2,column=0,pady=10)  
+
+        self.FOM_file_entry_var = customtkinter.StringVar()
+        self.FOM_file = customtkinter.CTkEntry(self.input_file_frame , textvariable=self.FOM_file_entry_var)
+        self.FOM_file.grid(row=2,column=1,pady=10,sticky='ew')
 
         self.FOM_file_button = customtkinter.CTkButton(self.input_file_frame , text='Open' , command=self.FOM_file_open_callback)
-        self.FOM_file_button.grid(row=1,column=2)
+        self.FOM_file_button.grid(row=2,column=2)
+
 
         ######################  Visualization  ######################
 
@@ -328,11 +351,27 @@ class UI(customtkinter.CTk):
         self.visual_4_option = customtkinter.CTkOptionMenu(self.visual_frame , values=self.visual_options , variable=self.visual_4_option_entry_var)
         self.visual_4_option.grid(row=4,column=1,padx=5, pady=10)                
 
+        ######################  IC  ######################
+
+        self.ic_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
+        self.ic_frame.grid(row=1,column=3,padx=10,pady=10 , sticky = 'new')
+        self.ic_frame.columnconfigure(0,weight=1)
+
+        self.ic_label = customtkinter.CTkLabel(self.ic_frame , text='Initial Conditions')
+        self.ic_label.grid(row=0,column=0,pady=10)
+
+        self.ic_listbox = customtkinter.CTkButton(self.ic_frame,text='Configure IC',command=self.IC_conf)
+        self.ic_listbox.grid(row=1,column=0,padx=10,pady=10,sticky='ew')
+
+        ######################  RUN  ######################
+
         self.run_button = customtkinter.CTkButton(self.set_up_frame , text='RUN !',font=customtkinter.CTkFont(size=30),command=self.run_callback)
         self.run_button.grid(row=3,column=1,columnspan=2,pady=20,sticky='news')
 
         # self.home_button_callback()
         self.setup_button_callback()
+        # self.input_file_open_callback()
+        # self.run_callback()
 
     def select_frame_by_name(self, name):
 
@@ -372,11 +411,11 @@ class UI(customtkinter.CTk):
 
         selected_option = time_scheme_entry_var
 
-        if selected_option == 'Explicit - RK4':
+        if selected_option == 'Explicit - FD Euler':
 
             self.res_tol.configure(state='disabled')
 
-        elif selected_option == 'Implicit - BDF':
+        elif selected_option == 'Implicit - BD Euler':
 
             self.res_tol.configure(state='normal')
 
@@ -407,11 +446,17 @@ class UI(customtkinter.CTk):
         else: 
 
             self.hyper_method.configure(state = 'disabled')    
-            
+    
+    def working_dir_callback(self):
+
+        self.working_dir_path = customtkinter.filedialog.askdirectory()
+        self.working_dir.delete(0, customtkinter.END)
+        self.working_dir.insert(0,string=self.working_dir_path)
 
     def input_file_open_callback(self):
 
         self.input_file_path = customtkinter.filedialog.askopenfilename()
+        # self.input_file_path = 'C:/GIT_Fork/ROMify/examples/shock_tube/input_file.inp'
         self.input_file.delete(0, customtkinter.END)
         self.input_file.insert(0,string=self.input_file_path)
 
@@ -433,6 +478,7 @@ class UI(customtkinter.CTk):
                     self.parameters[keyword] = value
 
             self.fill_gui_from_inp_file()
+            self.fill_gui_from_inp_file_IC()
             
         except FileNotFoundError:
 
@@ -469,11 +515,11 @@ class UI(customtkinter.CTk):
 
             if variable == 'time_scheme':
 
-                if parameters['time_scheme'] == 'explicit_rk4':
+                if parameters['time_scheme'] == 'explicit_fd_euler':
 
                     self.time_scheme_entry_var.set(self.time_scheme_options[0])
                 
-                elif parameters['time_scheme'] == 'implicit_bdf':
+                elif parameters['time_scheme'] == 'implicit_bd_euler':
 
                     self.time_scheme_entry_var.set(self.time_scheme_options[1])
 
@@ -615,13 +661,237 @@ class UI(customtkinter.CTk):
                 
                 indices = [index for index, value in enumerate(visual_options) if value == parameters['variable4']]
                 
-                self.visual_4_option_entry_var.set(visual_options[indices[0]])      
+                self.visual_4_option_entry_var.set(visual_options[indices[0]])
+
+    def fill_gui_from_inp_file_IC(self):
+
+        self.IC_conf()
+
+        parameters =  self.parameters
+
+        num_ic_region = len(ast.literal_eval(parameters['x_interval_ic']))
+
+        for indx in range(0,num_ic_region):
+
+            for variable in parameters:
+                            
+                if variable == 'x_interval_ic':
+                    
+                    x_interval = ast.literal_eval(parameters['x_interval_ic'])
+                    self.IC_x_init_entry_var.set(x_interval[indx][0])
+                    self.IC_x_final_entry_var.set(x_interval[indx][1])
+
+                if variable == 'press_ic':
+
+                    pressure = ast.literal_eval(parameters['press_ic'])
+                    self.IC_press_entry_var.set(pressure[indx]) 
+
+                if variable == 'temp_ic':
+                    
+                    temperature = ast.literal_eval(parameters['temp_ic'])
+                    self.IC_temp_entry_var.set(temperature[indx])
+
+                if variable == 'vel_ic':
+
+                    velocity = ast.literal_eval(parameters['vel_ic'])
+                    self.IC_vel_entry_var.set(velocity[indx]) 
+
+                if variable == 'rho_ic':
+                    
+                    velocity = ast.literal_eval(parameters['rho_ic'])
+                    self.IC_density_entry_var.set(velocity[indx])
+
+                if variable == 'mass_frac_ic':
+
+                    mass_fraction = ast.literal_eval(parameters['mass_frac_ic'])
+                    self.IC_mf_entry_var.set([mass_fraction[indx]])
+
+            self.IC_row_insert()
+
+        self.pass_ic_data()
+
+        
+
+    def IC_conf(self):
+
+        self.new_windows = customtkinter.CTkToplevel()
+        self.new_windows.protocol("WM_DELETE_WINDOW",self.pass_ic_data)
+        self.new_windows.attributes("-topmost", True)
+        self.new_windows_width   = 1430
+        self.new_windows_height  = 310
+        self.new_windows_x       = (self.screen_width/2)-(self.new_windows_width /2)
+        self.new_windows_y       = (self.screen_height/2)-(self.new_windows_height /2)
+        self.new_windows.geometry(f'{self.new_windows_width}x{self.new_windows_height}+{int(self.new_windows_x)}+{int(self.new_windows_y)}')
+        self.new_windows.title('Initial Condition Configuration')
+
+        ###Treeview Customisation (theme colors are selected)
+        bg_color = app._apply_appearance_mode(customtkinter.ThemeManager.theme["CTkFrame"]["fg_color"])
+        text_color = app._apply_appearance_mode(customtkinter.ThemeManager.theme["CTkLabel"]["text_color"])
+        selected_color = app._apply_appearance_mode(customtkinter.ThemeManager.theme["CTkButton"]["fg_color"])
+
+        treestyle = ttk.Style()
+        treestyle.theme_use('default')
+        treestyle.configure("Treeview", background=bg_color, foreground=text_color, fieldbackground=bg_color, borderwidth=0)
+ 
+        self.IC_data_table_frame = customtkinter.CTkFrame(self.new_windows)
+        self.IC_data_table_frame.columnconfigure(14,weight=1)
+        self.IC_data_table_frame.rowconfigure(8,weight=1)
+        self.IC_data_table_frame.grid(row=0,column=0,padx = 10 , pady =10 , sticky='ew')
+
+        self.tree = ttk.Treeview(self.IC_data_table_frame, columns=("x_init", "x_final", "Pressure","Temperature","Velocity","Density","Mass Fraction"), show="headings")
+        self.tree.heading("x_init"       , text="x init")
+        self.tree.heading("x_final"      , text="x final")
+        self.tree.heading("Pressure"     , text="Pressure")
+        self.tree.heading("Temperature"  , text="Temperature")
+        self.tree.heading("Velocity"     , text="Velocity")
+        self.tree.heading("Density"      , text="Density")
+        self.tree.heading("Mass Fraction", text="Mass Fraction")
+        self.tree.grid(row=0,column=0,columnspan=14)
+        
+        self.IC_x_init_label = customtkinter.CTkLabel(self.IC_data_table_frame, text="x init:")
+        self.IC_x_init_label.grid(row=1,column=0)
+        self.IC_x_init_entry_var = customtkinter.StringVar()
+        self.IC_x_init_entry = customtkinter.CTkEntry(self.IC_data_table_frame,textvariable=self.IC_x_init_entry_var)
+        self.IC_x_init_entry.grid(row=1,column=1)
+
+        self.IC_x_final_label = customtkinter.CTkLabel(self.IC_data_table_frame, text="x final:")
+        self.IC_x_final_label.grid(row=1,column=2)
+        self.IC_x_final_entry_var = customtkinter.StringVar()        
+        self.IC_x_final_entry = customtkinter.CTkEntry(self.IC_data_table_frame,textvariable=self.IC_x_final_entry_var)
+        self.IC_x_final_entry.grid(row=1,column=3)
+
+        self.IC_press_label = customtkinter.CTkLabel(self.IC_data_table_frame, text="Pressure:")
+        self.IC_press_label.grid(row=1,column=4)
+        self.IC_press_entry_var = customtkinter.StringVar()        
+        self.IC_press_entry = customtkinter.CTkEntry(self.IC_data_table_frame,textvariable=self.IC_press_entry_var)
+        self.IC_press_entry.grid(row=1,column=5)
+
+        self.IC_temp_label = customtkinter.CTkLabel(self.IC_data_table_frame, text="Temperature:")
+        self.IC_temp_label.grid(row=1,column=6)
+        self.IC_temp_entry_var = customtkinter.StringVar()        
+        self.IC_temp_entry = customtkinter.CTkEntry(self.IC_data_table_frame,textvariable=self.IC_temp_entry_var)
+        self.IC_temp_entry.grid(row=1,column=7)
+
+        self.IC_vel_label = customtkinter.CTkLabel(self.IC_data_table_frame, text="Velocity:")
+        self.IC_vel_label.grid(row=1,column=8)
+        self.IC_vel_entry_var = customtkinter.StringVar()        
+        self.IC_vel_entry = customtkinter.CTkEntry(self.IC_data_table_frame,textvariable=self.IC_vel_entry_var)
+        self.IC_vel_entry.grid(row=1,column=9)
+
+        self.IC_density_label = customtkinter.CTkLabel(self.IC_data_table_frame, text="Density:")
+        self.IC_density_label.grid(row=1,column=10)
+        self.IC_density_entry_var = customtkinter.StringVar()        
+        self.IC_density_entry = customtkinter.CTkEntry(self.IC_data_table_frame,textvariable=self.IC_density_entry_var)
+        self.IC_density_entry.grid(row=1,column=11)
+
+        self.IC_mf_label = customtkinter.CTkLabel(self.IC_data_table_frame, text="Mass Fraction:")
+        self.IC_mf_label.grid(row=1,column=12)
+        self.IC_mf_entry_var = customtkinter.StringVar()        
+        self.IC_mf_entry = customtkinter.CTkEntry(self.IC_data_table_frame,textvariable=self.IC_mf_entry_var)
+        self.IC_mf_entry.grid(row=1,column=13)
+
+        self.IC_add_button = customtkinter.CTkButton(self.IC_data_table_frame, text="Add",command=self.IC_row_insert)
+        self.IC_add_button.grid(row=2,column=4,columnspan=2 ,pady=10,sticky='ew')
+
+        self.IC_remove_button = customtkinter.CTkButton(self.IC_data_table_frame, text="Remove",command=self.IC_row_remove)
+        self.IC_remove_button.grid(row=2,column=8,columnspan=2 ,pady=10,sticky='ew')
+
+        if hasattr(self, 'ic_data'):
+
+            for row in self.ic_data:
+                self.tree.insert("", "end", values=row)
+
+
+    def IC_row_insert(self):
+
+        xi  = self.IC_x_init_entry.get()
+        xf  = self.IC_x_final_entry.get()
+        p   = self.IC_press_entry.get()
+        T   = self.IC_temp_entry.get()
+        v   = self.IC_vel_entry.get()
+        rho = self.IC_density_entry.get()
+        mf  = self.IC_mf_entry.get()
+
+        if xi and xf and p and T and v and rho and mf :
+
+            self.tree.insert('','end',values=(xi,xf,p,T,v,rho,mf))
+
+            self.IC_x_init_entry.delete(0, customtkinter.END)
+            self.IC_x_final_entry.delete(0, customtkinter.END)
+            self.IC_press_entry.delete(0, customtkinter.END)
+            self.IC_temp_entry.delete(0, customtkinter.END)
+            self.IC_vel_entry.delete(0, customtkinter.END)
+            self.IC_density_entry.delete(0, customtkinter.END)
+            self.IC_mf_entry.delete(0, customtkinter.END)
+
+    def IC_row_remove(self):
+
+        selected_item = self.tree.selection()
+        if selected_item:
+            self.tree.delete(selected_item)
+
+    def pass_ic_data(self):
+
+        data_array = []
+
+        for item in self.tree.get_children():
+            data = [self.tree.item(item, "values")]
+            data_array.extend(data)
+
+        self.ic_data = data_array
+        self.new_windows.destroy()
 
     def run_callback(self):
 
+        try:
+            importlib.reload(ui_solver_bridge)
+            print(f"Reloaded module: {ui_solver_bridge}")
+        except ImportError as e:
+            print(f"Error reloading module: {ui_solver_bridge}")
+
+        try:
+            importlib.reload(solver_functions)
+            print(f"Reloaded module: {solver_functions}")
+        except ImportError as e:
+            print(f"Error reloading module: {solver_functions}")
+
+        try:
+            importlib.reload(non_linear_terms)
+            print(f"Reloaded module: {non_linear_terms}")
+        except ImportError as e:
+            print(f"Error reloading module: {non_linear_terms}")
+
+        try:
+            importlib.reload(time_integrator_functions)
+            print(f"Reloaded module: {time_integrator_functions}")
+        except ImportError as e:
+            print(f"Error reloading module: {time_integrator_functions}")    
+
+        try:
+            importlib.reload(visualization_functions)
+            print(f"Reloaded module: {visualization_functions}")
+        except ImportError as e:
+            print(f"Error reloading module: {visualization_functions}")    
+
+        try:
+            importlib.reload(rom_functions)
+            print(f"Reloaded module: {rom_functions}")
+        except ImportError as e:
+            print(f"Error reloading module: {rom_functions}") 
+
+        # try:
         ui_solver_bridge.driver(self)
-                                      
+
+        # except:
+        #     print(f"Running Failed !")
+
+                                                             
 if __name__ == "__main__":
 
-    app = UI()
+    app = UI()  
     app.mainloop()
+
+
+
+
+

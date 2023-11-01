@@ -48,39 +48,85 @@ def solver_parameters_collector(self):
     solver_param['variable3'] = self.visual_3_option_entry_var.get()
     solver_param['variable4'] = self.visual_4_option_entry_var.get()
 
+    ### ic data ###
+    solver_param['ic_data']   = self.ic_data
+
+    ### Input Directory ###
+    solver_param['working_dir'] = self.working_dir_entry_var.get()
+    # solver_param['FOM_Result'] = self.FOM_re
+
     return solver_param
+
+# def ic_generator(solver_param):
+
+#     num_region = len(solver_param['ic_data'])
+#     num_cell   = solver_param['cell_number']
+#     x       =  np.linspace( solver_param['x_initial'] , solver_param['x_final'] , int(solver_param['cell_number'])+4 )
+
+#     rho = np.zeros(num_cell+4)
+#     vx  = np.zeros(num_cell+4)
+#     P   = np.zeros(num_cell+4)
+
+#     for region in range(0,num_region):
+        
+#         indx = np.where(  (x >= float(solver_param['ic_data'][region][0]))  &  (x <= float(solver_param['ic_data'][region][1]))  )
+        
+#         rho[indx] = eval(solver_param['ic_data'][region][5])
+#         vx [indx] = eval(solver_param['ic_data'][region][4])
+#         P  [indx] = eval(solver_param['ic_data'][region][2])
+         
+#     return rho,vx,P
 
 def ic_generator(solver_param):
 
-    # rho = np.linspace(solver_param['rho_inlet'] , solver_param['rho_outlet'] , int(solver_param['cell_number'])+2)
-    # vx  = np.linspace(solver_param['vel_inlet'] , solver_param['vel_outlet'] , int(solver_param['cell_number'])+2)   
-    # P   = np.linspace(solver_param['press_inlet'] , solver_param['press_outlet'] , int(solver_param['cell_number'])+2)
+    num_region = len(solver_param['ic_data'])
+    num_cell   = solver_param['cell_number']
+    x          =  np.linspace( solver_param['x_initial'] , solver_param['x_final'] , int(solver_param['cell_number'])+4 )
 
-    rho = np.zeros((int(solver_param['cell_number'])+2))
-    vx  = np.zeros((int(solver_param['cell_number'])+2))   
-    P   = np.zeros((int(solver_param['cell_number'])+2))
+    rho = np.zeros(num_cell+4)+0.01
+    vx  = np.zeros(num_cell+4)+1
+    P   = np.zeros(num_cell+4)+1
 
-    rho [0:257] = 1
-    vx [0:257] = 0
-    P [0:257] = 1
+    rho = (1 * np.exp(-((x - 0.01/2) ** 2) / (2 * 0.001 ** 2)))+0.05
 
-    rho [257:] = 0.125
-    vx [257:] = 0
-    P [257:] = 0.1
-
-    
     return rho,vx,P
 
-def add_ghost_cell(rho , vx , P):
+def add_ghost_cell(rho , vx , P ,sol_time):
 
-    rho[0] = rho[1]
-    vx[0]  = vx[1]
-    P[0]   = P[1]
+    # rho[0:2]   = rho[3]
+    # vx[0:2]    = vx[3]
+    # P[0:2]     = P[3]
 
-    rho[-1] = rho[-2]
-    vx[-1]  = vx[-2]
-    P[-1]   = P[-2]
+    # rho[-2:-1] = rho[-3]
+    # vx[-2:-1]  = vx[-3]
+    # P[-2:-1]   = P[-3]
 
+    
+    rho[0:2]   = rho[-4:-2]
+    vx[0:2]    = vx[-4:-2]
+    P[0:2]     = P[-4:-2]
+
+    rho[-2:] = rho[2:4]
+    vx[-2:]  = vx[2:4]
+    P[-2:]   = P[2:4]
+
+    rho[1]   = rho[-3]
+    vx[1]    = vx[-3]
+    P[1]     = P[-3]
+
+    rho[-2] = rho[2]
+    vx[-2]  = vx[2]
+    P[-2]   = P[2]
+
+    # if periodic_inlet:
+         
+    #     pass
+         
+    # if periodic_outlet:
+         
+    # pert =  0.0001* np.sin(2*np.pi*1e6*sol_time)
+    # P[-3] = P[-3] * (1 + pert)
+ 
     return rho,vx,P
     
 
@@ -92,11 +138,13 @@ def prim2cons_converter(rho , vx , P , gamma , vol):
 
     return mass , momx , energy
 
-def cons2prim_converter(mass , momx , energy , gamma , vol):
+def cons2prim_converter(mass , momx , energy , gamma , vol,sol_time):
 
     rho = mass / vol
     vx  = momx / rho / vol
     P   = (energy/vol - (0.5 * rho * (vx**2))) * (gamma-1)
+
+    rho , vx , P = add_ghost_cell(rho,vx,P,sol_time)
 
     return  rho , vx , P
 
@@ -122,33 +170,33 @@ def extrapolate_center2face( var , d_var , dx):
     return var_left_face , var_right_face
 
 def flux_calculator(rho_face_left , rho_face_right , vx_face_left , vx_face_right , p_face_left , p_face_right , gamma):
-    
-	en_L = p_face_left  / (gamma-1) + 0.5 * rho_face_left  * (vx_face_left**2)
-	en_R = p_face_right / (gamma-1) + 0.5 * rho_face_right * (vx_face_right**2)
+
+    en_L = p_face_left  / (gamma-1) + 0.5 * rho_face_left  * (vx_face_left**2)
+    en_R = p_face_right / (gamma-1) + 0.5 * rho_face_right * (vx_face_right**2)
 
 	# compute star (averaged) states
-	rho_star  = 0.5*(rho_face_left + rho_face_right)
-	momx_star = 0.5*(rho_face_left * vx_face_left + rho_face_right * vx_face_right)
-	en_star   = 0.5*(en_L + en_R)
+    rho_star  = 0.5*(rho_face_left + rho_face_right)
+    momx_star = 0.5*(rho_face_left * vx_face_left + rho_face_right * vx_face_right)
+    en_star   = 0.5*(en_L + en_R)
 	
-	P_star = (gamma-1)*(en_star-0.5*(momx_star**2)/rho_star)
+    P_star = (gamma-1)*(en_star-0.5*(momx_star**2)/rho_star)
 	
 	# compute fluxes (local Lax-Friedrichs/Rusanov)
-	flux_mass   = momx_star
-	flux_momx   = momx_star**2/rho_star + P_star
-	flux_energy = (en_star+P_star) * momx_star/rho_star
+    flux_mass   = momx_star
+    flux_momx   = momx_star**2/rho_star + P_star
+    flux_energy = (en_star+P_star) * momx_star/rho_star
 	
 	# find wavespeeds
-	C_L = np.sqrt(gamma * p_face_left  / rho_face_left  ) + np.abs(vx_face_left)
-	C_R = np.sqrt(gamma * p_face_right / rho_face_right ) + np.abs(vx_face_right)
-	C   = np.maximum( C_L, C_R )
+    C_L = np.sqrt(gamma * p_face_left  / rho_face_left  ) + np.abs(vx_face_left)
+    C_R = np.sqrt(gamma * p_face_right / rho_face_right ) + np.abs(vx_face_right)
+    C   = np.maximum( C_L, C_R )
 	
 	# add stabilizing diffusive term
-	flux_mass   -= C * 0.5 * (rho_face_left - rho_face_right)
-	flux_momx   -= C * 0.5 * (rho_face_left * vx_face_left - rho_face_right * vx_face_right)
-	flux_energy -= C * 0.5 * ( en_L - en_R )
+    flux_mass   -= C * 0.5 * (rho_face_left - rho_face_right)
+    flux_momx   -= C * 0.5 * (rho_face_left * vx_face_left - rho_face_right * vx_face_right)
+    flux_energy -= C * 0.5 * ( en_L - en_R )
 
-	return flux_mass, flux_momx, flux_energy
+    return flux_mass, flux_momx, flux_energy
 
 def inviscid_d_flux_dx_calculator(flux , dx):
      
