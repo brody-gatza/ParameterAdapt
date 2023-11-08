@@ -5,10 +5,12 @@ import visualization_functions
 import rom_functions
 import numpy as np
 import matplotlib.pyplot as plt
-
+import time
 
 def driver(self):
     
+    start_time = time.time()
+
     # collect all of variables from user interface
     solver_param = solver_functions.solver_parameters_collector(self)
     slope_limiter = False
@@ -18,9 +20,10 @@ def driver(self):
     vol     = dx
     dt      = solver_param['dt']
     res_tol = solver_param['res_tol']
-    x       =  np.linspace( solver_param['x_initial'] , solver_param['x_final'] , int(solver_param['cell_number']) )
+    x       = np.linspace( solver_param['x_initial'] , solver_param['x_final'] , int(solver_param['cell_number']) )
     sol_time= 0
     rom_flag= solver_param['calc_rom']
+    hyper_flag = solver_param['hyper']
     interval= 100
     work_dir= solver_param['working_dir']
 
@@ -32,12 +35,6 @@ def driver(self):
 
     # get the gas properties
     gamma = 1.4
-
-    # initialize rom if necessary
-
-    if rom_flag:
-
-        basis , normalizor, denormalizor , q_ref = rom_functions.precomputer(solver_param)
 
     # convert prim to cons
     mass , momx , energy = solver_functions.prim2cons_converter(rho , vx , p , gamma , vol)
@@ -59,6 +56,20 @@ def driver(self):
     full_prim_results[1,:] = vx 
     full_prim_results[2,:] = p
 
+    # initialize rom if necessary
+    if rom_flag:
+
+        basis , normalizor, denormalizor , q_ref = rom_functions.precomputer(solver_param)
+        q_red  = basis.T @ np.hstack((full_cons_results[0,2:-2],full_cons_results[1,2:-2],full_cons_results[2,2:-2]))
+        S_indx = np.array(range(0,512))
+
+        if hyper_flag:
+            pcc , S_indx       = rom_functions.hyper_precomputer(basis)
+
+    else:
+
+        S_indx                    = np.array(range(0,512))
+
 
     # create plot
     plt.close()
@@ -71,8 +82,10 @@ def driver(self):
 
     for iter in range(solver_param['num_step']):
 
-        dflux_mass_dx , dflux_momx_dx , dflux_energy_dx = non_linear_terms.flux_calculator(mass,momx,energy,dx,gamma,vol,slope_limiter,sol_time)
 
+        dflux_mass_dx , dflux_momx_dx , dflux_energy_dx = non_linear_terms.flux_calculator(mass,momx,energy,dx,gamma,vol,slope_limiter,sol_time,S_indx)
+
+            
         # apply flux terms
         d_mass_dt   =  - dflux_mass_dx   * dx
         d_momx_dt   =  - dflux_momx_dx   * dx
@@ -80,7 +93,7 @@ def driver(self):
 
         if rom_flag:
              
-            mass, momx, energy = rom_functions.order_reducer(solver_param,d_mass_dt,d_momx_dt,d_energy_dt,basis , normalizor, denormalizor , q_ref,full_cons_results)
+            mass, momx, energy , q_red = rom_functions.order_reducer(solver_param,d_mass_dt,d_momx_dt,d_energy_dt,basis,normalizor,denormalizor,q_ref,q_red,pcc)
 
         else :
 
@@ -127,6 +140,12 @@ def driver(self):
         cons_results_save[:,:,iter] = cons_results
         prim_results_save[:,:,iter] = prim_results    
 
+    end_time = time.time()
+
+    elapsed_time = end_time - start_time
+
+    print(f"Elapsed time: {elapsed_time} seconds")
+
     if rom_flag:
         np.save( work_dir +"/ROM_cons.npy" ,cons_results_save)
         np.save( work_dir +"/ROM_prim.npy" ,prim_results_save)
@@ -134,6 +153,8 @@ def driver(self):
     else: 
         np.save( work_dir +"/FOM_cons.npy" ,cons_results_save)
         np.save( work_dir +"/FOM_prim.npy" ,prim_results_save)
+
+
          
 
  

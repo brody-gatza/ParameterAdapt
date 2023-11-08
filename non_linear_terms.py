@@ -1,6 +1,11 @@
 import solver_functions
+import numpy as np
 
-def flux_calculator(mass,momx,energy,dx,gamma,vol,slope_limiter,sol_time):
+def flux_calculator(mass,momx,energy,dx,gamma,vol,slope_limiter,sol_time,S_indx):
+
+    mass  = mass   [S_indx+2]
+    momx  = momx   [S_indx+2]
+    energy= energy [S_indx+2]
     
     # convert cons to prim
     rho , vx , p = solver_functions.cons2prim_converter(mass , momx , energy , gamma , vol,sol_time)

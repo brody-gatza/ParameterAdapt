@@ -3,7 +3,7 @@ import customtkinter
 import ast
 from tkinter import ttk
 import importlib
-
+import cProfile
 
 import solver_functions
 import non_linear_terms
@@ -879,17 +879,17 @@ class UI(customtkinter.CTk):
         except ImportError as e:
             print(f"Error reloading module: {rom_functions}") 
 
-        # try:
-        ui_solver_bridge.driver(self)
-
-        # except:
-        #     print(f"Running Failed !")
+        try:
+            ui_solver_bridge.driver(self)
+        except:
+            print(f"Running Failed !")
 
                                                              
 if __name__ == "__main__":
 
     app = UI()  
     app.mainloop()
+
 
 
 
