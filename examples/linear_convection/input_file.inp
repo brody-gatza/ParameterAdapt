@@ -24,14 +24,6 @@ vel_outlet        = 0.1
 rho_outlet        = 0.1
 mass_frac_outlet = [1.0, 0.0]
 
-# Initial Condition
-
-x_interval_ic = [[0,6.28],[6.28,10]]
-press_ic      = [5000,5000]
-temp_ic       = [300,300]
-vel_ic        = [0,0]
-rho_ic        = [0.1,0.1]
-mass_frac_ic  = [[1.0, 0.0],[1.0, 0.0]]
 
 # gas model
 gas_model = ideal gas model

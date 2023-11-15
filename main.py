@@ -3,7 +3,8 @@ import customtkinter
 import ast
 from tkinter import ttk
 import importlib
-import cProfile
+import pandas as pd
+
 
 import solver_functions
 import non_linear_terms
@@ -738,7 +739,7 @@ class UI(customtkinter.CTk):
         self.IC_data_table_frame.rowconfigure(8,weight=1)
         self.IC_data_table_frame.grid(row=0,column=0,padx = 10 , pady =10 , sticky='ew')
 
-        self.tree = ttk.Treeview(self.IC_data_table_frame, columns=("x_init", "x_final", "Pressure","Temperature","Velocity","Density","Mass Fraction"), show="headings")
+        self.tree = ttk.Treeview(self.IC_data_table_frame, columns=("x_init", "x_final", "Pressure","Temperature","Velocity","Density","Mass Fraction"), show="headings" , selectmode ='browse')
         self.tree.heading("x_init"       , text="x init")
         self.tree.heading("x_final"      , text="x final")
         self.tree.heading("Pressure"     , text="Pressure")
@@ -791,10 +792,13 @@ class UI(customtkinter.CTk):
         self.IC_mf_entry.grid(row=1,column=13)
 
         self.IC_add_button = customtkinter.CTkButton(self.IC_data_table_frame, text="Add",command=self.IC_row_insert)
-        self.IC_add_button.grid(row=2,column=4,columnspan=2 ,pady=10,sticky='ew')
+        self.IC_add_button.grid(row=2,column=2,columnspan=2 ,pady=10,sticky='ew')
 
         self.IC_remove_button = customtkinter.CTkButton(self.IC_data_table_frame, text="Remove",command=self.IC_row_remove)
-        self.IC_remove_button.grid(row=2,column=8,columnspan=2 ,pady=10,sticky='ew')
+        self.IC_remove_button.grid(row=2,column=6,columnspan=2 ,pady=10,sticky='ew')
+
+        self.IC_file_read = customtkinter.CTkButton(self.IC_data_table_frame, text="Read IC File",command=self.IC_file_read_fun)
+        self.IC_file_read.grid(row=2,column=10,columnspan=2,pady=10,sticky='ew')
 
         if hasattr(self, 'ic_data'):
 
@@ -829,6 +833,56 @@ class UI(customtkinter.CTk):
         selected_item = self.tree.selection()
         if selected_item:
             self.tree.delete(selected_item)
+
+    def IC_file_read_fun(self):
+
+        self.new_windows.withdraw()
+        IC_file_path = customtkinter.filedialog.askopenfilename()
+        self.new_windows.deiconify()
+        IC_data = pd.read_excel(IC_file_path)
+        print('Reading Excel File Sucessfully Completed')
+        
+        num_ic_region = len(IC_data['press_ic'])
+
+        parameters = ("x_interval_ic", "press_ic","temp_ic","vel_ic","rho_ic","mass_frac_ic")
+
+        for indx in range(0,num_ic_region):
+
+            for variable in parameters:
+                            
+                if variable == 'x_interval_ic':
+                    
+                    x_interval = ast.literal_eval(IC_data[variable][indx])
+                    self.IC_x_init_entry_var.set(x_interval[0])
+                    self.IC_x_final_entry_var.set(x_interval[1])
+
+                if variable == 'press_ic':
+
+                    pressure = IC_data[variable][indx]
+                    self.IC_press_entry_var.set(pressure) 
+
+                if variable == 'temp_ic':
+                    
+                    temperature = IC_data[variable][indx]
+                    self.IC_temp_entry_var.set(temperature)
+
+                if variable == 'vel_ic':
+
+                    velocity = IC_data[variable][indx]
+                    self.IC_vel_entry_var.set(velocity) 
+
+                if variable == 'rho_ic':
+                    
+                    density = IC_data[variable][indx]
+                    self.IC_density_entry_var.set(density)
+
+                if variable == 'mass_frac_ic':
+
+                    mass_fraction = ast.literal_eval(IC_data[variable][indx])
+                    self.IC_mf_entry_var.set([mass_fraction])
+
+            self.IC_row_insert()        
+
 
     def pass_ic_data(self):
 
@@ -879,10 +933,8 @@ class UI(customtkinter.CTk):
         except ImportError as e:
             print(f"Error reloading module: {rom_functions}") 
 
-        try:
-            ui_solver_bridge.driver(self)
-        except:
-            print(f"Running Failed !")
+        ui_solver_bridge.driver(self)
+
 
                                                              
 if __name__ == "__main__":

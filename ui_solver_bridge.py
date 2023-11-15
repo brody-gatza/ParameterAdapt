@@ -83,7 +83,7 @@ def driver(self):
     for iter in range(solver_param['num_step']):
 
 
-        dflux_mass_dx , dflux_momx_dx , dflux_energy_dx = non_linear_terms.flux_calculator(mass,momx,energy,dx,gamma,vol,slope_limiter,sol_time,S_indx)
+        dflux_mass_dx , dflux_momx_dx , dflux_energy_dx = non_linear_terms.flux_calculator(mass,momx,energy,dx,gamma,vol,slope_limiter,sol_time,S_indx,hyper_flag)
 
             
         # apply flux terms

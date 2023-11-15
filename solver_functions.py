@@ -57,39 +57,26 @@ def solver_parameters_collector(self):
 
     return solver_param
 
-# def ic_generator(solver_param):
-
-#     num_region = len(solver_param['ic_data'])
-#     num_cell   = solver_param['cell_number']
-#     x       =  np.linspace( solver_param['x_initial'] , solver_param['x_final'] , int(solver_param['cell_number'])+4 )
-
-#     rho = np.zeros(num_cell+4)
-#     vx  = np.zeros(num_cell+4)
-#     P   = np.zeros(num_cell+4)
-
-#     for region in range(0,num_region):
-        
-#         indx = np.where(  (x >= float(solver_param['ic_data'][region][0]))  &  (x <= float(solver_param['ic_data'][region][1]))  )
-        
-#         rho[indx] = eval(solver_param['ic_data'][region][5])
-#         vx [indx] = eval(solver_param['ic_data'][region][4])
-#         P  [indx] = eval(solver_param['ic_data'][region][2])
-         
-#     return rho,vx,P
-
 def ic_generator(solver_param):
 
     num_region = len(solver_param['ic_data'])
     num_cell   = solver_param['cell_number']
-    x          =  np.linspace( solver_param['x_initial'] , solver_param['x_final'] , int(solver_param['cell_number'])+4 )
+    x       =  np.linspace( solver_param['x_initial'] , solver_param['x_final'] , int(solver_param['cell_number'])+4 )
 
-    rho = np.zeros(num_cell+4)+0.01
-    vx  = np.zeros(num_cell+4)+1
-    P   = np.zeros(num_cell+4)+1
+    rho = np.zeros(num_cell+4)
+    vx  = np.zeros(num_cell+4)
+    P   = np.zeros(num_cell+4)
 
-    rho = (1 * np.exp(-((x - 0.01/2) ** 2) / (2 * 0.001 ** 2)))+0.05
-
+    for region in range(0,num_region):
+        
+        indx = np.where(  (x >= float(solver_param['ic_data'][region][0]))  &  (x <= float(solver_param['ic_data'][region][1]))  )
+        
+        rho[indx] = eval(solver_param['ic_data'][region][5])
+        vx [indx] = eval(solver_param['ic_data'][region][4])
+        P  [indx] = eval(solver_param['ic_data'][region][2])
+         
     return rho,vx,P
+
 
 def add_ghost_cell(rho , vx , P ,sol_time):
 
