@@ -8,7 +8,7 @@ res_tol       = 1e-5
 # space discretization
 x_initial   = 0
 x_final     = 1
-cell_number = 512 
+cell_number = 500 
 
 # inlet BC
 press_inlet      = 1

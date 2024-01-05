@@ -42,30 +42,19 @@ def precomputer(solver_param):
         norm_matrix[i, i] = norm_factor[value_index]
 
     basis         = V[:,0:truncation_indx[0][0]]
+    # basis         = V[:,0:500]
     # basis         = V
-    denormalizor  = norm_matrix
-    normalizor    = np.linalg.inv(denormalizor)
+    normalizor    = norm_matrix
+    denormalizor  = np.linalg.inv(normalizor)
     q_ref         = first_snapshot.ravel(order='C')
 
     return basis , normalizor, denormalizor , q_ref
 
-def hyper_precomputer(basis):
+def hyper_precomputer(basis,S_indx_solver):
 
-    S_indx                    = np.array(range(0,512))
-    index_to_select           = np.sort(np.random.choice(S_indx,int(0.8*512),replace=False))
+    pcc = basis @ np.linalg.pinv(basis[S_indx_solver,:])
 
-    S_indx                    = S_indx[index_to_select]
-    S_indx_temp               = np.concatenate((S_indx,S_indx+512,S_indx+2*512))
-    # S_indx                  = np.sort((np.random.randint(low=0,high=512,size=507)))
-    # one_var_probe           = np.zeros((512))
-    # one_var_probe[S_indx]   = 1 
-    # diagonal_elements       = np.vstack((one_var_probe,one_var_probe,one_var_probe))
-    # S                       = np.zeros((3*512,3*512))
-    # np.fill_diagonal(S,diagonal_elements)
-
-    pcc = basis @ np.linalg.pinv(basis[S_indx_temp,:])
-
-    return pcc , S_indx
+    return pcc
 
 def order_reducer(solver_param,d_mass_dt,d_momx_dt,d_energy_dt,basis , normalizor, denormalizor , q_ref,q_red,pcc):
 
@@ -100,7 +89,83 @@ def order_reducer(solver_param,d_mass_dt,d_momx_dt,d_energy_dt,basis , normalizo
     return mass, momx, energy , Q_red
 
 
+def user2solver_indx_converter(S_indx_user,num_consv_var,num_cell):
+
+    num_selected_cell = np.size(S_indx_user)
+
+    S_indx_solver     = np.zeros((num_consv_var*num_selected_cell),dtype=int)
+    
+    for j in np.arange(0,num_consv_var):
+        
+        start = j*num_selected_cell
+        end   = (j+1)*num_selected_cell
+
+        S_indx_solver[start:end] = S_indx_user + j * num_cell
+
+    return S_indx_solver
 
 
+def solver2user_indx_converter(S_indx_solver,num_cell):
+
+    all_vars_vector_size = np.size(S_indx_solver)
+    
+    S_indx_user = np.array([])
+
+    for j in range(0,all_vars_vector_size):
+
+        if S_indx_solver[j] >= num_cell:
+
+            coeff = np.floor(S_indx_solver[j]/num_cell)
+
+            new_indx = S_indx_solver[j] - coeff * num_cell
+
+        else: 
+
+            new_indx = S_indx_solver[j]
+
+        S_indx_user = np.append(S_indx_user, new_indx)  
+
+    S_indx_user = np.unique(S_indx_user)
+    S_indx_user = np.sort(S_indx_user)
+    S_indx_user = S_indx_user.astype(int)
+
+    return S_indx_user
+
+def DEIM_sample_point_finder(basis,num_cell):
+
+    max_mode_value = np.max(np.abs(basis[:,0]))
+    max_mode_indx  = np.argmax(np.abs(basis[:,0]),axis=0)
+
+    S_indx_temp = max_mode_indx
+
+    num_grids = np.shape(basis)[0]
+    num_modes = np.shape(basis)[1]
+    
+    
+
+    U = basis[:,0]
+    U = U.reshape(-1, 1)
+    P = np.zeros((num_grids,1))
+    P[max_mode_indx] = 1
+
+
+    for mode in range(1,num_modes):
+        
+        u_l = basis[:,mode].reshape(-1,1)
+        c = np.linalg.solve(np.transpose(P) @ U , np.transpose(P) @ u_l)
+        r = u_l - U @ c
+        new_max_value = np.max(np.abs(r))
+        new_indx      = np.argmax(np.abs(r))
+        new_P_vector  = np.zeros((num_grids,1))
+        new_P_vector[new_indx] = 1 
+        U = np.hstack([U,u_l])
+        P = np.hstack([P,new_P_vector])
+        S_indx_temp = np.hstack([S_indx_temp,new_indx])
+
+    S_indx_solver = S_indx_temp
+
+    S_indx_user   = solver2user_indx_converter(S_indx_solver,num_cell)
+
+    return S_indx_user
 
     

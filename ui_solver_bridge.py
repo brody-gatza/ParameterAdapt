@@ -13,7 +13,7 @@ def driver(self):
 
     # collect all of variables from user interface
     solver_param = solver_functions.solver_parameters_collector(self)
-    slope_limiter = False
+    slope_limiter = True
     
     # some basic parameters
     dx      = (solver_param['x_final'] - solver_param['x_initial']) / solver_param['cell_number']
@@ -24,9 +24,13 @@ def driver(self):
     sol_time= 0
     rom_flag= solver_param['calc_rom']
     hyper_flag = solver_param['hyper']
+    adaptive_sampling = True
     interval= 100
     work_dir= solver_param['working_dir']
-    flux_scheme='Rusanov'
+    flux_scheme ='Roe'
+    num_consv_var = 3
+
+    solver_param['sampling_method'] = 'DEIM'
 
     # get the initial condition
     rho , vx , p = solver_functions.ic_generator(solver_param)
@@ -57,19 +61,32 @@ def driver(self):
     full_prim_results[1,:] = vx 
     full_prim_results[2,:] = p
 
+
     # initialize rom if necessary
     if rom_flag:
 
         basis , normalizor, denormalizor , q_ref = rom_functions.precomputer(solver_param)
+        
         q_red  = basis.T @ np.hstack((full_cons_results[0,2:-2],full_cons_results[1,2:-2],full_cons_results[2,2:-2]))
-        S_indx = np.array(range(0,512))
+
+        S_indx_user               = np.array(range(0,solver_param['cell_number']))
+
+        pcc                       = 0
 
         if hyper_flag:
-            pcc , S_indx       = rom_functions.hyper_precomputer(basis)
+
+            if solver_param['sampling_method'] == 'DEIM':
+
+                S_indx_user = rom_functions.DEIM_sample_point_finder(basis,solver_param['cell_number'])
+
+            S_indx_solver = rom_functions.user2solver_indx_converter(S_indx_user,num_consv_var,solver_param['cell_number'])
+
+            pcc       = rom_functions.hyper_precomputer(basis,S_indx_solver)
 
     else:
 
-        S_indx                    = np.array(range(0,512))
+        S_indx_user               = np.array(range(0,solver_param['cell_number']))
+        pcc                       = 0
 
 
     # create plot
@@ -77,17 +94,17 @@ def driver(self):
     fig , axs = plt.subplots(2,2)
     fig.set_size_inches(15,6)
     visual_var1,visual_var2,visual_var3,visual_var4 = visualization_functions.visual_var_collector(solver_param)
-    plot1 , plot2 , plot3 , plot4                   = visualization_functions.initial_plot(axs)
+    plot1 , plot2 , plot3 , plot4 , scatter1                   = visualization_functions.initial_plot(axs)
 
     # begin simulation
 
     for iter in range(solver_param['num_step']):
 
 
-        d_mass_dt , d_momx_dt , d_energy_dt = non_linear_terms.flux_calculator(mass,momx,energy,dx,gamma,vol,slope_limiter,sol_time,S_indx,hyper_flag,flux_scheme)
+        d_mass_dt , d_momx_dt , d_energy_dt = non_linear_terms.flux_calculator(mass,momx,energy,dx,gamma,vol,slope_limiter,sol_time,S_indx_user,hyper_flag,flux_scheme,pcc)
 
         if rom_flag:
-             
+            
             mass, momx, energy , q_red = rom_functions.order_reducer(solver_param,d_mass_dt,d_momx_dt,d_energy_dt,basis,normalizor,denormalizor,q_ref,q_red,pcc)
 
         else :
@@ -103,13 +120,13 @@ def driver(self):
 
                 mass , momx , energy  = time_integrator_functions.implicit_bd_euler(mass,momx,energy,dx,dt,gamma,vol,res_tol,slope_limiter)
 
-        mass[0:2]   = mass[3]
-        momx[0:2]    = momx[3]
-        energy[0:2]     = energy[3]
+        mass[0:3]   = mass[2]
+        momx[0:3]   = momx[2]
+        energy[0:3] = energy[2]
 
-        mass[-2:] = mass[-3]
-        momx[-2:]  = momx[-3]
-        energy[-2:]   = energy[-3]
+        mass[-2:]   = mass[-3]
+        momx[-2:]   = momx[-3]
+        energy[-2:] = energy[-3]
 
         # convert cons to prim
         rho , vx , p = solver_functions.cons2prim_converter(mass , momx , energy , gamma , vol,sol_time)
@@ -134,7 +151,9 @@ def driver(self):
         prim_results[2,:] = p     [2:-2]
 
         # visualization
+        # breakpoint()
         visualization_functions.in_progress_plot(fig,axs,x,prim_results,plot1,plot2,plot3,plot4,visual_var1,visual_var2,visual_var3,visual_var4,solver_param,iter)
+        scatter1.set_offsets(np.column_stack((x[S_indx_user], prim_results[0,S_indx_user])))
         plt.show(block=False)
         
         print('Iteration: ' + str(iter))
@@ -155,6 +174,7 @@ def driver(self):
     else: 
         np.save( work_dir +"/FOM_cons.npy" ,cons_results_save)
         np.save( work_dir +"/FOM_prim.npy" ,prim_results_save)
+
 
 
          

@@ -48,6 +48,7 @@ def initial_plot(axs):
 
     # Plot in the first subplot (top-left)
     plot1 , = axs[0, 0].plot([], [])
+    scatter1 = axs[0, 0].scatter([], [],color='black',marker='o')
     # axs[0, 0].set_title('var1')
 
     # Plot in the second subplot (top-right)
@@ -62,7 +63,7 @@ def initial_plot(axs):
     plot4 , = axs[1, 1].plot([], [], color='red')
     # axs[1, 1].set_title('var4')
 
-    return plot1 , plot2 , plot3 , plot4  
+    return plot1 , plot2 , plot3 , plot4  , scatter1
 
 def in_progress_plot(fig,axs,x,FOM_prim_results,plot1,plot2,plot3,plot4,visual_var1,visual_var2,visual_var3,visual_var4,solver_param,iter):
     
@@ -118,7 +119,7 @@ def in_progress_plot(fig,axs,x,FOM_prim_results,plot1,plot2,plot3,plot4,visual_v
 
 
 
-    if iter % 100 == 0:
+    if iter % 50 == 0:
 
         fig.canvas.draw()
         fig.canvas.flush_events()

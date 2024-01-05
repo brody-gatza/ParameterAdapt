@@ -156,6 +156,7 @@ def extrapolate_center2face( var , d_var , dx):
 
     var_left_face  = np.zeros(len(var)+1)
     var_right_face = np.zeros(len(var)+1)
+
     for indx in range(1,len(var)-1):
 
         var_left_face[indx]  = var[indx-1] + d_var[indx-1] * (dx/2)
@@ -163,8 +164,28 @@ def extrapolate_center2face( var , d_var , dx):
 
     return var_left_face , var_right_face
 
-def rusanov_flux_calculator(rho_face_left , rho_face_right , vx_face_left , vx_face_right , p_face_left , p_face_right , gamma):
+def rusanov_flux_calculator(mass , momx , energy ,gamma , vol , dx , slope_limiter , sol_time):
 
+    # convert cons to prim
+    rho , vx , p = cons2prim_converter(mass , momx , energy , gamma , vol,sol_time)
+
+    # calculate gradients
+    d_rho_dx = gradient_calculator(rho , dx)
+    d_vx_dx  = gradient_calculator(vx , dx)
+    d_p_dx   = gradient_calculator(p , dx)
+
+    if slope_limiter:
+
+        d_rho_dx = slope_limit(rho , dx , d_rho_dx)
+        d_vx_dx  = slope_limit(vx  , dx , d_vx_dx )
+        d_p_dx   = slope_limit(p   , dx , d_p_dx  )
+
+    # extrapolate from center to face
+    rho_face_left , rho_face_right = extrapolate_center2face(rho,d_rho_dx,dx)
+    vx_face_left  , vx_face_right  = extrapolate_center2face(vx,d_vx_dx,dx)
+    p_face_left   , p_face_right   = extrapolate_center2face(p,d_p_dx,dx)
+
+    # start flux calculation
     en_L = p_face_left  / (gamma-1) + 0.5 * rho_face_left  * (vx_face_left**2)
     en_R = p_face_right / (gamma-1) + 0.5 * rho_face_right * (vx_face_right**2)
 
@@ -182,10 +203,9 @@ def rusanov_flux_calculator(rho_face_left , rho_face_right , vx_face_left , vx_f
 
     return flux_mass, flux_momx, flux_energy
 
-def roe_flux_calculator(mass , momx , energy , gamma , vol):
-
+def roe_flux_calculator(mass , momx , energy , gamma , vol , S_indx_user , hyper_flag , pcc):
     
-    Q_cons       = np.vstack((mass , momx , energy))
+    Q_cons           = np.vstack((mass , momx , energy))
     rho , vx , press = cons2prim_converter(mass,momx,energy,gamma,vol,0)
 
     # number of cell
@@ -197,7 +217,20 @@ def roe_flux_calculator(mass , momx , energy , gamma , vol):
     flux = np.zeros((3,cell_num+1))
     diffusion = np.zeros((3,cell_num+1))
 
-    for j in range (0,cell_num-1):
+    if hyper_flag == True:
+
+        range_flux = S_indx_user + 2 
+        range_flux_neighbor_left  = range_flux - 1
+        range_flux = np.concatenate((range_flux,range_flux_neighbor_left))
+        range_flux = np.sort(np.unique(range_flux))
+
+
+    else : 
+        
+        range_flux = range(0,cell_num-1)
+
+
+    for j in range_flux:
     
         # Compute Roe averages
         R=np.sqrt(rho[j+1]/rho[j])                   # R_{j+1/2}
@@ -224,7 +257,7 @@ def roe_flux_calculator(mass , momx , energy , gamma , vol):
         lamb = np.array([[ abs(umoy-amoy),  0,              0                 ],
                         [0,                 abs(umoy),      0                 ],
                         [0,                 0,              abs(umoy+amoy)    ]])
-                      
+                    
         # Compute Roe matrix |A_{j+1/2}|
         A = P @ lamb @ Pinv
 
@@ -234,19 +267,34 @@ def roe_flux_calculator(mass , momx , energy , gamma , vol):
         flux[1,j+1] = 0.5*(rho[j]*vx[j]**2 + press[j] + rho[j+1]*vx[j+1]+press[j+1])              - diffusion[1,j+1]
         flux[2,j+1] = 0.5*(vx[j]*(energy[j]+press[j]) + vx[j+1]*(energy[j+1]+press[j+1]))         - diffusion[2,j+1]
 
-
     flux_mass   = flux[0,:]
     flux_momx   = flux[1,:]
     flux_energy = flux[2,:]
 
     return flux_mass, flux_momx, flux_energy
 
-def inviscid_d_flux_dx_calculator(flux , dx):
-    
-    d_flux_dx = np.zeros(len(flux)-1)
+def inviscid_d_flux_dx_calculator(flux , dx , hyper_flag , S_indx_user):
 
-    for indx in range(0,len(d_flux_dx)-1):
+    if hyper_flag == True:
 
-        d_flux_dx[indx] = -(flux[indx+1] - flux[indx])/dx
+        d_flux_dx = np.zeros(len(S_indx_user))
+
+        S_indx_user = S_indx_user + 2
+
+        counter = 0
+
+        for indx in S_indx_user:
+
+            d_flux_dx[counter] = -(flux[indx+1] - flux[indx])/dx
+            counter = counter + 1
+
+    else:
+
+        d_flux_dx = np.zeros(len(flux)-1)
+
+        for indx in range(0,len(d_flux_dx)-1):
+
+            d_flux_dx[indx] = -(flux[indx+1] - flux[indx])/dx
 
     return d_flux_dx
+
