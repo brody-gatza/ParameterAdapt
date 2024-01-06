@@ -3,25 +3,43 @@ import time_integrator_functions
 
 def precomputer(solver_param):
 
-    training_data_path = solver_param['working_dir'] + "/FOM_cons.npy"
+    training_data_path_cons = solver_param['working_dir'] + "/FOM_cons.npy"
+    training_data_path_prim = solver_param['working_dir'] + "/FOM_prim.npy"
     POD_energy_limit   = 100-solver_param['pod_energy']
-    training_data      = np.load(training_data_path)
-    first_snapshot     = training_data[:,:,0]
+    training_data_cons = np.load(training_data_path_cons)
+    training_data_prim = np.load(training_data_path_prim)
+    first_snapshot     = training_data_cons[:,:,0]
     # first_snapshot     = np.mean(training_data,axis=2)
-    centered_data      = training_data - first_snapshot[:,:,np.newaxis]
+
+    state_var_num      = len(training_data_cons[:,0,0])
+    snapshot_num       = len(training_data_cons[0,0,:])
+    cell_num           = solver_param['cell_number']
+
+    centered_data      = np.empty((state_var_num,cell_num,snapshot_num))
+
+    for indx in range(0,snapshot_num):
+
+        centered_data[:,:,indx] = training_data_cons[:,:,indx] - first_snapshot
 
     l2_factors         = np.sqrt(np.sum(centered_data**2, axis=2))
     norm_factor        = np.mean(l2_factors, axis=1)
 
-    cen_norm_data      = centered_data / norm_factor[:, np.newaxis, np.newaxis]
+    cen_norm_data      = np.zeros((state_var_num,cell_num,snapshot_num))
 
-    tall_thin_data = np.zeros((cen_norm_data.shape[0] * cen_norm_data.shape[1], cen_norm_data.shape[2]))
+    for i in range(0,state_var_num):
+
+        for j in range(0,snapshot_num):
+
+            cen_norm_data[i,:,j] = centered_data[i,:,j] / norm_factor[i]
+
+
+    tall_thin_data = np.zeros((state_var_num * cell_num, snapshot_num))
     
-    for indx in range(cen_norm_data.shape[2]):
+    for indx in range(0,snapshot_num):
 
-        tall_thin_data[:, indx] = cen_norm_data[:, :, indx].reshape(-1)
+        tall_thin_data[:, indx] = cen_norm_data[:,:,indx].ravel(order='C')
 
-    V, S, U = np.linalg.svd(tall_thin_data, full_matrices=False)
+    V, S, U = np.linalg.svd(tall_thin_data, full_matrices=True)
 
     square_sum_singular_values = np.sum(S**2)
 
@@ -31,24 +49,25 @@ def precomputer(solver_param):
 
     print(f'to capture '+ str(solver_param['pod_energy']) +' percent of energy '+ str(truncation_indx[0][0])+ ' mode must be used')
 
-    norm_matrix_size = S.size
+    norm_matrix_size = state_var_num * cell_num
 
-    norm_matrix = np.zeros((norm_matrix_size, norm_matrix_size))
+    norm_matrix_diag = np.array([])
 
-    segment_size = norm_matrix_size // len(norm_factor)
+    for indx in range(0,state_var_num):
 
-    for i in range(norm_matrix_size):
-        value_index = i // segment_size
-        norm_matrix[i, i] = norm_factor[value_index]
+        temp = np.full(cell_num , norm_factor[indx])
+        norm_matrix_diag = np.append(norm_matrix_diag,temp)
 
-    basis         = V[:,0:truncation_indx[0][0]]
+    norm_matrix = np.diag(norm_matrix_diag)
+
+    # basis         = V[:,0:truncation_indx[0][0]]
     # basis         = V[:,0:500]
-    # basis         = V
+    basis         = V
     normalizor    = norm_matrix
     denormalizor  = np.linalg.inv(normalizor)
     q_ref         = first_snapshot.ravel(order='C')
 
-    return basis , normalizor, denormalizor , q_ref
+    return basis , normalizor, denormalizor , q_ref , training_data_prim
 
 def hyper_precomputer(basis,S_indx_solver):
 

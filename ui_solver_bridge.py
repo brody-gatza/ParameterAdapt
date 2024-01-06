@@ -57,6 +57,7 @@ def driver(self):
     full_prim_results      = np.zeros(( 3 , int(solver_param['cell_number'])+4             )  )
     prim_results           = np.zeros(( 3 , int(solver_param['cell_number'])               )  )
     prim_results_save      = np.zeros(( 3 , int(solver_param['cell_number'])    , int(int(solver_param['num_step'])))  )
+
     full_prim_results[0,:] = rho 
     full_prim_results[1,:] = vx 
     full_prim_results[2,:] = p
@@ -65,7 +66,7 @@ def driver(self):
     # initialize rom if necessary
     if rom_flag:
 
-        basis , normalizor, denormalizor , q_ref = rom_functions.precomputer(solver_param)
+        basis , normalizor, denormalizor , q_ref , training_data_prim = rom_functions.precomputer(solver_param)
         
         q_red  = basis.T @ np.hstack((full_cons_results[0,2:-2],full_cons_results[1,2:-2],full_cons_results[2,2:-2]))
 
@@ -87,6 +88,7 @@ def driver(self):
 
         S_indx_user               = np.array(range(0,solver_param['cell_number']))
         pcc                       = 0
+        training_data_prim        = 0 
 
 
     # create plot
@@ -94,7 +96,7 @@ def driver(self):
     fig , axs = plt.subplots(2,2)
     fig.set_size_inches(15,6)
     visual_var1,visual_var2,visual_var3,visual_var4 = visualization_functions.visual_var_collector(solver_param)
-    plot1 , plot2 , plot3 , plot4 , scatter1                   = visualization_functions.initial_plot(axs)
+    plots                  = visualization_functions.initial_plot(axs)
 
     # begin simulation
 
@@ -152,8 +154,8 @@ def driver(self):
 
         # visualization
         # breakpoint()
-        visualization_functions.in_progress_plot(fig,axs,x,prim_results,plot1,plot2,plot3,plot4,visual_var1,visual_var2,visual_var3,visual_var4,solver_param,iter)
-        scatter1.set_offsets(np.column_stack((x[S_indx_user], prim_results[0,S_indx_user])))
+        visualization_functions.in_progress_plot(fig,axs,x,prim_results,plots,visual_var1,visual_var2,visual_var3,visual_var4,solver_param,iter,training_data_prim,rom_flag)
+        # scatter1.set_offsets(np.column_stack((x[S_indx_user], prim_results[0,S_indx_user])))
         plt.show(block=False)
         
         print('Iteration: ' + str(iter))
