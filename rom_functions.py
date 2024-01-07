@@ -60,11 +60,11 @@ def precomputer(solver_param):
 
     norm_matrix = np.diag(norm_matrix_diag)
 
-    # basis         = V[:,0:truncation_indx[0][0]]
+    basis         = V[:,0:truncation_indx[0][0]]
     # basis         = V[:,0:500]
-    basis         = V
-    normalizor    = norm_matrix
-    denormalizor  = np.linalg.inv(normalizor)
+    # basis         = V
+    denormalizor    = norm_matrix
+    normalizor  = np.linalg.inv(denormalizor)
     q_ref         = first_snapshot.ravel(order='C')
 
     return basis , normalizor, denormalizor , q_ref , training_data_prim

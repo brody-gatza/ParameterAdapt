@@ -1,3 +1,5 @@
+import numpy as np
+
 def visual_var_collector(solver_param):
 
     visual_options            = ['Density','Pressure','Temprature','Velocity','Heat Release','Mass Fraction']
@@ -44,27 +46,30 @@ def visual_var_collector(solver_param):
     return visual_var1 , visual_var2 , visual_var3 , visual_var4
 
 
-def initial_plot(axs):
+def initial_plot(axs,hyper_flag):
     plots = {}
     # Plot in the first subplot (top-left)
     plot11 , = axs[0, 0].plot([], [] , color = 'C0' ,linestyle='-'  , label = 'ROM')
     plot12 , = axs[0, 0].plot([], [] , color = 'C0' ,linestyle='--' , label = 'FOM')
-    # plots['scatter1'] = axs[0, 0].scatter([], [],color='black',marker='o')
+
     # axs[0, 0].set_title('var1')
 
     # Plot in the second subplot (top-right)
     plot21 , = axs[0, 1].plot([], [], color='C1', linestyle='-'  ,  label = 'ROM')
     plot22 , = axs[0, 1].plot([], [], color='C1', linestyle='--' ,  label = 'FOM')
+    
     # axs[0, 1].set_title('var2')
 
     # Plot in the third subplot (bottom-left)
     plot31 , = axs[1, 0].plot([], [], color='C2', linestyle='-' , label = 'ROM')
     plot32 , = axs[1, 0].plot([], [], color='C2', linestyle='--', label = 'FOM')
+   
     # axs[1, 0].set_title('var3')
 
     # Plot in the fourth subplot (bottom-right)
     plot41 , = axs[1, 1].plot([], [], color='C3', linestyle='-' , label = 'ROM')
     plot42 , = axs[1, 1].plot([], [], color='C3', linestyle='--', label = 'FOM')
+
     # axs[1, 1].set_title('var4')
 
     plots['plot11'] = plot11 
@@ -76,11 +81,23 @@ def initial_plot(axs):
     plots['plot22'] = plot22 
     plots['plot32'] = plot32 
     plots['plot42'] = plot42 
-    
 
+    if hyper_flag == True:
+
+        scatter1 = axs[0, 0].scatter([], [],color='black',marker='o',label='Sampling Points')
+        scatter2 = axs[0, 1].scatter([], [],color='black',marker='o',label='Sampling Points') 
+        scatter3 = axs[1, 0].scatter([], [],color='black',marker='o',label='Sampling Points')
+        scatter4 = axs[1, 1].scatter([], [],color='black',marker='o',label='Sampling Points')
+
+        plots['scatter1'] = scatter1
+        plots['scatter2'] = scatter2
+        plots['scatter3'] = scatter3
+        plots['scatter4'] = scatter4
+
+    
     return plots
 
-def in_progress_plot(fig,axs,x,prim_results,plots,visual_var1,visual_var2,visual_var3,visual_var4,solver_param,iter,training_data_prim,rom_flag):
+def in_progress_plot(fig,axs,x,prim_results,plots,visual_var1,visual_var2,visual_var3,visual_var4,solver_param,iter,training_data_prim,rom_flag,hyper_flag,S_indx_user):
     
 
     y11= prim_results[visual_var1,:]
@@ -174,6 +191,18 @@ def in_progress_plot(fig,axs,x,prim_results,plots,visual_var1,visual_var2,visual
         axs[0,1].legend()
         axs[1,0].legend()
         axs[1,1].legend()
+
+    if hyper_flag == True:
+
+        scatter1 = plots['scatter1']
+        scatter2 = plots['scatter2']
+        scatter3 = plots['scatter3']
+        scatter4 = plots['scatter4']
+
+        scatter1.set_offsets(np.column_stack((x[S_indx_user], y11[S_indx_user])))
+        scatter2.set_offsets(np.column_stack((x[S_indx_user], y21[S_indx_user])))
+        scatter3.set_offsets(np.column_stack((x[S_indx_user], y31[S_indx_user])))
+        scatter4.set_offsets(np.column_stack((x[S_indx_user], y41[S_indx_user])))
 
 
     if iter % 50 == 0:

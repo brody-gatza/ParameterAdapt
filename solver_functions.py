@@ -119,17 +119,17 @@ def add_ghost_cell(rho , vx , P ,sol_time):
 
 def prim2cons_converter(rho , vx , P , gamma , vol):
 
-    mass   = rho 
-    momx   = rho * vx 
-    energy = (P/(gamma-1) + 0.5 * rho * (vx**2)) 
+    mass   = rho * vol
+    momx   = rho * vx * vol
+    energy = (P/(gamma-1) + 0.5 * rho * (vx**2)) * vol
 
     return mass , momx , energy
 
 def cons2prim_converter(mass , momx , energy , gamma , vol,sol_time):
 
-    rho = mass 
-    vx  = momx / rho 
-    P   = (energy - (0.5 * rho * (vx**2))) * (gamma-1)
+    rho = mass / vol
+    vx  = momx / rho / vol
+    P   = (energy/vol - (0.5 * rho * (vx**2))) * (gamma-1)
 
     rho , vx , P = add_ghost_cell(rho,vx,P,sol_time)
 
@@ -294,7 +294,7 @@ def inviscid_d_flux_dx_calculator(flux , dx , hyper_flag , S_indx_user):
 
         for indx in range(0,len(d_flux_dx)):
 
-            d_flux_dx[indx] = -(flux[indx+1] - flux[indx])/dx
+            d_flux_dx[indx] = -(flux[indx+1] - flux[indx])
 
     return d_flux_dx
 

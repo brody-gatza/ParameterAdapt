@@ -27,7 +27,7 @@ def driver(self):
     adaptive_sampling = True
     interval= 100
     work_dir= solver_param['working_dir']
-    flux_scheme ='Roe'
+    flux_scheme ='Rusanov'
     num_consv_var = 3
 
     solver_param['sampling_method'] = 'DEIM'
@@ -70,15 +70,15 @@ def driver(self):
         
         q_red  = basis.T @ np.hstack((full_cons_results[0,2:-2],full_cons_results[1,2:-2],full_cons_results[2,2:-2]))
 
-        S_indx_user               = np.array(range(0,solver_param['cell_number']))
+        S_indx_user               = np.arange(0,solver_param['cell_number'])
 
         pcc                       = 0
 
         if hyper_flag:
 
-            if solver_param['sampling_method'] == 'DEIM':
+            # if solver_param['sampling_method'] == 'DEIM':
 
-                S_indx_user = rom_functions.DEIM_sample_point_finder(basis,solver_param['cell_number'])
+            #     S_indx_user = rom_functions.DEIM_sample_point_finder(basis,solver_param['cell_number'])
 
             S_indx_solver = rom_functions.user2solver_indx_converter(S_indx_user,num_consv_var,solver_param['cell_number'])
 
@@ -86,7 +86,7 @@ def driver(self):
 
     else:
 
-        S_indx_user               = np.array(range(0,solver_param['cell_number']))
+        S_indx_user               = np.arange(0,solver_param['cell_number'])
         pcc                       = 0
         training_data_prim        = 0 
 
@@ -96,7 +96,7 @@ def driver(self):
     fig , axs = plt.subplots(2,2)
     fig.set_size_inches(15,6)
     visual_var1,visual_var2,visual_var3,visual_var4 = visualization_functions.visual_var_collector(solver_param)
-    plots                  = visualization_functions.initial_plot(axs)
+    plots                  = visualization_functions.initial_plot(axs,hyper_flag)
 
     # begin simulation
 
@@ -154,8 +154,8 @@ def driver(self):
 
         # visualization
         # breakpoint()
-        visualization_functions.in_progress_plot(fig,axs,x,prim_results,plots,visual_var1,visual_var2,visual_var3,visual_var4,solver_param,iter,training_data_prim,rom_flag)
-        # scatter1.set_offsets(np.column_stack((x[S_indx_user], prim_results[0,S_indx_user])))
+        visualization_functions.in_progress_plot(fig,axs,x,prim_results,plots,visual_var1,visual_var2,visual_var3,visual_var4,solver_param,iter,training_data_prim,rom_flag,hyper_flag,S_indx_user)
+        
         plt.show(block=False)
         
         print('Iteration: ' + str(iter))
