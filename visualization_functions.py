@@ -176,7 +176,7 @@ def in_progress_plot(fig,axs,x,prim_results,plots,visual_var1,visual_var2,visual
         axs[1,1].legend()
 
 
-    if iter % 1000 == 0:
+    if iter % 50 == 0:
 
         fig.canvas.draw()
         fig.canvas.flush_events()

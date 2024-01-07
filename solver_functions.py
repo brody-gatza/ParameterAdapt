@@ -157,7 +157,7 @@ def extrapolate_center2face( var , d_var , dx):
     var_left_face  = np.zeros(len(var)+1)
     var_right_face = np.zeros(len(var)+1)
 
-    for indx in range(1,len(var)-1):
+    for indx in range(1,len(var)):
 
         var_left_face[indx]  = var[indx-1] + d_var[indx-1] * (dx/2)
         var_right_face[indx] = var[indx] - d_var[indx] * (dx/2)
@@ -292,7 +292,7 @@ def inviscid_d_flux_dx_calculator(flux , dx , hyper_flag , S_indx_user):
 
         d_flux_dx = np.zeros(len(flux)-1)
 
-        for indx in range(0,len(d_flux_dx)-1):
+        for indx in range(0,len(d_flux_dx)):
 
             d_flux_dx[indx] = -(flux[indx+1] - flux[indx])/dx
 
