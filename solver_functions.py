@@ -206,8 +206,9 @@ def rusanov_flux_calculator(mass , momx , energy ,gamma , vol , dx , slope_limit
 def roe_flux_calculator(mass , momx , energy , gamma , vol , S_indx_user , hyper_flag , pcc):
     
     Q_cons           = np.vstack((mass , momx , energy))
-    rho , vx , press = cons2prim_converter(mass,momx,energy,gamma,vol,0)
 
+    rho , vx , press = cons2prim_converter(mass,momx,energy,gamma,vol,0)
+    en               = press  / (gamma-1) + 0.5 * rho  * (vx**2)
     # number of cell
     cell_num = len(rho)
 
@@ -233,10 +234,10 @@ def roe_flux_calculator(mass , momx , energy , gamma , vol , S_indx_user , hyper
     for j in range_flux:
     
         # Compute Roe averages
-        R=np.sqrt(rho[j+1]/rho[j])                   # R_{j+1/2}
-        rmoy=R*rho[j]                                # {hat rho}_{j+1/2}
-        umoy=(R*vx[j+1]+vx[j])/(R+1)                # {hat U}_{j+1/2}
-        hmoy=(R*htot[j+1]+htot[j])/(R+1);            # {hat H}_{j+1/2}
+        R=np.sqrt(rho[j+1]/rho[j])                      # R_{j+1/2}
+        rmoy=R*rho[j]                                   # {hat rho}_{j+1/2}
+        umoy=(R*vx[j+1]+vx[j])/(R+1)                    # {hat U}_{j+1/2}
+        hmoy=(R*htot[j+1]+htot[j])/(R+1);               # {hat H}_{j+1/2}
         amoy=np.sqrt((gamma-1.0)*(hmoy-0.5*umoy*umoy))  # {hat a}_{j+1/2}
         
         # Auxiliary variables used to compute P_{j+1/2}^{-1}
@@ -261,11 +262,11 @@ def roe_flux_calculator(mass , momx , energy , gamma , vol , S_indx_user , hyper
         # Compute Roe matrix |A_{j+1/2}|
         A = P @ lamb @ Pinv
 
-        diffusion[:,j+1] = 0.5 * A @ (Q_cons[:,j+1]-Q_cons[:,j])
+        diffusion[:,j+1] = 0.5 * A @ (Q_cons[:,j+1]-Q_cons[:,j]) / vol
 
-        flux[0,j+1] = 0.5*(rho[j]*vx[j]               + rho[j+1]*vx[j+1])                         - diffusion[0,j+1]
-        flux[1,j+1] = 0.5*(rho[j]*vx[j]**2 + press[j] + rho[j+1]*vx[j+1]+press[j+1])              - diffusion[1,j+1]
-        flux[2,j+1] = 0.5*(vx[j]*(energy[j]+press[j]) + vx[j+1]*(energy[j+1]+press[j+1]))         - diffusion[2,j+1]
+        flux[0,j+1] = 0.5*(rho[j]*vx[j]               + rho[j+1]*vx[j+1])                         - diffusion[0,j+1] 
+        flux[1,j+1] = 0.5*(rho[j]*vx[j]**2 + press[j] + rho[j+1]*vx[j+1]+press[j+1])              - diffusion[1,j+1] 
+        flux[2,j+1] = 0.5*(vx[j]*(en[j]+press[j])     + vx[j+1]*(en[j+1]+press[j+1]))             - diffusion[2,j+1] 
 
     flux_mass   = flux[0,:]
     flux_momx   = flux[1,:]
