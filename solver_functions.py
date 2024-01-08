@@ -230,7 +230,6 @@ def roe_flux_calculator(mass , momx , energy , gamma , vol , S_indx_user , hyper
         
         range_flux = range(0,cell_num-1)
 
-
     for j in range_flux:
     
         # Compute Roe averages
@@ -286,7 +285,7 @@ def inviscid_d_flux_dx_calculator(flux , dx , hyper_flag , S_indx_user):
 
         for indx in S_indx_user:
 
-            d_flux_dx[counter] = -(flux[indx+1] - flux[indx])/dx
+            d_flux_dx[counter] = -(flux[indx+1] - flux[indx])
             counter = counter + 1
 
     else:

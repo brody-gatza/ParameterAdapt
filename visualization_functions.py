@@ -84,10 +84,10 @@ def initial_plot(axs,hyper_flag):
 
     if hyper_flag == True:
 
-        scatter1 = axs[0, 0].scatter([], [],color='black',marker='o',label='Sampling Points')
-        scatter2 = axs[0, 1].scatter([], [],color='black',marker='o',label='Sampling Points') 
-        scatter3 = axs[1, 0].scatter([], [],color='black',marker='o',label='Sampling Points')
-        scatter4 = axs[1, 1].scatter([], [],color='black',marker='o',label='Sampling Points')
+        scatter1 = axs[0, 0].scatter([], [] , 7 ,color='black',marker='o',label='Sampling Points')
+        scatter2 = axs[0, 1].scatter([], [] , 7 ,color='black',marker='o',label='Sampling Points') 
+        scatter3 = axs[1, 0].scatter([], [] , 7 ,color='black',marker='o',label='Sampling Points')
+        scatter4 = axs[1, 1].scatter([], [] , 7 ,color='black',marker='o',label='Sampling Points')
 
         plots['scatter1'] = scatter1
         plots['scatter2'] = scatter2

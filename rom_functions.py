@@ -1,4 +1,5 @@
 import numpy as np
+import scipy as sc
 import time_integrator_functions
 
 def precomputer(solver_param):
@@ -182,6 +183,19 @@ def DEIM_sample_point_finder(basis,num_cell):
         S_indx_temp = np.hstack([S_indx_temp,new_indx])
 
     S_indx_solver = S_indx_temp
+
+    S_indx_user   = solver2user_indx_converter(S_indx_solver,num_cell)
+
+    return S_indx_user
+
+
+def QDEIM_sample_point_finder(U,num_cell):
+    breakpoint()
+    n, m = U.shape
+
+    Q, R, P = sc.linalg.qr(U.T, mode='full',pivoting=True)
+
+    S_indx_solver = P[:m]
 
     S_indx_user   = solver2user_indx_converter(S_indx_solver,num_cell)
 

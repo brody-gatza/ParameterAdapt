@@ -27,10 +27,10 @@ def driver(self):
     adaptive_sampling = True
     interval= 100
     work_dir= solver_param['working_dir']
-    flux_scheme ='Rusanov'
+    flux_scheme ='Roe'
     num_consv_var = 3
 
-    solver_param['sampling_method'] = 'DEIM'
+    solver_param['sampling_method'] = 'QDEIM'
 
     # get the initial condition
     rho , vx , p = solver_functions.ic_generator(solver_param)
@@ -76,9 +76,14 @@ def driver(self):
 
         if hyper_flag:
 
-            # if solver_param['sampling_method'] == 'DEIM':
+            if solver_param['sampling_method'] == 'DEIM':
 
-            #     S_indx_user = rom_functions.DEIM_sample_point_finder(basis,solver_param['cell_number'])
+                S_indx_user = rom_functions.DEIM_sample_point_finder(basis,solver_param['cell_number'])
+
+            elif solver_param['sampling_method'] == 'QDEIM':
+                
+                S_indx_user = rom_functions.QDEIM_sample_point_finder(basis,solver_param['cell_number'])
+            
 
             S_indx_solver = rom_functions.user2solver_indx_converter(S_indx_user,num_consv_var,solver_param['cell_number'])
 
