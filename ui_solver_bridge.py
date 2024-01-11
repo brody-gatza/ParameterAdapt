@@ -30,7 +30,12 @@ def driver(self):
     flux_scheme ='Roe'
     num_consv_var = 3
 
+    # solver_param['sampling_method'] = 'GappyPOD'
+    # solver_param['sampling_method'] = 'DEIM'
     solver_param['sampling_method'] = 'QDEIM'
+    # solver_param['sampling_method'] = 'GappyPODE'
+
+    num_samples = 150
 
     # get the initial condition
     rho , vx , p = solver_functions.ic_generator(solver_param)
@@ -83,6 +88,9 @@ def driver(self):
             elif solver_param['sampling_method'] == 'QDEIM':
                 
                 S_indx_user = rom_functions.QDEIM_sample_point_finder(basis,solver_param['cell_number'])
+
+            elif solver_param['sampling_method'] == 'GappyPODE':
+                S_indx_user = rom_functions.GappyPODE_sample_point_finder(basis,num_samples,solver_param['cell_number'])
             
 
             S_indx_solver = rom_functions.user2solver_indx_converter(S_indx_user,num_consv_var,solver_param['cell_number'])

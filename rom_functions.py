@@ -190,12 +190,48 @@ def DEIM_sample_point_finder(basis,num_cell):
 
 
 def QDEIM_sample_point_finder(U,num_cell):
-    breakpoint()
+
     n, m = U.shape
 
     Q, R, P = sc.linalg.qr(U.T, mode='full',pivoting=True)
 
     S_indx_solver = P[:m]
+
+    S_indx_user   = solver2user_indx_converter(S_indx_solver,num_cell)
+
+    return S_indx_user
+
+
+def GappyPODE_sample_point_finder(basis,num_samples,num_cell):
+
+
+    _, _, p = sc.linalg.qr(basis.T, mode='full', pivoting=True)
+
+    p = p[:basis.shape[1]]
+
+    for i in range(len(p) + 1, num_samples + 1):
+
+        _, S, W = np.linalg.svd(basis[p, :], full_matrices=False)
+
+        g = S[-2]**2 - S[-1]**2
+
+        Ub = np.dot(W.T, basis.T)
+
+        r = g + np.sum(Ub**2, axis=0)
+
+        r = r - np.sqrt((g + np.sum(Ub**2, axis=0))**2 - 4 * g * Ub[-1, :]**2)
+
+        I = np.argsort(r)[::-1]
+
+        e = 0
+
+        while I[e] in p:
+
+            e += 1
+
+        p = np.append(p, I[e])
+
+    S_indx_solver = p
 
     S_indx_user   = solver2user_indx_converter(S_indx_solver,num_cell)
 

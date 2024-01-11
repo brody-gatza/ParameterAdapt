@@ -205,7 +205,7 @@ def in_progress_plot(fig,axs,x,prim_results,plots,visual_var1,visual_var2,visual
         scatter4.set_offsets(np.column_stack((x[S_indx_user], y41[S_indx_user])))
 
 
-    if iter % 50 == 0:
+    if iter % 500 == 0:
 
         fig.canvas.draw()
         fig.canvas.flush_events()
