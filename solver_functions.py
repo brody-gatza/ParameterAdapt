@@ -4,6 +4,26 @@ def solver_parameters_collector(self):
 
     solver_param = {}
 
+    ### solver_mode ###
+    if self.fom_mode_checkbox_check_var.get() == True:
+
+        solver_param['solver_mode'] = 'FOM'
+
+    elif self.rom_mode_checkbox_check_var.get() == True:
+
+        solver_param['solver_mode'] = 'ROM'
+
+    elif self.adaptive_rom_mode_checkbox_check_var.get() == True:
+
+        solver_param['solver_mode'] = 'Adaptive ROM'
+
+    solver_param['rom_method'] = self.rom_method_entry_var.get()
+    solver_param['pod_energy'] = float(self.energy_capture_entry_var.get())
+    solver_param['hyper']      = self.hyper_method_checkbox_check_var.get()
+    solver_param['sampling_method'] = self.hyper_method_entry_var.get()
+    solver_param['init_training_win'] = self.training_window_entry_var.get()
+
+
     ### time discretization ###
     solver_param['dt'] = float(self.dt_entry_var.get())
     solver_param['num_step'] = int(self.num_step_entry_var.get())
@@ -17,51 +37,67 @@ def solver_parameters_collector(self):
     solver_param['cell_number'] = int(self.cell_number_entry_var.get())
 
     ### inlet BC ###
-    solver_param['press_inlet'] = float(self.inlet_press_entry_var.get())
-    solver_param['temp_inlet'] = float(self.inlet_temp_entry_var.get())
-    solver_param['vel_inlet'] = float(self.inlet_vel_entry_var.get())
-    solver_param['rho_inlet'] = float(self.inlet_rho_entry_var.get())
-    solver_param['mass_frac_inlet'] = self.inlet_mass_frac_entry_var.get()
+    # solver_param['press_inlet'] = float(self.inlet_press_entry_var.get())
+    # solver_param['temp_inlet'] = float(self.inlet_temp_entry_var.get())
+    # solver_param['vel_inlet'] = float(self.inlet_vel_entry_var.get())
+    # solver_param['rho_inlet'] = float(self.inlet_rho_entry_var.get())
+    # solver_param['mass_frac_inlet'] = self.inlet_mass_frac_entry_var.get()
 
-    ### outlet BC ###
-    solver_param['press_outlet'] = float(self.outlet_press_entry_var.get())
-    solver_param['temp_outlet'] = float(self.outlet_temp_entry_var.get())
-    solver_param['vel_outlet'] = float(self.outlet_vel_entry_var.get())
-    solver_param['rho_outlet'] = float(self.outlet_rho_entry_var.get())
-    solver_param['mass_frac_outlet'] = self.outlet_mass_frac_entry_var.get()
+    # ### outlet BC ###
+    # solver_param['press_outlet'] = float(self.outlet_press_entry_var.get())
+    # solver_param['temp_outlet'] = float(self.outlet_temp_entry_var.get())
+    # solver_param['vel_outlet'] = float(self.outlet_vel_entry_var.get())
+    # solver_param['rho_outlet'] = float(self.outlet_rho_entry_var.get())
+    # solver_param['mass_frac_outlet'] = self.outlet_mass_frac_entry_var.get()
 
-    ### gas model ###
-    solver_param['gas_model'] = self.gas_model_entry_var.get()
+    solver_param['non_reflective_bc'] = True
 
-    ### ROM ###
-    solver_param['calc_rom'] = self.rom_method_checkbox_check_var.get()
-    solver_param['rom_method'] = self.rom_method_entry_var.get()
-    solver_param['pod_energy'] = float(self.energy_capture_entry_var.get())
-
-    ### Hyper-Reduction ###
-    solver_param['hyper'] = self.hyper_method_checkbox_check_var.get()
-    solver_param['hyper_method'] = self.hyper_method_entry_var.get()
+    ### physics ###
+    solver_param['gas_model']  = self.gas_model_entry_var.get()
+    solver_param['gamma']      = 1.4 
+    solver_param['flux_scheme']= self.flux_scheme_entry_var.get()
+    solver_param['limiter']    = self.limiter_checkbox_check_var.get()
 
     ### visualization ###
-    solver_param['variable1'] = self.visual_1_option_entry_var.get()
-    solver_param['variable2'] = self.visual_2_option_entry_var.get()
-    solver_param['variable3'] = self.visual_3_option_entry_var.get()
-    solver_param['variable4'] = self.visual_4_option_entry_var.get()
+    solver_param['variable1']           = self.visual_1_option_entry_var.get()
+    solver_param['variable2']           = self.visual_2_option_entry_var.get()
+    solver_param['variable3']           = self.visual_3_option_entry_var.get()
+    solver_param['variable4']           = self.visual_4_option_entry_var.get()
+    solver_param['vis_update_interval'] = int(self.visual_update_interval_entry_var.get())
 
     ### ic data ###
     solver_param['ic_data']   = self.ic_data
 
     ### Input Directory ###
     solver_param['working_dir'] = self.working_dir_entry_var.get()
-    # solver_param['FOM_Result'] = self.FOM_re
+    solver_param['FOM_result_dir'] = self.FOM_file_entry_var.get()
+
+    ### Some Basic Calculations ###
+
+    solver_param['dx']      = (solver_param['x_final'] - solver_param['x_initial']) / solver_param['cell_number']
+    solver_param['vol']     = solver_param['dx']
+    solver_param['x']       = np.linspace( solver_param['x_initial'] , solver_param['x_final'] , int(solver_param['cell_number']) )
 
     return solver_param
 
-def ic_generator(solver_param):
+def initialize_state(solver_param):
+
+    # create state variable
+    state = {}
+
+    state['cons_results_save']      = np.zeros(( 3 , int(solver_param['cell_number'])    , int(int(solver_param['num_step'])) )  )
+    state['prim_results_save']      = np.zeros(( 3 , int(solver_param['cell_number'])    , int(int(solver_param['num_step'])))  )
+
+    state['Q_cons']                 = np.zeros((3*int(solver_param['cell_number'])+(3*4)))
+    state['Q_prim']                 = np.zeros((3*int(solver_param['cell_number'])+(3*4)))
+
+    return state
+
+def ic_generator(solver_param,state):
 
     num_region = len(solver_param['ic_data'])
     num_cell   = solver_param['cell_number']
-    x       =  np.linspace( solver_param['x_initial'] , solver_param['x_final'] , int(solver_param['cell_number'])+4 )
+    x          =  np.linspace( solver_param['x_initial'] , solver_param['x_final'] , int(solver_param['cell_number'])+4 )
 
     rho = np.zeros(num_cell+4)
     vx  = np.zeros(num_cell+4)
@@ -74,66 +110,97 @@ def ic_generator(solver_param):
         rho[indx] = eval(solver_param['ic_data'][region][5])
         vx [indx] = eval(solver_param['ic_data'][region][4])
         P  [indx] = eval(solver_param['ic_data'][region][2])
-         
-    return rho,vx,P
-
-
-def add_ghost_cell(rho , vx , P ,sol_time):
-
-    rho[0:2]   = rho[3]
-    vx[0:2]    = vx[3]
-    P[0:2]     = P[3]
-
-    rho[-2:] = rho[-3]
-    vx[-2:]  = vx[-3]
-    P[-2:]   = P[-3]
-
     
-    # rho[0:2]   = rho[-4:-2]
-    # vx[0:2]    = vx[-4:-2]
-    # P[0:2]     = P[-4:-2]
+    state['Q_prim'] = np.vstack((rho,vx,P)).ravel()
 
-    # rho[-2:] = rho[2:4]
-    # vx[-2:]  = vx[2:4]
-    # P[-2:]   = P[2:4]
+    return state
 
-    # rho[1]   = rho[-3]
-    # vx[1]    = vx[-3]
-    # P[1]     = P[-3]
 
-    # rho[-2] = rho[2]
-    # vx[-2]  = vx[2]
-    # P[-2]   = P[2]
+def update_ghost_cell(solver_param,state):
 
-    # if periodic_inlet:
-         
-    #     pass
-         
-    # if periodic_outlet:
-         
-    # pert =  0.0001* np.sin(2*np.pi*1e6*sol_time)
-    # P[-3] = P[-3] * (1 + pert)
- 
-    return rho,vx,P
+    num_cell = solver_param['cell_number']
+
+    Q_prim   = state['Q_prim']
+    Q_cons   = state['Q_cons']
+
+    Q_prim_user = results_solver2user_converter(num_cell,Q_prim)
+    Q_cons_user = results_solver2user_converter(num_cell,Q_cons)
+    
+    if solver_param['non_reflective_bc']:
+
+        Q_prim_user[:,0:2]   = Q_prim_user[:,3].reshape(-1, 1)
+
+        Q_prim_user[:,-2:]   = Q_prim_user[:,-3].reshape(-1, 1)
+
+        Q_cons_user[:,0:2]   = Q_cons_user[:,3].reshape(-1, 1)
+
+        Q_cons_user[:,-2:]   = Q_cons_user[:,-3].reshape(-1, 1)
+
+    elif solver_param['periodic_bc']:
+
+        Q_prim_user[:,0:2]   = Q_prim_user[:,-4:-2]
+        Q_prim_user[:,-2:]   = Q_prim_user[:,2:4]
+        Q_prim_user[:,1]     = Q_prim_user[:,-3]
+        Q_prim_user[:,-2]    = Q_prim_user[:,2]
+
+        Q_cons_user[:,0:2]   = Q_cons_user[:,-4:-2]
+        Q_cons_user[:,-2:]   = Q_cons_user[:,2:4]
+        Q_cons_user[:,1]     = Q_cons_user[:,-3]
+        Q_cons_user[:,-2]    = Q_cons_user[:,2]
+
+
+    Q_prim_solver = results_user2solver_converter(Q_prim_user)
+    Q_cons_solver = results_user2solver_converter(Q_cons_user)
+    
+    state['Q_prim'] = Q_prim_solver
+    state['Q_cons'] = Q_cons_solver
+
+    return state
     
 
-def prim2cons_converter(rho , vx , P , gamma , vol):
+def prim2cons_converter(solver_param, state):
+
+    num_cell = solver_param['cell_number']
+
+    Q_prim   = state['Q_prim']
+
+    Q_prim_user = results_solver2user_converter(num_cell,Q_prim)
+
+    vol = solver_param['vol']
+
+    gamma = solver_param['gamma']
+
+    rho = Q_prim_user[0,:]
+    vx  = Q_prim_user[1,:] 
+    P   = Q_prim_user[2,:]
 
     mass   = rho * vol
     momx   = rho * vx * vol
     energy = (P/(gamma-1) + 0.5 * rho * (vx**2)) * vol
 
-    return mass , momx , energy
+    state['Q_cons'] = np.vstack((mass,momx,energy)).ravel()
 
-def cons2prim_converter(mass , momx , energy , gamma , vol,sol_time):
+    return state
+
+def cons2prim_converter(solver_param, state):
+
+    vol         = solver_param['vol']
+    gamma       = solver_param['gamma']
+    Q_cons      = state['Q_cons']
+    Q_cons_user = results_solver2user_converter(solver_param['cell_number'],Q_cons)
+    mass        = Q_cons_user[0,:]
+    momx        = Q_cons_user[1,:]
+    energy      = Q_cons_user[2,:]
 
     rho = mass / vol
     vx  = momx / rho / vol
     P   = (energy/vol - (0.5 * rho * (vx**2))) * (gamma-1)
 
-    rho , vx , P = add_ghost_cell(rho,vx,P,sol_time)
+    state['Q_prim'] = np.vstack((rho,vx,P)).ravel()
 
-    return  rho , vx , P
+    state = update_ghost_cell(solver_param,state)
+
+    return  state
 
 def gradient_calculator(var,dx):
 
@@ -203,11 +270,23 @@ def rusanov_flux_calculator(mass , momx , energy ,gamma , vol , dx , slope_limit
 
     return flux_mass, flux_momx, flux_energy
 
-def roe_flux_calculator(mass , momx , energy , gamma , vol , S_indx_user , hyper_flag , pcc):
+def roe_flux_calculator(solver_param,rom_param,state):
     
-    Q_cons           = np.vstack((mass , momx , energy))
+    Q_cons           = state['Q_cons']
+    state            = cons2prim_converter(solver_param,state)
+    Q_prim           = state['Q_prim']
+    Q_cons_user      = results_solver2user_converter(solver_param['cell_number'],Q_cons)
+    Q_prim_user      = results_solver2user_converter(solver_param['cell_number'],Q_prim)
 
-    rho , vx , press = cons2prim_converter(mass,momx,energy,gamma,vol,0)
+    rho    = Q_prim_user[0,:]
+    vx     = Q_prim_user[1,:]
+    press  = Q_prim_user[2,:]
+
+    gamma  = solver_param['gamma']
+    vol    = solver_param['vol']
+
+    S_indx_user = rom_param['S_indx_user']
+
     en               = press  / (gamma-1) + 0.5 * rho  * (vx**2)
     # number of cell
     cell_num = len(rho)
@@ -218,7 +297,7 @@ def roe_flux_calculator(mass , momx , energy , gamma , vol , S_indx_user , hyper
     flux = np.zeros((3,cell_num+1))
     diffusion = np.zeros((3,cell_num+1))
 
-    if hyper_flag == True:
+    if solver_param['hyper'] == True:
 
         range_flux = S_indx_user + 2 
         range_flux_neighbor_left  = range_flux - 1
@@ -261,23 +340,25 @@ def roe_flux_calculator(mass , momx , energy , gamma , vol , S_indx_user , hyper
         # Compute Roe matrix |A_{j+1/2}|
         A = P @ lamb @ Pinv
 
-        diffusion[:,j+1] = 0.5 * A @ (Q_cons[:,j+1]-Q_cons[:,j]) / vol
+        diffusion[:,j+1] = 0.5 * A @ (Q_cons_user[:,j+1]-Q_cons_user[:,j]) / vol
 
         flux[0,j+1] = 0.5*(rho[j]*vx[j]               + rho[j+1]*vx[j+1])                         - diffusion[0,j+1] 
         flux[1,j+1] = 0.5*(rho[j]*vx[j]**2 + press[j] + rho[j+1]*vx[j+1]+press[j+1])              - diffusion[1,j+1] 
         flux[2,j+1] = 0.5*(vx[j]*(en[j]+press[j])     + vx[j+1]*(en[j+1]+press[j+1]))             - diffusion[2,j+1] 
 
-    flux_mass   = flux[0,:]
-    flux_momx   = flux[1,:]
-    flux_energy = flux[2,:]
+    state['flux_cons'] = flux
 
-    return flux_mass, flux_momx, flux_energy
+    return state
 
-def inviscid_d_flux_dx_calculator(flux , dx , hyper_flag , S_indx_user):
+def inviscid_d_flux_dx_calculator(solver_param,rom_param,state):
 
-    if hyper_flag == True:
+    S_indx_user = rom_param['S_indx_user']
 
-        d_flux_dx = np.zeros(len(S_indx_user))
+    flux = state['flux_cons']
+
+    if solver_param['hyper'] == True:
+
+        d_flux_dx = np.zeros((3 , len(S_indx_user)))
 
         S_indx_user = S_indx_user + 2
 
@@ -285,16 +366,54 @@ def inviscid_d_flux_dx_calculator(flux , dx , hyper_flag , S_indx_user):
 
         for indx in S_indx_user:
 
-            d_flux_dx[counter] = -(flux[indx+1] - flux[indx])
+            d_flux_dx[:,counter] = -(flux[:,indx+1] - flux[:,indx])
             counter = counter + 1
 
     else:
 
-        d_flux_dx = np.zeros(len(flux)-1)
+        d_flux_dx = np.zeros((3 , solver_param['cell_number'] + 4))
 
-        for indx in range(0,len(d_flux_dx)):
+        for indx in range(0,len(d_flux_dx[0,:])):
 
-            d_flux_dx[indx] = -(flux[indx+1] - flux[indx])
+            d_flux_dx[:,indx] = -(flux[:,indx+1] - flux[:,indx])
+    
+    state['d_flux_dx'] = d_flux_dx.ravel()
+    
+    return state
 
-    return d_flux_dx
+def results_solver2user_converter(num_cell,Q):
+
+    Q_reshaped = np.reshape(Q,(3,num_cell+4))
+
+    return Q_reshaped
+
+def results_user2solver_converter(Q):
+
+    Q_reshaped = np.ravel(Q)
+
+    return Q_reshaped
+
+def residual_calculator(solver_param,rom_param,state):
+    
+    # compute flux
+    if solver_param['flux_scheme'] == 'Rusanov':
+        state = rusanov_flux_calculator(solver_param,state)
+
+    elif solver_param['flux_scheme'] == 'Roe':
+        state = roe_flux_calculator(solver_param,rom_param,state)
+
+    # inviscid flux vector terms
+    state   = inviscid_d_flux_dx_calculator( solver_param,rom_param,state)
+
+    return state
+
+
+
+
+
+
+
+
+
+    
 

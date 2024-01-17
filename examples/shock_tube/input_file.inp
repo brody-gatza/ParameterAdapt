@@ -1,3 +1,12 @@
+# solver setup
+
+solver_mode 		= adaptive_rom
+rom_method  		= galerkin
+pod_energy  		= 99.999
+hyper	    		= true
+hyper_method		= qdeim
+init_training_win 	= 100
+
 # time discretization
 dt            = 5e-5
 num_steps     = 3000
@@ -11,18 +20,18 @@ x_final     = 1
 cell_number = 500 
 
 # inlet BC
-press_inlet      = 1
-temp_inlet       = 300
-vel_inlet        = 0.1
-rho_inlet        = 1
-mass_frac_inlet  = [1.0, 0.0]
+#press_inlet      = 1
+#temp_inlet       = 300
+#vel_inlet        = 0.1
+#rho_inlet        = 1
+#mass_frac_inlet  = [1.0, 0.0]
 
 # outlet BC
-press_outlet      = 0.1
-temp_outlet       = 300
-vel_outlet        = 0.1
-rho_outlet        = 0.1
-mass_frac_outlet = [1.0, 0.0]
+#press_outlet      = 0.1
+#temp_outlet       = 300
+#vel_outlet        = 0.1
+#rho_outlet        = 0.1
+#mass_frac_outlet = [1.0, 0.0]
 
 # Initial Condition
 
@@ -34,23 +43,16 @@ rho_ic        = [1,0.1]
 mass_frac_ic  = [[1.0, 0.0],[1.0, 0.0]]
 
 # gas model
-gas_model = ideal gas model
-
-# ROM
-calc_rom   = false
-rom_method = galerkin
-pod_energy = 99.999
-
-# Hyper-Reduction
-hyper = false
-hyper_method= gappy_pod
+gas_model   = ideal gas model
+flux_scheme = roe
 
 # Visualization
 
-variable1 = Density
-variable2 = Pressure
-variable3 = Velocity
-variable4 = None
+variable1 	= Density
+variable2 	= Pressure
+variable3 	= Velocity
+variable4 	= None
+update_interval = 100
 
 
 

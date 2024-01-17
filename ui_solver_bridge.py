@@ -9,172 +9,84 @@ import time
 
 def driver(self):
     
-    start_time = time.time()
-
     # collect all of variables from user interface
     solver_param = solver_functions.solver_parameters_collector(self)
-    slope_limiter = True
-    
-    # some basic parameters
-    dx      = (solver_param['x_final'] - solver_param['x_initial']) / solver_param['cell_number']
-    vol     = dx
-    dt      = solver_param['dt']
-    res_tol = solver_param['res_tol']
-    x       = np.linspace( solver_param['x_initial'] , solver_param['x_final'] , int(solver_param['cell_number']) )
-    sol_time= 0
-    rom_flag= solver_param['calc_rom']
-    hyper_flag = solver_param['hyper']
-    adaptive_sampling = True
-    interval= 100
-    work_dir= solver_param['working_dir']
-    flux_scheme ='Roe'
-    num_consv_var = 3
 
-    # solver_param['sampling_method'] = 'GappyPOD'
-    # solver_param['sampling_method'] = 'DEIM'
-    solver_param['sampling_method'] = 'QDEIM'
-    # solver_param['sampling_method'] = 'GappyPODE'
-
-    num_samples = 150
+    # initialize main states 
+    state = solver_functions.initialize_state(solver_param)
 
     # get the initial condition
-    rho , vx , p = solver_functions.ic_generator(solver_param)
+    state = solver_functions.ic_generator(solver_param,state)
 
     # add ghost cells
-    rho , vx , p = solver_functions.add_ghost_cell(rho , vx , p ,sol_time)
-
-    # get the gas properties
-    gamma = 1.4
+    state = solver_functions.update_ghost_cell(solver_param,state)
 
     # convert prim to cons
-    mass , momx , energy = solver_functions.prim2cons_converter(rho , vx , p , gamma , vol)
-
-    # stack cons and prim variables
-    full_cons_results      = np.zeros(( 3 , int(solver_param['cell_number'])+4              )  )
-    cons_results           = np.zeros(( 3 , int(solver_param['cell_number'])                )  )
-    cons_results_save      = np.zeros(( 3 , int(solver_param['cell_number'])    , int(int(solver_param['num_step'])) )  )
-    
-    full_cons_results[0,:] = mass 
-    full_cons_results[1,:] = momx 
-    full_cons_results[2,:] = energy
-
-
-    full_prim_results      = np.zeros(( 3 , int(solver_param['cell_number'])+4             )  )
-    prim_results           = np.zeros(( 3 , int(solver_param['cell_number'])               )  )
-    prim_results_save      = np.zeros(( 3 , int(solver_param['cell_number'])    , int(int(solver_param['num_step'])))  )
-
-    full_prim_results[0,:] = rho 
-    full_prim_results[1,:] = vx 
-    full_prim_results[2,:] = p
-
+    state = solver_functions.prim2cons_converter(solver_param, state)
 
     # initialize rom if necessary
-    if rom_flag:
+    if solver_param['solver_mode'] == 'ROM':
 
-        basis , normalizor, denormalizor , q_ref , training_data_prim = rom_functions.precomputer(solver_param)
-        
-        q_red  = basis.T @ np.hstack((full_cons_results[0,2:-2],full_cons_results[1,2:-2],full_cons_results[2,2:-2]))
+        rom_param = rom_functions.precomputer(solver_param,state)
 
-        S_indx_user               = np.arange(0,solver_param['cell_number'])
+        if solver_param['hyper'] == True:
 
-        pcc                       = 0
+            rom_param = rom_functions.sample_point_finder(solver_param,rom_param)
 
-        if hyper_flag:
-
-            if solver_param['sampling_method'] == 'DEIM':
-
-                S_indx_user = rom_functions.DEIM_sample_point_finder(basis,solver_param['cell_number'])
-
-            elif solver_param['sampling_method'] == 'QDEIM':
-                
-                S_indx_user = rom_functions.QDEIM_sample_point_finder(basis,solver_param['cell_number'])
-
-            elif solver_param['sampling_method'] == 'GappyPODE':
-                S_indx_user = rom_functions.GappyPODE_sample_point_finder(basis,num_samples,solver_param['cell_number'])
-            
-
-            S_indx_solver = rom_functions.user2solver_indx_converter(S_indx_user,num_consv_var,solver_param['cell_number'])
-
-            pcc       = rom_functions.hyper_precomputer(basis,S_indx_solver)
-
-    else:
+    elif solver_param['solver_mode'] == 'FOM':
 
         S_indx_user               = np.arange(0,solver_param['cell_number'])
+        S_indx_solver             = rom_functions.user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
         pcc                       = 0
         training_data_prim        = 0 
 
+        rom_param = {}
+        
+        rom_param['S_indx_user']      = S_indx_user
+        rom_param['S_indx_solver']    = S_indx_solver
+        rom_param['hyper_precompute'] = pcc
+
 
     # create plot
+    visual_param = visualization_functions.visual_var_collector(solver_param)
+
     plt.close()
     fig , axs = plt.subplots(2,2)
     fig.set_size_inches(15,6)
-    visual_var1,visual_var2,visual_var3,visual_var4 = visualization_functions.visual_var_collector(solver_param)
-    plots                  = visualization_functions.initial_plot(axs,hyper_flag)
+    
+    visual_param        = visualization_functions.initial_plot(axs,solver_param,visual_param)
+
+    # prepare saving space
+    cons_results_save = state['cons_results_save']
+    prim_results_save = state['prim_results_save']
 
     # begin simulation
-
+    start_time = time.time()
+    
     for iter in range(solver_param['num_step']):
 
+        if solver_param['solver_mode'] == 'FOM':
 
-        d_mass_dt , d_momx_dt , d_energy_dt = non_linear_terms.flux_calculator(mass,momx,energy,dx,gamma,vol,slope_limiter,sol_time,S_indx_user,hyper_flag,flux_scheme,pcc)
+            state = solver_functions.residual_calculator(solver_param,rom_param,state)
+            state = time_integrator_functions.advance_time(solver_param,state)
 
-        if rom_flag:
+        elif solver_param['solver_mode'] == 'ROM':
             
-            mass, momx, energy , q_red = rom_functions.order_reducer(solver_param,d_mass_dt,d_momx_dt,d_energy_dt,basis,normalizor,denormalizor,q_ref,q_red,pcc)
-
-        else :
-
-            # time integration
-            if solver_param['time_scheme'] == 'Explicit - FD Euler':
-
-                mass   = time_integrator_functions.explicit_fd_euler(mass   , d_mass_dt   , dt)
-                momx   = time_integrator_functions.explicit_fd_euler(momx   , d_momx_dt   , dt)
-                energy = time_integrator_functions.explicit_fd_euler(energy , d_energy_dt , dt)
-
-            elif solver_param['time_scheme'] == 'Implicit - BD Euler':
-
-                mass , momx , energy  = time_integrator_functions.implicit_bd_euler(mass,momx,energy,dx,dt,gamma,vol,res_tol,slope_limiter)
-
-        mass[0:3]   = mass[2]
-        momx[0:3]   = momx[2]
-        energy[0:3] = energy[2]
-
-        mass[-2:]   = mass[-3]
-        momx[-2:]   = momx[-3]
-        energy[-2:] = energy[-3]
+            state = rom_functions.red2full_state_calculator(solver_param,rom_param,state)
 
         # convert cons to prim
-        rho , vx , p = solver_functions.cons2prim_converter(mass , momx , energy , gamma , vol,sol_time)
+        state = solver_functions.cons2prim_converter(solver_param,state)
 
-        # update results
-        full_cons_results[0,:] = mass
-        full_cons_results[1,:] = momx
-        full_cons_results[2,:] = energy
-
-        full_prim_results[0,:] = rho
-        full_prim_results[1,:] = vx
-        full_prim_results[2,:] = p
-
-        # update results without ghost cells
-        cons_results[0,:] = mass  [2:-2]
-        cons_results[1,:] = momx  [2:-2]
-        cons_results[2,:] = energy[2:-2]
-
-
-        prim_results[0,:] = rho   [2:-2]
-        prim_results[1,:] = vx    [2:-2]
-        prim_results[2,:] = p     [2:-2]
+        state = solver_functions.update_ghost_cell(solver_param,state)
 
         # visualization
-        # breakpoint()
-        visualization_functions.in_progress_plot(fig,axs,x,prim_results,plots,visual_var1,visual_var2,visual_var3,visual_var4,solver_param,iter,training_data_prim,rom_flag,hyper_flag,S_indx_user)
+        visualization_functions.in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param)
         
         plt.show(block=False)
         
-        print('Iteration: ' + str(iter))
-        sol_time = sol_time + dt
-        cons_results_save[:,:,iter] = cons_results
-        prim_results_save[:,:,iter] = prim_results    
+        print('Iteration: ' + str(iter+1))
+        cons_results_save[:,:,iter] = solver_functions.results_solver2user_converter(solver_param['cell_number'],[state['Q_cons']])[:,2:-2]
+        prim_results_save[:,:,iter] = solver_functions.results_solver2user_converter(solver_param['cell_number'],[state['Q_prim']])[:,2:-2]  
 
     end_time = time.time()
 
@@ -182,13 +94,28 @@ def driver(self):
 
     print(f"Elapsed time: {elapsed_time} seconds")
 
-    if rom_flag:
-        np.save( work_dir +"/ROM_cons.npy" ,cons_results_save)
-        np.save( work_dir +"/ROM_prim.npy" ,prim_results_save)
+    # prepare the name for the files to be saved
+    work_dir   = solver_param['working_dir']
 
-    else: 
-        np.save( work_dir +"/FOM_cons.npy" ,cons_results_save)
-        np.save( work_dir +"/FOM_prim.npy" ,prim_results_save)
+    if solver_param['solver_mode'] == 'FOM':
+
+        save_title = solver_param['solver_mode'] + ' ' + str(solver_param['num_step']) + ' ' + 'snapshots' + ' ' +solver_param['time_scheme'] 
+
+    elif solver_param['solver_mode'] == 'ROM' or solver_param['solver_mode'] == 'Adaptive ROM':
+
+        save_title = solver_param['solver_mode'] + ' ' + str(solver_param['num_step']) + ' ' + 'snapshots' + ' ' + solver_param['time_scheme'] + ' ' + solver_param['rom_method']
+
+        if solver_param['hyper'] == True:
+
+            save_title = save_title + '' + solver_param['sampling_method']
+
+    print('Saving resutls into working directory')
+
+    # save the results and end the simulation
+    np.save( work_dir + '/' +save_title + ' cons.npy' ,cons_results_save)
+    np.save( work_dir + '/' +save_title + ' prim.npy' ,prim_results_save)
+
+    print('Simulation successfully completed !')
 
 
 

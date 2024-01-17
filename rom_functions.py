@@ -1,11 +1,14 @@
+import time
 import numpy as np
 import scipy as sc
+import solver_functions
 import time_integrator_functions
 
-def precomputer(solver_param):
+def precomputer(solver_param,state):
 
-    training_data_path_cons = solver_param['working_dir'] + "/FOM_cons.npy"
-    training_data_path_prim = solver_param['working_dir'] + "/FOM_prim.npy"
+    print('Initializing the ROM mode!')
+    training_data_path_cons = solver_param['FOM_result_dir']
+    training_data_path_prim = training_data_path_cons.replace(' cons.npy',' prim.npy')
     POD_energy_limit   = 100-solver_param['pod_energy']
     training_data_cons = np.load(training_data_path_cons)
     training_data_prim = np.load(training_data_path_prim)
@@ -50,6 +53,8 @@ def precomputer(solver_param):
 
     print(f'to capture '+ str(solver_param['pod_energy']) +' percent of energy '+ str(truncation_indx[0][0])+ ' mode must be used')
 
+    time.sleep(1.5)
+
     norm_matrix_size = state_var_num * cell_num
 
     norm_matrix_diag = np.array([])
@@ -65,49 +70,92 @@ def precomputer(solver_param):
     # basis         = V[:,0:500]
     # basis         = V
     denormalizor    = norm_matrix
-    normalizor  = np.linalg.inv(denormalizor)
-    q_ref         = first_snapshot.ravel(order='C')
+    normalizor      = np.linalg.inv(denormalizor)
+    q_ref           = first_snapshot.ravel(order='C')
 
-    return basis , normalizor, denormalizor , q_ref , training_data_prim
+    print(str(len(basis[0,:])) + ' modes are going to be used in this simulation')
+
+    time.sleep(1.5)
+
+    rom_param     = {}
+
+    rom_param['basis']              = basis
+    rom_param['normalizor']         = normalizor
+    rom_param['denormalizor']       = denormalizor
+    rom_param['q_ref']              = q_ref
+    rom_param['training_data_prim'] = training_data_prim
+
+    Q_cons_solver = state['Q_cons']
+    Q_cons_user   = solver_functions.results_solver2user_converter(cell_num,Q_cons_solver)
+    Q_cons_interior_user = Q_cons_user[:,2:-2]
+    Q_cons_interior_solver = solver_functions.results_user2solver_converter(Q_cons_interior_user) 
+    rom_param['q_red0'] = basis.T @ Q_cons_interior_solver
+
+    num_consv_var = 3
+    
+    S_indx_user   = np.arange(0,solver_param['cell_number'])
+    pcc           = 0
+    S_indx_solver = user2solver_indx_converter(S_indx_user,num_consv_var,solver_param['cell_number'])
+
+    rom_param['S_indx_user']      = S_indx_user
+    rom_param['S_indx_solver']    = S_indx_solver
+    rom_param['hyper_precompute'] = pcc
+
+    return rom_param
 
 def hyper_precomputer(basis,S_indx_solver):
 
+
     pcc = basis @ np.linalg.pinv(basis[S_indx_solver,:])
+
 
     return pcc
 
-def order_reducer(solver_param,d_mass_dt,d_momx_dt,d_energy_dt,basis , normalizor, denormalizor , q_ref,q_red,pcc):
-
-    if solver_param['calc_rom'] and solver_param['hyper']: 
-
-        RES = np.vstack((d_mass_dt,d_momx_dt,d_energy_dt))
-        RES = RES.ravel(order='C')
-        RES = pcc @ RES
-
-    elif solver_param['calc_rom']: 
-
-        RES = np.vstack((d_mass_dt[2:-2],d_momx_dt[2:-2],d_energy_dt[2:-2]))
-        RES = RES.ravel(order='C')
-
-
-    dt       = solver_param['dt']
+def red2full_state_calculator(solver_param,rom_param,state):
 
     if solver_param['rom_method'] == 'Galerkin':
 
-        Q0_red           = q_red
+        state = solver_functions.residual_calculator(solver_param,rom_param,state)
+
+        if solver_param['hyper'] == False:
+
+            RES_solver       = state['d_flux_dx']
+            RES_user         = solver_functions.results_solver2user_converter(solver_param['cell_number'],RES_solver)
+            RES              = RES_user[:,2:-2].ravel()
+
+        else:
+            pcc              = rom_param['hyper_precompute']
+            RES_solver       = state['d_flux_dx']   
+            RES              = pcc @ RES_solver
+
+
+        Q0_red           = rom_param['q_red0']
+        q_ref            = rom_param['q_ref']
+        normalizor       = rom_param['normalizor']
+        denormalizor     = rom_param['denormalizor']
+        basis            = rom_param['basis']
+
         dQ_red_dt        = basis.T @ normalizor @ RES
-        Q_red            = time_integrator_functions.explicit_fd_euler(Q0_red , dQ_red_dt   , dt)
-        Q_full_order     = q_ref + (denormalizor @ basis @ Q_red) 
 
-    desired_shape        = [3,solver_param['cell_number']]
-    Q                    = Q_full_order.reshape(( desired_shape[0] , desired_shape[1]))
+        state['Q_cons']  = Q0_red
 
-    mass   = np.hstack(( Q[0,0], Q[0,0] , Q[0,:] , Q[0,-1] ,Q[0,-1] ))
-    momx   = np.hstack(( Q[1,0], Q[1,0] , Q[1,:] , Q[1,-1] ,Q[1,-1] ))
-    energy = np.hstack(( Q[2,0], Q[2,0] , Q[2,:] , Q[2,-1] ,Q[2,-1] ))
+        state['d_flux_dx']= dQ_red_dt
 
-    return mass, momx, energy , Q_red
+        state            = time_integrator_functions.advance_time(solver_param,state)
 
+        Q_red            = state['Q_cons']
+
+        Q_full_order_solver= q_ref + (denormalizor @ basis @ Q_red) 
+
+        Q_full_order_user  = solver_functions.results_solver2user_converter(solver_param['cell_number']-4,Q_full_order_solver)
+
+        Q_full_order_user  = np.column_stack((Q_full_order_user[:,0], Q_full_order_user[:,0], Q_full_order_user , Q_full_order_user[:,-1] , Q_full_order_user[:,-1]))
+
+        state['Q_cons']    = solver_functions.results_user2solver_converter(Q_full_order_user)
+
+        rom_param['q_red0']    = Q_red
+
+        return state
 
 def user2solver_indx_converter(S_indx_user,num_consv_var,num_cell):
 
@@ -150,6 +198,37 @@ def solver2user_indx_converter(S_indx_solver,num_cell):
     S_indx_user = S_indx_user.astype(int)
 
     return S_indx_user
+
+def sample_point_finder(solver_param,rom_param):
+
+    basis = rom_param['basis']
+
+    if solver_param['sampling_method'] == 'DEIM':
+
+            S_indx_user = DEIM_sample_point_finder(basis,solver_param['cell_number'])
+
+    elif solver_param['sampling_method'] == 'QDEIM':
+            
+            S_indx_user = QDEIM_sample_point_finder(basis,solver_param['cell_number'])
+
+    elif solver_param['sampling_method'] == 'Gappy POD + E':
+            
+            num_samples = 400
+
+            S_indx_user = GappyPODE_sample_point_finder(basis,num_samples,solver_param['cell_number'])
+    
+    num_consv_var  = 3
+
+    S_indx_solver = user2solver_indx_converter(S_indx_user,num_consv_var,solver_param['cell_number'])
+
+    pcc       = hyper_precomputer(basis,S_indx_solver)
+
+    rom_param['hyper_precompute'] = pcc
+    rom_param['S_indx_user']      = S_indx_user
+    rom_param['S_indx_solver']    = S_indx_solver
+
+    return rom_param
+
 
 def DEIM_sample_point_finder(basis,num_cell):
 

@@ -1,4 +1,5 @@
 import numpy as np
+import solver_functions
 
 def visual_var_collector(solver_param):
 
@@ -41,13 +42,20 @@ def visual_var_collector(solver_param):
 
     if solver_param['variable4'] == 'None':
         
-        visual_var4 = []             
+        visual_var4 = []
 
-    return visual_var1 , visual_var2 , visual_var3 , visual_var4
+    visual_param = {}
+
+    visual_param['visual_var1'] = visual_var1
+    visual_param['visual_var2'] = visual_var2
+    visual_param['visual_var3'] = visual_var3
+    visual_param['visual_var4'] = visual_var4
+
+    return visual_param
 
 
-def initial_plot(axs,hyper_flag):
-    plots = {}
+def initial_plot(axs,solver_param,visual_param):
+
     # Plot in the first subplot (top-left)
     plot11 , = axs[0, 0].plot([], [] , color = 'C0' ,linestyle='-'  , label = 'ROM')
     plot12 , = axs[0, 0].plot([], [] , color = 'C0' ,linestyle='--' , label = 'FOM')
@@ -72,59 +80,69 @@ def initial_plot(axs,hyper_flag):
 
     # axs[1, 1].set_title('var4')
 
-    plots['plot11'] = plot11 
-    plots['plot21'] = plot21 
-    plots['plot31'] = plot31 
-    plots['plot41'] = plot41
+    visual_param['plot11'] = plot11 
+    visual_param['plot21'] = plot21 
+    visual_param['plot31'] = plot31 
+    visual_param['plot41'] = plot41
 
-    plots['plot12'] = plot12 
-    plots['plot22'] = plot22 
-    plots['plot32'] = plot32 
-    plots['plot42'] = plot42 
+    visual_param['plot12'] = plot12 
+    visual_param['plot22'] = plot22 
+    visual_param['plot32'] = plot32 
+    visual_param['plot42'] = plot42 
 
-    if hyper_flag == True:
+    if solver_param['hyper'] == True:
 
         scatter1 = axs[0, 0].scatter([], [] , 7 ,color='black',marker='o',label='Sampling Points')
         scatter2 = axs[0, 1].scatter([], [] , 7 ,color='black',marker='o',label='Sampling Points') 
         scatter3 = axs[1, 0].scatter([], [] , 7 ,color='black',marker='o',label='Sampling Points')
         scatter4 = axs[1, 1].scatter([], [] , 7 ,color='black',marker='o',label='Sampling Points')
 
-        plots['scatter1'] = scatter1
-        plots['scatter2'] = scatter2
-        plots['scatter3'] = scatter3
-        plots['scatter4'] = scatter4
+        visual_param['scatter1'] = scatter1
+        visual_param['scatter2'] = scatter2
+        visual_param['scatter3'] = scatter3
+        visual_param['scatter4'] = scatter4
 
     
-    return plots
+    return visual_param
 
-def in_progress_plot(fig,axs,x,prim_results,plots,visual_var1,visual_var2,visual_var3,visual_var4,solver_param,iter,training_data_prim,rom_flag,hyper_flag,S_indx_user):
+def in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param):
+
+    prim_results = solver_functions.results_solver2user_converter(solver_param['cell_number'],state['Q_prim'])
+    training_data_prim = rom_param['training_data_prim']
+
+    x = solver_param['x']
+
+    visual_var1 = visual_param['visual_var1'] 
+    visual_var2 = visual_param['visual_var2'] 
+    visual_var3 = visual_param['visual_var3'] 
+    visual_var4 = visual_param['visual_var4'] 
     
 
-    y11= prim_results[visual_var1,:]
-    y21= prim_results[visual_var2,:]
-    y31= prim_results[visual_var3,:]
-    y41= prim_results[visual_var4,:]
+    y11= prim_results[visual_var1,2:-2]
+    y21= prim_results[visual_var2,2:-2]
+    y31= prim_results[visual_var3,2:-2]
+    y41= prim_results[visual_var4,2:-2]
 
     if y11.size == 0 : 
 
-        y11 = 0 * prim_results[0,:]
+        y11 = 0 * prim_results[0,2:-2]
 
     if y21.size == 0 : 
 
-        y21 = 0 * prim_results[0,:]
+        y21 = 0 * prim_results[0,2:-2]
 
     if y31.size == 0 : 
 
-        y31 = 0 * prim_results[0,:]
+        y31 = 0 * prim_results[0,2:-2]
 
     if y41.size == 0 : 
 
-        y41 = 0 * prim_results[0,:]
+        y41 = 0 * prim_results[0,2:-2]
 
-    plot11 = plots['plot11']
-    plot21 = plots['plot21']
-    plot31 = plots['plot31']
-    plot41 = plots['plot41']
+    plot11 = visual_param['plot11']
+    plot21 = visual_param['plot21']
+    plot31 = visual_param['plot31']
+    plot41 = visual_param['plot41']
 
     plot11.set_data(x,y11)
     plot21.set_data(x,y21)
@@ -137,10 +155,10 @@ def in_progress_plot(fig,axs,x,prim_results,plots,visual_var1,visual_var2,visual
     axs[1,1].set_ylim(min(y41,default=0)*0.0099 , max(y41,default=0)*1.1)
 
     
-    # axs[0,0].set_ylim(0 , 6)
-    # axs[0,1].set_ylim(970000 , 987500)
-    # axs[1,0].set_ylim(0 , 8)
-    # axs[1,1].set_ylim(min(y4,default=0)*0.0099 , max(y4,default=0)*1.001)
+    # # axs[0,0].set_ylim(0 , 6)
+    # # axs[0,1].set_ylim(970000 , 987500)
+    # # axs[1,0].set_ylim(0 , 8)
+    # # axs[1,1].set_ylim(min(y4,default=0)*0.0099 , max(y4,default=0)*1.001)
 
     axs[0,0].set_xlim( 0 , x[-2]*1.05)
     axs[0,1].set_xlim( 0 , x[-2]*1.05)
@@ -152,9 +170,7 @@ def in_progress_plot(fig,axs,x,prim_results,plots,visual_var1,visual_var2,visual
     axs[1,0].set_ylabel(solver_param['variable3'])
     axs[1,1].set_ylabel(solver_param['variable4'])
 
-
-
-    if rom_flag == True :
+    if solver_param['solver_mode'] == 'ROM' :
 
         y12= training_data_prim[visual_var1,:,iter]
         y22= training_data_prim[visual_var2,:,iter]
@@ -163,24 +179,24 @@ def in_progress_plot(fig,axs,x,prim_results,plots,visual_var1,visual_var2,visual
 
         if y12.size == 0 : 
 
-            y12 = 0 * prim_results[0,:]
+            y12 = 0 * training_data_prim[0,:,0]
 
         if y22.size == 0 : 
 
-            y22 = 0 * prim_results[0,:]
+            y22 = 0 * training_data_prim[0,:,0]
 
         if y32.size == 0 : 
 
-            y32 = 0 * prim_results[0,:]
+            y32 = 0 * training_data_prim[0,:,0]
 
         if y42.size == 0 : 
 
-            y42 = 0 * prim_results[0,:]
+            y42 = 0 * training_data_prim[0,:,0]
 
-        plot12 = plots['plot12']
-        plot22 = plots['plot22']
-        plot32 = plots['plot32']
-        plot42 = plots['plot42']
+        plot12 = visual_param['plot12']
+        plot22 = visual_param['plot22']
+        plot32 = visual_param['plot32']
+        plot42 = visual_param['plot42']
 
         plot12.set_data(x,y12)
         plot22.set_data(x,y22)
@@ -192,12 +208,14 @@ def in_progress_plot(fig,axs,x,prim_results,plots,visual_var1,visual_var2,visual
         axs[1,0].legend()
         axs[1,1].legend()
 
-    if hyper_flag == True:
+    if solver_param['hyper'] == True:
 
-        scatter1 = plots['scatter1']
-        scatter2 = plots['scatter2']
-        scatter3 = plots['scatter3']
-        scatter4 = plots['scatter4']
+        S_indx_user = rom_param['S_indx_user']
+
+        scatter1 = visual_param['scatter1']
+        scatter2 = visual_param['scatter2']
+        scatter3 = visual_param['scatter3']
+        scatter4 = visual_param['scatter4']
 
         scatter1.set_offsets(np.column_stack((x[S_indx_user], y11[S_indx_user])))
         scatter2.set_offsets(np.column_stack((x[S_indx_user], y21[S_indx_user])))
@@ -205,7 +223,7 @@ def in_progress_plot(fig,axs,x,prim_results,plots,visual_var1,visual_var2,visual
         scatter4.set_offsets(np.column_stack((x[S_indx_user], y41[S_indx_user])))
 
 
-    if iter % 500 == 0:
+    if iter % solver_param['vis_update_interval'] == 0:
 
         fig.canvas.draw()
         fig.canvas.flush_events()

@@ -21,9 +21,9 @@ class UI(customtkinter.CTk):
         super().__init__()
 
         customtkinter.set_appearance_mode("Dark")      # Modes: system (default), light, dark
-        customtkinter.set_default_color_theme("blue")  # Themes: blue (default), dark-blue, green
+        customtkinter.set_default_color_theme("dark-blue")  # Themes: blue (default), dark-blue, green
 
-        self.window_width = 1360
+        self.window_width = 1280
         self.window_length= 720
 
         self.screen_width  = self.winfo_screenwidth()
@@ -60,15 +60,71 @@ class UI(customtkinter.CTk):
         self.home_frame.grid_columnconfigure(1, weight=1)
 
         self.set_up_frame = customtkinter.CTkFrame(self, corner_radius=0)
-        self.set_up_frame.grid_columnconfigure(4,weight=1)
+        self.set_up_frame.grid_rowconfigure(15,weight=1)
+        self.set_up_frame.grid_columnconfigure(10,weight=1)
 
         self.results_page_frame = customtkinter.CTkFrame(self, corner_radius=0)
         self.results_page_frame.grid_columnconfigure(1, weight=1)
 
+
+        ######################   Solver Mode   ######################
+
+        self.solver_mode_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
+        self.solver_mode_frame.grid(row=0,column=0,columnspan = 3 , rowspan = 6 , pady=10,padx=10,sticky='new')
+
+        self.solver_mode_group_label = customtkinter.CTkLabel(self.solver_mode_frame,text="Solver Mode" )
+        self.solver_mode_group_label.grid(row=0 , column= 0 , columnspan = 3 )
+
+        self.fom_mode_checkbox_check_var = customtkinter.BooleanVar(value=1)
+        self.fom_mode_checkbox = customtkinter.CTkCheckBox(self.solver_mode_frame , text='FOM', variable=self.fom_mode_checkbox_check_var , 
+                                                           command=lambda: self.solver_mode_checkbox_callback('FOM'))
+        self.fom_mode_checkbox.grid(row=1,column=0,padx=5, pady=10)
+
+        self.rom_mode_checkbox_check_var = customtkinter.BooleanVar()
+        self.rom_mode_checkbox = customtkinter.CTkCheckBox(self.solver_mode_frame , text='ROM', variable=self.rom_mode_checkbox_check_var , 
+                                                           command=lambda: self.solver_mode_checkbox_callback(option='ROM'))
+        self.rom_mode_checkbox.grid(row=1,column=1,padx=5, pady=10)
+
+        self.adaptive_rom_mode_checkbox_check_var = customtkinter.BooleanVar()
+        self.adaptive_rom_mode_checkbox = customtkinter.CTkCheckBox(self.solver_mode_frame , text='Adaptive ROM', variable=self.adaptive_rom_mode_checkbox_check_var , 
+                                                                    command=lambda: self.solver_mode_checkbox_callback(option='Adaptive ROM'))
+        self.adaptive_rom_mode_checkbox.grid(row=1,column=2,padx=5, pady=10)
+
+        self.rom_method_label = customtkinter.CTkLabel(self.solver_mode_frame , text='ROM Method')
+        self.rom_method_label.grid(row=2,column=0,padx=5, pady=10)
+        
+        self.rom_method_entry_var = customtkinter.StringVar()
+        self.rom_method_options = ['Galerkin','LSPG']
+        self.rom_method = customtkinter.CTkOptionMenu(self.solver_mode_frame , values=self.rom_method_options , state='disabled' , variable=self.rom_method_entry_var)
+        self.rom_method.grid(row=2,column=1,padx=5, pady=10)
+
+        self.energy_capture_label = customtkinter.CTkLabel(self.solver_mode_frame , text='POD Energy Capture')
+        self.energy_capture_label.grid(row=4,column=0,padx=5, pady=10)
+        
+        self.energy_capture_entry_var = customtkinter.StringVar()
+        self.energy_capture = customtkinter.CTkEntry(self.solver_mode_frame , textvariable=self.energy_capture_entry_var , state='disabled')
+        self.energy_capture.grid(row=4,column=1,padx=5, pady=10)
+
+        self.hyper_method_checkbox_check_var = customtkinter.BooleanVar()
+        self.hyper_method_checkbox = customtkinter.CTkCheckBox(self.solver_mode_frame , text='Hyper-Reduction', state='disabled' ,variable=self.hyper_method_checkbox_check_var)
+        self.hyper_method_checkbox.grid(row=5,column=0,padx=5, pady=10)
+
+        self.hyper_method_entry_var = customtkinter.StringVar()
+        self.hyper_method_options = ['DEIM','QDEIM','Gappy POD','Gappy POD + E']
+        self.hyper_method = customtkinter.CTkOptionMenu(self.solver_mode_frame , values=self.hyper_method_options ,state='disabled',variable=self.hyper_method_entry_var)
+        self.hyper_method.grid(row=5,column=1,padx=5, pady=10)
+
+        self.training_window_label = customtkinter.CTkLabel(self.solver_mode_frame , text='Initial Training Window')
+        self.training_window_label.grid(row=6,column=0,padx=5, pady=10)
+        
+        self.training_window_entry_var = customtkinter.StringVar()
+        self.training_window = customtkinter.CTkEntry(self.solver_mode_frame , textvariable=self.training_window_entry_var , state='disabled')
+        self.training_window.grid(row=6,column=1,padx=5, pady=10)
+
         ######################   Time Descrtization   ######################
 
         self.time_descritization_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
-        self.time_descritization_frame.grid(row=0,column=0,padx=10,pady=10,sticky='new')
+        self.time_descritization_frame.grid(row=0,column=3,padx=10,pady=10,columnspan = 2 , rowspan = 6 , sticky='new')
 
         self.time_descritization_group_label = customtkinter.CTkLabel(self.time_descritization_frame,text="Time Discretization" )
         self.time_descritization_group_label.grid(row=0 , column= 0 , columnspan = 2 )
@@ -111,10 +167,10 @@ class UI(customtkinter.CTk):
         self.res_tol = customtkinter.CTkEntry(self.time_descritization_frame,textvariable=self.res_tol_entry_var)
         self.res_tol.grid(row=5,column=1,padx=15,pady=10)
 
-        ######################   Space Descrtization   ######################
+        #####################   Space Descrtization   ######################
 
         self.space_descritization_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
-        self.space_descritization_frame.grid(row=1,column=0,padx=10,pady=10 , sticky = 'new')
+        self.space_descritization_frame.grid(row=6,column=3,padx=10,pady=10, columnspan=2 , rowspan=4 , sticky = 'new')
 
         self.space_descritization_group_label = customtkinter.CTkLabel(self.space_descritization_frame,text="Space Discretization")
         self.space_descritization_group_label.grid(row=0 , column= 0 , columnspan = 2) 
@@ -141,148 +197,128 @@ class UI(customtkinter.CTk):
         self.cell_number = customtkinter.CTkEntry(self.space_descritization_frame , textvariable=self.cell_number_entry_var)
         self.cell_number.grid(row=3,column=1,padx=25, pady=10)
 
-        ######################   Inet BC   ######################
+        #####################   Inet BC   ######################
 
-        self.inlet_bc_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
-        self.inlet_bc_frame.grid(row=0,column=1,padx=10,pady=10 , sticky = 'new')
+        # self.inlet_bc_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
+        # self.inlet_bc_frame.grid(row=1,column=1,padx=10,pady=10 , sticky = 'new')
 
-        self.inlet_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Inlet Boundary Condition')
-        self.inlet_label.grid(row=0,column=0,columnspan = 2)
+        # self.inlet_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Inlet Boundary Condition')
+        # self.inlet_label.grid(row=0,column=0,columnspan = 2)
 
-        self.inlet_press_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Pressure')
-        self.inlet_press_label.grid(row=1,column=0,padx=15,pady=10) 
+        # self.inlet_press_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Pressure')
+        # self.inlet_press_label.grid(row=1,column=0,padx=15,pady=10) 
 
-        self.inlet_press_entry_var = customtkinter.StringVar()
-        self.inlet_press = customtkinter.CTkEntry(self.inlet_bc_frame , textvariable=self.inlet_press_entry_var)
-        self.inlet_press.grid(row=1,column=1,padx=15,pady=10) 
+        # self.inlet_press_entry_var = customtkinter.StringVar()
+        # self.inlet_press = customtkinter.CTkEntry(self.inlet_bc_frame , textvariable=self.inlet_press_entry_var)
+        # self.inlet_press.grid(row=1,column=1,padx=15,pady=10) 
 
-        self.inlet_temp_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Temperature')
-        self.inlet_temp_label.grid(row=2,column=0,padx=15,pady=10)  
+        # self.inlet_temp_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Temperature')
+        # self.inlet_temp_label.grid(row=2,column=0,padx=15,pady=10)  
 
-        self.inlet_temp_entry_var = customtkinter.StringVar()
-        self.inlet_temp = customtkinter.CTkEntry(self.inlet_bc_frame,textvariable=self.inlet_temp_entry_var)
-        self.inlet_temp.grid(row=2,column=1,padx=15,pady=10) 
+        # self.inlet_temp_entry_var = customtkinter.StringVar()
+        # self.inlet_temp = customtkinter.CTkEntry(self.inlet_bc_frame,textvariable=self.inlet_temp_entry_var)
+        # self.inlet_temp.grid(row=2,column=1,padx=15,pady=10) 
 
-        self.inlet_vel_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Velocity')
-        self.inlet_vel_label.grid(row=3,column=0,padx=15,pady=10) 
+        # self.inlet_vel_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Velocity')
+        # self.inlet_vel_label.grid(row=3,column=0,padx=15,pady=10) 
 
-        self.inlet_vel_entry_var = customtkinter.StringVar()
-        self.inlet_vel = customtkinter.CTkEntry(self.inlet_bc_frame , textvariable=self.inlet_vel_entry_var)
-        self.inlet_vel.grid(row=3,column=1,padx=15,pady=10) 
+        # self.inlet_vel_entry_var = customtkinter.StringVar()
+        # self.inlet_vel = customtkinter.CTkEntry(self.inlet_bc_frame , textvariable=self.inlet_vel_entry_var)
+        # self.inlet_vel.grid(row=3,column=1,padx=15,pady=10) 
 
-        self.inlet_rho_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Density')
-        self.inlet_rho_label.grid(row=4,column=0,padx=15,pady=10) 
+        # self.inlet_rho_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Density')
+        # self.inlet_rho_label.grid(row=4,column=0,padx=15,pady=10) 
 
-        self.inlet_rho_entry_var = customtkinter.StringVar()
-        self.inlet_rho = customtkinter.CTkEntry(self.inlet_bc_frame,textvariable=self.inlet_rho_entry_var)
-        self.inlet_rho.grid(row=4,column=1,padx=15,pady=10) 
+        # self.inlet_rho_entry_var = customtkinter.StringVar()
+        # self.inlet_rho = customtkinter.CTkEntry(self.inlet_bc_frame,textvariable=self.inlet_rho_entry_var)
+        # self.inlet_rho.grid(row=4,column=1,padx=15,pady=10) 
 
-        self.inlet_mass_frac_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Mass Fraction')
-        self.inlet_mass_frac_label.grid(row=5,column=0,padx=15,pady=10) 
+        # self.inlet_mass_frac_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Mass Fraction')
+        # self.inlet_mass_frac_label.grid(row=5,column=0,padx=15,pady=10) 
 
-        self.inlet_mass_frac_entry_var = customtkinter.StringVar()
-        self.inlet_mass_frac = customtkinter.CTkEntry(self.inlet_bc_frame,textvariable=self.inlet_mass_frac_entry_var)
-        self.inlet_mass_frac.grid(row=5,column=1,padx=15,pady=10) 
+        # self.inlet_mass_frac_entry_var = customtkinter.StringVar()
+        # self.inlet_mass_frac = customtkinter.CTkEntry(self.inlet_bc_frame,textvariable=self.inlet_mass_frac_entry_var)
+        # self.inlet_mass_frac.grid(row=5,column=1,padx=15,pady=10) 
 
-        ######################   Outlet BC   ######################
+        # ######################   Outlet BC   ######################
 
-        self.outlet_bc_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
-        self.outlet_bc_frame.grid(row=0,column=2,padx=10,pady=10 , sticky = 'new')
+        # self.outlet_bc_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
+        # self.outlet_bc_frame.grid(row=1,column=2,padx=10,pady=10 , sticky = 'new')
 
-        self.outlet_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Outlet Boundary Condition')
-        self.outlet_label.grid(row=0,column=0,columnspan = 2)
+        # self.outlet_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Outlet Boundary Condition')
+        # self.outlet_label.grid(row=0,column=0,columnspan = 2)
 
-        self.outlet_press_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Pressure')
-        self.outlet_press_label.grid(row=1,column=0,padx=15,pady=10) 
+        # self.outlet_press_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Pressure')
+        # self.outlet_press_label.grid(row=1,column=0,padx=15,pady=10) 
 
-        self.outlet_press_entry_var = customtkinter.StringVar()
-        self.outlet_press = customtkinter.CTkEntry(self.outlet_bc_frame,textvariable=self.outlet_press_entry_var)
-        self.outlet_press.grid(row=1,column=1,padx=15,pady=10) 
+        # self.outlet_press_entry_var = customtkinter.StringVar()
+        # self.outlet_press = customtkinter.CTkEntry(self.outlet_bc_frame,textvariable=self.outlet_press_entry_var)
+        # self.outlet_press.grid(row=1,column=1,padx=15,pady=10) 
 
-        self.outlet_temp_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Temperature')
-        self.outlet_temp_label.grid(row=2,column=0,padx=15,pady=10)  
+        # self.outlet_temp_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Temperature')
+        # self.outlet_temp_label.grid(row=2,column=0,padx=15,pady=10)  
 
-        self.outlet_temp_entry_var = customtkinter.StringVar()
-        self.outlet_temp = customtkinter.CTkEntry(self.outlet_bc_frame,textvariable=self.outlet_temp_entry_var)
-        self.outlet_temp.grid(row=2,column=1,padx=15,pady=10) 
+        # self.outlet_temp_entry_var = customtkinter.StringVar()
+        # self.outlet_temp = customtkinter.CTkEntry(self.outlet_bc_frame,textvariable=self.outlet_temp_entry_var)
+        # self.outlet_temp.grid(row=2,column=1,padx=15,pady=10) 
 
-        self.outlet_vel_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Velocity')
-        self.outlet_vel_label.grid(row=3,column=0,padx=15,pady=10) 
+        # self.outlet_vel_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Velocity')
+        # self.outlet_vel_label.grid(row=3,column=0,padx=15,pady=10) 
 
-        self.outlet_vel_entry_var = customtkinter.StringVar()
-        self.outlet_vel = customtkinter.CTkEntry(self.outlet_bc_frame,textvariable=self.outlet_vel_entry_var)
-        self.outlet_vel.grid(row=3,column=1,padx=15,pady=10) 
+        # self.outlet_vel_entry_var = customtkinter.StringVar()
+        # self.outlet_vel = customtkinter.CTkEntry(self.outlet_bc_frame,textvariable=self.outlet_vel_entry_var)
+        # self.outlet_vel.grid(row=3,column=1,padx=15,pady=10) 
 
-        self.outlet_rho_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Density')
-        self.outlet_rho_label.grid(row=4,column=0,padx=15,pady=10) 
+        # self.outlet_rho_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Density')
+        # self.outlet_rho_label.grid(row=4,column=0,padx=15,pady=10) 
 
-        self.outlet_rho_entry_var = customtkinter.StringVar()
-        self.outlet_rho = customtkinter.CTkEntry(self.outlet_bc_frame,textvariable=self.outlet_rho_entry_var)
-        self.outlet_rho.grid(row=4,column=1,padx=15,pady=10) 
+        # self.outlet_rho_entry_var = customtkinter.StringVar()
+        # self.outlet_rho = customtkinter.CTkEntry(self.outlet_bc_frame,textvariable=self.outlet_rho_entry_var)
+        # self.outlet_rho.grid(row=4,column=1,padx=15,pady=10) 
 
-        self.outlet_mass_frac_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Mass Fraction')
-        self.outlet_mass_frac_label.grid(row=5,column=0,padx=15,pady=10) 
+        # self.outlet_mass_frac_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Mass Fraction')
+        # self.outlet_mass_frac_label.grid(row=5,column=0,padx=15,pady=10) 
 
-        self.outlet_mass_frac_entry_var = customtkinter.StringVar()
-        self.outlet_mass_frac = customtkinter.CTkEntry(self.outlet_bc_frame,textvariable=self.outlet_mass_frac_entry_var)
-        self.outlet_mass_frac.grid(row=5,column=1,padx=15,pady=10)
+        # self.outlet_mass_frac_entry_var = customtkinter.StringVar()
+        # self.outlet_mass_frac = customtkinter.CTkEntry(self.outlet_bc_frame,textvariable=self.outlet_mass_frac_entry_var)
+        # self.outlet_mass_frac.grid(row=5,column=1,padx=15,pady=10)
 
-        ######################   Gas Model   ######################
+        #####################   Gas Model   ######################
         
-        self.misc_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
-        self.misc_frame.grid(row=1,column=1,padx=10,pady=10 , sticky = 'new')
+        self.physics_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
+        self.physics_frame.grid(row=6,column=0 , columnspan = 3 , pady=10,padx=10,sticky='nsew')
 
-        self.misc_label = customtkinter.CTkLabel(self.misc_frame,text="Gas Model")
-        self.misc_label.grid(row=0 , column= 0 , columnspan = 2) 
+        self.gas_model_frame_label = customtkinter.CTkLabel(self.physics_frame,text="Physics")
+        self.gas_model_frame_label.grid(row=0 , column= 0 , columnspan = 4) 
 
-        self.gas_model_label = customtkinter.CTkLabel(self.misc_frame , text='Gas Model')
-        self.gas_model_label.grid(row=1,column=0,padx=25, pady=10)
+        self.gas_model_label = customtkinter.CTkLabel(self.physics_frame , text='Gas Model')
+        self.gas_model_label.grid(row=1 , column=0)
 
         self.gas_model_entry_var = customtkinter.StringVar()
         self.gas_model_options = ['Ideal Gas Model']
-        self.gas_model = customtkinter.CTkOptionMenu(self.misc_frame , values=self.gas_model_options)
-        self.gas_model.grid(row=1,column=1,padx=15, pady=10)
-        
-        ######################   ROM   ######################
+        self.gas_model = customtkinter.CTkOptionMenu(self.physics_frame , values=self.gas_model_options)
+        self.gas_model.grid(row=1,column=1 , padx = 5 , pady = 10)
 
-        self.rom_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
-        self.rom_frame.grid(row=1,column=2,padx=10,pady=10 , sticky = 'new')
+        self.flux_scheme_label = customtkinter.CTkLabel(self.physics_frame , text='Flux Scheme')
+        self.flux_scheme_label.grid(row=2 , column=0)
 
-        self.misc_label = customtkinter.CTkLabel(self.rom_frame,text="Reduced Order Modeling (ROM)")
-        self.misc_label.grid(row=0 , column= 0 , columnspan = 2)
+        self.flux_scheme_entry_var = customtkinter.StringVar()
+        self.flux_scheme_options = ['Roe','Rusanov']
+        self.flux_scheme = customtkinter.CTkOptionMenu(self.physics_frame , values=self.flux_scheme_options , variable=self.flux_scheme_entry_var)
+        self.flux_scheme.grid(row=2,column=1 , padx = 15 , pady = 10)
 
-        self.rom_method_checkbox_check_var = customtkinter.BooleanVar()
-        self.rom_method_checkbox = customtkinter.CTkCheckBox(self.rom_frame , text='Enable ROM', variable=self.rom_method_checkbox_check_var ,command=self.ROM_checkbox_callback)
-        self.rom_method_checkbox.grid(row=1,column=0,padx=5, pady=10)
-        
-        self.rom_method_entry_var = customtkinter.StringVar()
-        self.rom_method_options = ['Galerkin','LSPG']
-        self.rom_method = customtkinter.CTkOptionMenu(self.rom_frame , values=self.rom_method_options , state='disabled')
-        self.rom_method.grid(row=1,column=1,padx=5, pady=10)
 
-        self.energy_capture_label = customtkinter.CTkLabel(self.rom_frame , text='POD Energy Capture')
-        self.energy_capture_label.grid(row=3,column=0,padx=5, pady=10)
-        
-        self.energy_capture_entry_var = customtkinter.StringVar()
-        self.energy_capture = customtkinter.CTkEntry(self.rom_frame , textvariable=self.energy_capture_entry_var , state='disabled')
-        self.energy_capture.grid(row=3,column=1,padx=5, pady=10)
+        self.limiter_checkbox_check_var = customtkinter.BooleanVar()
+        self.limiter_checkbox = customtkinter.CTkCheckBox(self.physics_frame , text='Limiter',variable=self.limiter_checkbox_check_var)
+        self.limiter_checkbox.grid(row=1,column=2,columnspan = 2 ,rowspan = 2,padx=5, pady=10)             
 
-        self.hyper_method_checkbox_check_var = customtkinter.BooleanVar()
-        self.hyper_method_checkbox = customtkinter.CTkCheckBox(self.rom_frame , text='Hyper-Reduction', variable=self.hyper_method_checkbox_check_var , command=self.hyper_checkbox_callback)
-        self.hyper_method_checkbox.grid(row=4,column=0,padx=5, pady=10)
-
-        self.hyper_method_entry_var = customtkinter.StringVar()
-        self.hyper_method_options = ['Gappy POD']
-        self.hyper_method = customtkinter.CTkOptionMenu(self.rom_frame , values=self.hyper_method_options ,state='disabled')
-        self.hyper_method.grid(row=4,column=1,padx=5, pady=10)        
-
-        ######################   Input File  ######################
+        # ######################   Input File  ######################
 
         self.input_file_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
         self.input_file_frame.grid_columnconfigure(0,weight=1)
-        self.input_file_frame.grid_columnconfigure(1,weight=5)
+        self.input_file_frame.grid_columnconfigure(1,weight=6)
         self.input_file_frame.grid_columnconfigure(2,weight=1)
-        self.input_file_frame.grid(row=2,column=0,columnspan=3,pady=10 , sticky = 'new')
+        self.input_file_frame.grid(row=10,column=0,columnspan=8,pady=10 , sticky = 'new')
         
         self.working_dir_label = customtkinter.CTkLabel(self.input_file_frame , text='Working Directory')
         self.working_dir_label.grid(row=0,column=0,pady=10)
@@ -317,10 +353,10 @@ class UI(customtkinter.CTk):
         ######################  Visualization  ######################
 
         self.visual_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
-        self.visual_frame.grid(row=0,column=3,padx=10,pady=10 , sticky = 'new')
+        self.visual_frame.grid(row=0,column=5,padx=10,pady=10 , sticky = 'new')
 
         self.visual_label = customtkinter.CTkLabel(self.visual_frame , text='Visualization')
-        self.visual_label.grid(row=0,column=0,pady=10,columnspan=2)
+        self.visual_label.grid(row=0,column=0,columnspan=2)
 
         self.visual_options = ['None','Density','Pressure','Temprature','Velocity','Heat Release','Mass Fraction']
 
@@ -329,45 +365,52 @@ class UI(customtkinter.CTk):
 
         self.visual_1_option_entry_var=customtkinter.StringVar(value=self.visual_options[0])
         self.visual_1_option = customtkinter.CTkOptionMenu(self.visual_frame , values=self.visual_options , variable=self.visual_1_option_entry_var)
-        self.visual_1_option.grid(row=1,column=1,padx=5, pady=10)
+        self.visual_1_option.grid(row=1,column=1,padx=15,pady=10)
 
         self.visual_2_option_label = customtkinter.CTkLabel(self.visual_frame , text='Variable #2')
         self.visual_2_option_label.grid(row=2,column=0,padx=15,pady=10)
 
         self.visual_2_option_entry_var=customtkinter.StringVar(value=self.visual_options[0])
         self.visual_2_option = customtkinter.CTkOptionMenu(self.visual_frame , values=self.visual_options , variable=self.visual_2_option_entry_var)
-        self.visual_2_option.grid(row=2,column=1,padx=5, pady=10)
+        self.visual_2_option.grid(row=2,column=1,padx=15,pady=10)
 
         self.visual_3_option_label = customtkinter.CTkLabel(self.visual_frame , text='Variable #3')
         self.visual_3_option_label.grid(row=3,column=0,padx=15,pady=10)
 
         self.visual_3_option_entry_var=customtkinter.StringVar(value=self.visual_options[0])
         self.visual_3_option = customtkinter.CTkOptionMenu(self.visual_frame , values=self.visual_options , variable=self.visual_3_option_entry_var)
-        self.visual_3_option.grid(row=3,column=1,padx=5, pady=10)
+        self.visual_3_option.grid(row=3,column=1,padx=15,pady=10)
 
         self.visual_4_option_label = customtkinter.CTkLabel(self.visual_frame , text='Variable #4')
         self.visual_4_option_label.grid(row=4,column=0,padx=15,pady=10)
 
         self.visual_4_option_entry_var=customtkinter.StringVar(value=self.visual_options[0])
         self.visual_4_option = customtkinter.CTkOptionMenu(self.visual_frame , values=self.visual_options , variable=self.visual_4_option_entry_var)
-        self.visual_4_option.grid(row=4,column=1,padx=5, pady=10)                
+        self.visual_4_option.grid(row=4,column=1,padx=15, pady=10)
 
-        ######################  IC  ######################
+        self.visual_update_interval_label = customtkinter.CTkLabel(self.visual_frame , text='Update Interval')
+        self.visual_update_interval_label.grid(row=5,column=0,padx=15,pady=10)
 
-        self.ic_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
-        self.ic_frame.grid(row=1,column=3,padx=10,pady=10 , sticky = 'new')
-        self.ic_frame.columnconfigure(0,weight=1)
+        self.visual_update_interval_entry_var=customtkinter.StringVar()
+        self.visual_update_interval = customtkinter.CTkEntry(self.visual_frame , textvariable=self.visual_update_interval_entry_var)
+        self.visual_update_interval.grid(row=5,column=1,padx=15, pady=10)                  
 
-        self.ic_label = customtkinter.CTkLabel(self.ic_frame , text='Initial Conditions')
-        self.ic_label.grid(row=0,column=0,pady=10)
+        # ######################  IC  ######################
 
-        self.ic_listbox = customtkinter.CTkButton(self.ic_frame,text='Configure IC',command=self.IC_conf)
-        self.ic_listbox.grid(row=1,column=0,padx=10,pady=10,sticky='ew')
+        # self.ic_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
+        # self.ic_frame.grid(row=1,column=3,padx=10,pady=10 , sticky = 'new')
+        # self.ic_frame.columnconfigure(0,weight=1)
+
+        # self.ic_label = customtkinter.CTkLabel(self.ic_frame , text='Initial Conditions')
+        # self.ic_label.grid(row=0,column=0,pady=10)
+
+        # self.ic_listbox = customtkinter.CTkButton(self.ic_frame,text='Configure IC',command=self.IC_conf)
+        # self.ic_listbox.grid(row=1,column=0,padx=10,pady=10,sticky='ew')
 
         ######################  RUN  ######################
 
         self.run_button = customtkinter.CTkButton(self.set_up_frame , text='RUN !',font=customtkinter.CTkFont(size=30),command=self.run_callback)
-        self.run_button.grid(row=3,column=1,columnspan=2,pady=20,sticky='news')
+        self.run_button.grid(row=13,column=3,columnspan = 2 ,pady=20,sticky='news')
 
         # self.home_button_callback()
         self.setup_button_callback()
@@ -421,32 +464,57 @@ class UI(customtkinter.CTk):
             self.res_tol.configure(state='normal')
 
         
-    def ROM_checkbox_callback(self):
+    def solver_mode_checkbox_callback(self,option):
 
-        if self.rom_method_checkbox_check_var.get() == True :
+        if option == 'FOM':
 
-            self.rom_method.configure(state = 'normal')
-            self.energy_capture.configure(state = 'normal')
-            self.FOM_file.configure(state = 'normal')
-            self.FOM_file_button.configure(state = 'normal')
-
-        else: 
+            self.fom_mode_checkbox_check_var.set(1)
+            self.rom_mode_checkbox_check_var.set(0)
+            self.adaptive_rom_mode_checkbox_check_var.set(0)
 
             self.rom_method.configure(state = 'disabled')
             self.energy_capture.configure(state = 'disabled')
+            self.hyper_method_checkbox.configure(state = 'disabled')
+            self.hyper_method_checkbox_check_var.set(0)
+            self.hyper_method.configure(state = 'disabled')
             self.FOM_file.configure(state = 'disabled')
             self.FOM_file_button.configure(state = 'disabled')
+            self.training_window.delete(0, customtkinter.END)
+            self.training_window.configure(state = 'disabled')
 
+            
 
-    def hyper_checkbox_callback(self):
+        if option == 'ROM':
 
-        if self.hyper_method_checkbox_check_var.get() == True :
+            self.rom_mode_checkbox_check_var.set(1)
+            self.fom_mode_checkbox_check_var.set(0)
+            self.adaptive_rom_mode_checkbox_check_var.set(0)
 
+            self.rom_method.configure(state = 'normal')
+            self.energy_capture.configure(state = 'normal')
+            self.hyper_method_checkbox.configure(state = 'normal')
             self.hyper_method.configure(state = 'normal')
+            self.FOM_file.configure(state = 'normal')
+            self.FOM_file_button.configure(state = 'normal')
+            self.training_window.delete(0, customtkinter.END)
+            self.training_window.configure(state = 'disabled')
+            
 
-        else: 
+        if option == 'Adaptive ROM':
 
-            self.hyper_method.configure(state = 'disabled')    
+            self.adaptive_rom_mode_checkbox_check_var.set(1)
+            self.fom_mode_checkbox_check_var.set(0)
+            self.rom_mode_checkbox_check_var.set(0)
+
+            self.rom_method.configure(state = 'normal')
+            self.energy_capture.configure(state = 'disabled')
+            self.hyper_method_checkbox.configure(state = 'disabled')
+            self.hyper_method_checkbox_check_var.set(1)
+            self.hyper_method.configure(state = 'normal')
+            self.FOM_file.configure(state = 'disabled')
+            self.FOM_file_button.configure(state = 'disabled')
+            self.training_window.configure(state = 'normal')            
+
     
     def working_dir_callback(self):
 
@@ -596,15 +664,29 @@ class UI(customtkinter.CTk):
 
                     self.gas_model_entry_var.set(self.gas_model_options[0])
 
-            if variable == 'calc_rom':
+            if variable == 'flux_scheme':
 
-                if parameters['calc_rom'] == 'false':
+                if parameters['flux_scheme'] == 'roe':
 
-                    self.rom_method_checkbox_check_var.set(False)
+                    self.flux_scheme_entry_var.set(self.flux_scheme_options[0])
+                    
+                elif parameters['flux_scheme'] == 'rusanov':
 
-                elif parameters['calc_rom'] == 'true':
+                    self.flux_scheme_entry_var.set(self.flux_scheme_options[1])
 
-                    self.rom_method_checkbox_check_var.set(True)
+            if variable == 'solver_mode':
+
+                if parameters['solver_mode'] == 'fom':
+
+                    self.solver_mode_checkbox_callback('FOM')
+
+                elif parameters['solver_mode'] == 'rom':
+
+                    self.solver_mode_checkbox_callback('ROM')
+
+                elif parameters['solver_mode'] == 'adaptive_rom':
+
+                    self.solver_mode_checkbox_callback('Adaptive ROM')
 
             if variable == 'rom_method':
 
@@ -615,8 +697,6 @@ class UI(customtkinter.CTk):
                 elif parameters['rom_method'] == 'lspg':
 
                     self.rom_method_entry_var.set(self.rom_method_options[1])
-
-                self.ROM_checkbox_callback()
 
             if variable == 'pod_energy':
 
@@ -634,11 +714,25 @@ class UI(customtkinter.CTk):
 
             if variable == 'hyper_method':
 
-                if parameters['hyper_method'] == 'gappy_pod':
+                if parameters['hyper_method'] == 'deim':
 
                     self.hyper_method_entry_var.set(self.hyper_method_options[0])
 
-                self.hyper_checkbox_callback()
+                if parameters['hyper_method'] == 'qdeim':
+
+                    self.hyper_method_entry_var.set(self.hyper_method_options[1])
+
+                if parameters['hyper_method'] == 'gappypod':
+
+                    self.hyper_method_entry_var.set(self.hyper_method_options[2])
+
+                if parameters['hyper_method'] == 'gappypode':
+
+                    self.hyper_method_entry_var.set(self.hyper_method_options[3])
+
+            if variable == 'init_training_win':
+
+                self.training_window_entry_var.set(parameters['init_training_win'])
 
             if variable == 'variable1':
                 
@@ -663,6 +757,12 @@ class UI(customtkinter.CTk):
                 indices = [index for index, value in enumerate(visual_options) if value == parameters['variable4']]
                 
                 self.visual_4_option_entry_var.set(visual_options[indices[0]])
+
+            if variable == 'update_interval':
+                
+                indices = [index for index, value in enumerate(visual_options) if value == parameters['update_interval']]
+                
+                self.visual_update_interval_entry_var.set(parameters['update_interval'])
 
     def fill_gui_from_inp_file_IC(self):
 
