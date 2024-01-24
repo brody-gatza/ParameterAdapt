@@ -25,20 +25,12 @@ def driver(self):
     state = solver_functions.prim2cons_converter(solver_param, state)
 
     # initialize rom if necessary
-    if solver_param['solver_mode'] == 'ROM':
-
-        rom_param = rom_functions.precomputer(solver_param,state)
-
-        if solver_param['hyper'] == True:
-
-            rom_param = rom_functions.sample_point_finder(solver_param,rom_param)
-
-    elif solver_param['solver_mode'] == 'FOM':
+    if solver_param['solver_mode'] == 'FOM' or solver_param['solver_mode'] == 'Adaptive ROM':
 
         S_indx_user               = np.arange(0,solver_param['cell_number'])
         S_indx_solver             = rom_functions.user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
         pcc                       = 0
-        training_data_prim        = 0 
+        solver_param['hyper']     = False
 
         rom_param = {}
         
@@ -46,6 +38,13 @@ def driver(self):
         rom_param['S_indx_solver']    = S_indx_solver
         rom_param['hyper_precompute'] = pcc
 
+    elif solver_param['solver_mode'] == 'ROM':
+
+        rom_param = rom_functions.precomputer(solver_param,state)
+
+        if solver_param['hyper'] == True:
+
+            rom_param = rom_functions.sample_point_finder(solver_param,rom_param)
 
     # create plot
     visual_param = visualization_functions.visual_var_collector(solver_param)
@@ -56,14 +55,12 @@ def driver(self):
     
     visual_param        = visualization_functions.initial_plot(axs,solver_param,visual_param)
 
-    # prepare saving space
-    cons_results_save = state['cons_results_save']
-    prim_results_save = state['prim_results_save']
-
     # begin simulation
     start_time = time.time()
-    
+
     for iter in range(solver_param['num_step']):
+
+        solver_param['iter'] = iter
 
         if solver_param['solver_mode'] == 'FOM':
 
@@ -72,7 +69,11 @@ def driver(self):
 
         elif solver_param['solver_mode'] == 'ROM':
             
-            state = rom_functions.red2full_state_calculator(solver_param,rom_param,state)
+            state , rom_param = rom_functions.red2full_state_calculator(solver_param,rom_param,state)
+
+        elif solver_param['solver_mode'] == 'Adaptive ROM':
+
+            state, solver_param , rom_param = rom_functions.adaptive_rom_progress(solver_param,rom_param,state,iter)
 
         # convert cons to prim
         state = solver_functions.cons2prim_converter(solver_param,state)
@@ -85,8 +86,8 @@ def driver(self):
         plt.show(block=False)
         
         print('Iteration: ' + str(iter+1))
-        cons_results_save[:,:,iter] = solver_functions.results_solver2user_converter(solver_param['cell_number'],[state['Q_cons']])[:,2:-2]
-        prim_results_save[:,:,iter] = solver_functions.results_solver2user_converter(solver_param['cell_number'],[state['Q_prim']])[:,2:-2]  
+        state['cons_results_save'][:,:,iter] = solver_functions.results_solver2user_converter(solver_param['cell_number'],[state['Q_cons']])[:,2:-2]
+        state['prim_results_save'][:,:,iter] = solver_functions.results_solver2user_converter(solver_param['cell_number'],[state['Q_prim']])[:,2:-2]  
 
     end_time = time.time()
 
@@ -112,8 +113,8 @@ def driver(self):
     print('Saving resutls into working directory')
 
     # save the results and end the simulation
-    np.save( work_dir + '/' +save_title + ' cons.npy' ,cons_results_save)
-    np.save( work_dir + '/' +save_title + ' prim.npy' ,prim_results_save)
+    np.save( work_dir + '/' +save_title + ' cons.npy' ,state['cons_results_save'])
+    np.save( work_dir + '/' +save_title + ' prim.npy' ,state['prim_results_save'])
 
     print('Simulation successfully completed !')
 

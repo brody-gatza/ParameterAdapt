@@ -3,16 +3,31 @@ import numpy as np
 import scipy as sc
 import solver_functions
 import time_integrator_functions
+from matplotlib import pyplot as plt
 
 def precomputer(solver_param,state):
 
     print('Initializing the ROM mode!')
-    training_data_path_cons = solver_param['FOM_result_dir']
-    training_data_path_prim = training_data_path_cons.replace(' cons.npy',' prim.npy')
+
+    if solver_param['solver_mode'] == 'ROM':
+
+        training_data_path_cons = solver_param['FOM_result_dir']
+        training_data_path_prim = training_data_path_cons.replace(' cons.npy',' prim.npy')
+
+        training_data_cons      = np.load(training_data_path_cons)
+        training_data_prim      = np.load(training_data_path_prim)
+        first_snapshot          = training_data_cons[:,:,0]        
+
+    elif solver_param['solver_mode'] == 'Adaptive ROM':
+
+        iter = solver_param['iter']
+
+        training_data_cons = state['cons_results_save']
+        training_data_prim = state['prim_results_save']
+        first_snapshot     = training_data_cons[:,:,iter-1]
+
+
     POD_energy_limit   = 100-solver_param['pod_energy']
-    training_data_cons = np.load(training_data_path_cons)
-    training_data_prim = np.load(training_data_path_prim)
-    first_snapshot     = training_data_cons[:,:,0]
     # first_snapshot     = np.mean(training_data,axis=2)
 
     state_var_num      = len(training_data_cons[:,0,0])
@@ -66,8 +81,8 @@ def precomputer(solver_param,state):
 
     norm_matrix = np.diag(norm_matrix_diag)
 
-    basis         = V[:,0:truncation_indx[0][0]]
-    # basis         = V[:,0:500]
+    # basis         = V[:,0:truncation_indx[0][0]]
+    basis         = V[:,0:30]
     # basis         = V
     denormalizor    = norm_matrix
     normalizor      = np.linalg.inv(denormalizor)
@@ -105,9 +120,7 @@ def precomputer(solver_param,state):
 
 def hyper_precomputer(basis,S_indx_solver):
 
-
     pcc = basis @ np.linalg.pinv(basis[S_indx_solver,:])
-
 
     return pcc
 
@@ -155,7 +168,10 @@ def red2full_state_calculator(solver_param,rom_param,state):
 
         rom_param['q_red0']    = Q_red
 
-        return state
+        state['d_flux_dx'] = RES_solver
+
+
+    return state , rom_param
 
 def user2solver_indx_converter(S_indx_user,num_consv_var,num_cell):
 
@@ -171,7 +187,6 @@ def user2solver_indx_converter(S_indx_user,num_consv_var,num_cell):
         S_indx_solver[start:end] = S_indx_user + j * num_cell
 
     return S_indx_solver
-
 
 def solver2user_indx_converter(S_indx_solver,num_cell):
 
@@ -193,10 +208,6 @@ def solver2user_indx_converter(S_indx_solver,num_cell):
 
         S_indx_user = np.append(S_indx_user, new_indx)  
 
-    S_indx_user = np.unique(S_indx_user)
-    S_indx_user = np.sort(S_indx_user)
-    S_indx_user = S_indx_user.astype(int)
-
     return S_indx_user
 
 def sample_point_finder(solver_param,rom_param):
@@ -213,7 +224,7 @@ def sample_point_finder(solver_param,rom_param):
 
     elif solver_param['sampling_method'] == 'Gappy POD + E':
             
-            num_samples = 400
+            num_samples = 150
 
             S_indx_user = GappyPODE_sample_point_finder(basis,num_samples,solver_param['cell_number'])
     
@@ -228,7 +239,6 @@ def sample_point_finder(solver_param,rom_param):
     rom_param['S_indx_solver']    = S_indx_solver
 
     return rom_param
-
 
 def DEIM_sample_point_finder(basis,num_cell):
 
@@ -267,10 +277,12 @@ def DEIM_sample_point_finder(basis,num_cell):
 
     return S_indx_user
 
-
 def QDEIM_sample_point_finder(U,num_cell):
 
     n, m = U.shape
+
+    num_selected_samples = 0
+    counter = 0
 
     Q, R, P = sc.linalg.qr(U.T, mode='full',pivoting=True)
 
@@ -278,11 +290,34 @@ def QDEIM_sample_point_finder(U,num_cell):
 
     S_indx_user   = solver2user_indx_converter(S_indx_solver,num_cell)
 
+    S_indx_user   = np.unique(S_indx_user)
+
+    num_selected_samples = len(S_indx_user)
+    
+    while num_selected_samples < m:
+        
+        start_indx = m + counter
+        end_indx   = m + counter + 1
+
+        new_sample = P[start_indx:end_indx]
+
+        S_indx_solver = np.append(S_indx_solver,new_sample)
+
+        S_indx_user   = solver2user_indx_converter(S_indx_solver,num_cell)
+
+        S_indx_user   = np.unique(S_indx_user)
+
+        num_selected_samples = len(S_indx_user)
+
+        counter = counter + 1
+
+    S_indx_user = np.sort(S_indx_user)
+
+    S_indx_user = S_indx_user.astype(int)
+
     return S_indx_user
 
-
 def GappyPODE_sample_point_finder(basis,num_samples,num_cell):
-
 
     _, _, p = sc.linalg.qr(basis.T, mode='full', pivoting=True)
 
@@ -310,10 +345,165 @@ def GappyPODE_sample_point_finder(basis,num_samples,num_cell):
 
         p = np.append(p, I[e])
 
+    breakpoint()
+
     S_indx_solver = p
 
     S_indx_user   = solver2user_indx_converter(S_indx_solver,num_cell)
 
     return S_indx_user
+
+def adaptive_rom_progress(solver_param,rom_param,state,iter):
+
+    if iter <= int(solver_param['init_training_win']):
+
+        if iter != int(solver_param['init_training_win']):
+            
+            state = solver_functions.residual_calculator(solver_param,rom_param,state)
+            state = time_integrator_functions.advance_time(solver_param,state)
+
+        elif iter == int(solver_param['init_training_win']):
+            
+            # Q 101
+            state = solver_functions.residual_calculator(solver_param,rom_param,state)
+            state = time_integrator_functions.advance_time(solver_param,state)
+
+            # V 101 and Qr 101
+            rom_param = precomputer(solver_param,state)
+
+    else:
+
+            solver_param['hyper'] = False
+
+            Q_tilda_old = state['Q_cons']
+            Q_tilda_old_user = solver_functions.results_solver2user_converter(solver_param['cell_number'],Q_tilda_old)
+            Q_tilda_old_user_int = Q_tilda_old_user[:,2:-2]
+            Q_tilda_old_solver_int = solver_functions.results_user2solver_converter(Q_tilda_old_user_int)
+
+            state , rom_param = red2full_state_calculator(solver_param,rom_param,state)
+
+            Q_red_new = rom_param['q_red0']
+
+            Q_tilda_new = state['Q_cons']
+            Q_tilda_new_user = solver_functions.results_solver2user_converter(solver_param['cell_number'],Q_tilda_new)
+            Q_tilda_new_user_int = Q_tilda_new_user[:,2:-2]
+            Q_tilda_new_solver_int = solver_functions.results_user2solver_converter(Q_tilda_new_user_int)
+
+            state['Q_cons'] = Q_tilda_old
+
+            state = solver_functions.residual_calculator(solver_param,rom_param,state)
+            state = time_integrator_functions.advance_time(solver_param,state)
+
+
+            Q_bar_new = state['Q_cons']
+            Q_bar_new_user = solver_functions.results_solver2user_converter(solver_param['cell_number'],Q_bar_new)
+            Q_bar_new_user_int = Q_bar_new_user[:,2:-2]
+            Q_bar_new_solver_int = solver_functions.results_user2solver_converter(Q_bar_new_user_int)
+
+
+            del_basis = ( ((Q_bar_new_solver_int-Q_tilda_new_solver_int).reshape(-1,1))@(Q_red_new.reshape(1,-1)) ) / (np.linalg.norm(Q_red_new) ** 2)
+            rom_param['basis']  = rom_param['basis'] + del_basis
+
+            new_basis  = rom_param['basis']
+            q_ref      = rom_param['q_ref']
+            denormalizor = rom_param['denormalizor']
+
+            Q_bar_new_int_check = q_ref + (denormalizor @ new_basis @ Q_red_new) 
+
+            diff = Q_bar_new_int_check - Q_bar_new_solver_int
+
+            breakpoint()
+
+
+            state['Q_cons'] = Q_tilda_new
+
+    
+    return state, solver_param , rom_param
+
+
+
+            
+
+
+
+
+
+
+            
+
+
+
+
+
+
+
+
+
+
+
+
+    # update sampling points
+
+    # rom_param = sample_point_finder(solver_param,rom_param)
+
+    # S_indx_solver           = rom_param['S_indx_solver']
+    # S_indx_user             = rom_param['S_indx_user']
+    # num_samples             = len(S_indx_user)
+
+    # interpolation_error      = full_state_combo - (rom_param['basis'] @ np.linalg.pinv(rom_param['basis'][S_indx_solver]) @ full_state_combo[S_indx_solver])
+    # interpolation_error_indx = np.argsort(np.abs(interpolation_error))[::-1]
+    # S_indx_solver            = np.sort(interpolation_error_indx[0:num_samples])
+    # S_indx_user              = solver2user_indx_converter(S_indx_solver,solver_param['cell_number'])
+
+    # check to avoid repeating indicies
+
+    # counter = 0
+
+    # n , m = rom_param['basis'].shape
+
+    # S_indx_user   = np.unique(S_indx_user[0:m])
+
+    # num_selected_samples = len(S_indx_user)
+
+    # while num_selected_samples < m:
+    
+    #     start_indx = num_samples + counter
+    #     end_indx   = num_samples + counter + 1
+
+    #     new_sample = interpolation_error_indx[start_indx:end_indx]
+
+    #     S_indx_solver = np.append(S_indx_solver,new_sample)
+
+    #     S_indx_user   = solver2user_indx_converter(S_indx_solver,solver_param['cell_number'])
+
+    #     S_indx_user   = np.unique(S_indx_user)
+
+    #     num_selected_samples = len(S_indx_user)
+
+    #     counter = counter + 1
+
+    # # S_indx_user = np.sort(S_indx_user)
+    
+    # S_indx_user = np.arange(100,400)
+
+    # S_indx_solver = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+
+    # S_indx_user = S_indx_user.astype(int)
+
+    # pcc         = hyper_precomputer(rom_param['basis'],S_indx_solver)
+
+    # rom_param['hyper_precompute'] = pcc
+    # rom_param['S_indx_solver'] = S_indx_solver
+    # rom_param['S_indx_user']   = S_indx_user
+
+
+         
+
+
+
+
+
+
+        
 
     

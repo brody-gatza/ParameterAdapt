@@ -53,7 +53,6 @@ def visual_var_collector(solver_param):
 
     return visual_param
 
-
 def initial_plot(axs,solver_param,visual_param):
 
     # Plot in the first subplot (top-left)
@@ -90,7 +89,7 @@ def initial_plot(axs,solver_param,visual_param):
     visual_param['plot32'] = plot32 
     visual_param['plot42'] = plot42 
 
-    if solver_param['hyper'] == True:
+    if solver_param['hyper'] == True or solver_param['solver_mode']=='Adaptive ROM':
 
         scatter1 = axs[0, 0].scatter([], [] , 7 ,color='black',marker='o',label='Sampling Points')
         scatter2 = axs[0, 1].scatter([], [] , 7 ,color='black',marker='o',label='Sampling Points') 
@@ -108,7 +107,6 @@ def initial_plot(axs,solver_param,visual_param):
 def in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param):
 
     prim_results = solver_functions.results_solver2user_converter(solver_param['cell_number'],state['Q_prim'])
-    training_data_prim = rom_param['training_data_prim']
 
     x = solver_param['x']
 
@@ -171,6 +169,8 @@ def in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param):
     axs[1,1].set_ylabel(solver_param['variable4'])
 
     if solver_param['solver_mode'] == 'ROM' :
+
+        training_data_prim = rom_param['training_data_prim']
 
         y12= training_data_prim[visual_var1,:,iter]
         y22= training_data_prim[visual_var2,:,iter]

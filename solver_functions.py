@@ -115,7 +115,6 @@ def ic_generator(solver_param,state):
 
     return state
 
-
 def update_ghost_cell(solver_param,state):
 
     num_cell = solver_param['cell_number']
@@ -157,7 +156,6 @@ def update_ghost_cell(solver_param,state):
 
     return state
     
-
 def prim2cons_converter(solver_param, state):
 
     num_cell = solver_param['cell_number']
@@ -403,7 +401,7 @@ def residual_calculator(solver_param,rom_param,state):
         state = roe_flux_calculator(solver_param,rom_param,state)
 
     # inviscid flux vector terms
-    state   = inviscid_d_flux_dx_calculator( solver_param,rom_param,state)
+    state   = inviscid_d_flux_dx_calculator(solver_param,rom_param,state)
 
     return state
 
