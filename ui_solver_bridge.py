@@ -69,6 +69,7 @@ def driver(self):
 
         elif solver_param['solver_mode'] == 'ROM':
             
+            state = solver_functions.residual_calculator(solver_param,rom_param,state)
             state , rom_param = rom_functions.red2full_state_calculator(solver_param,rom_param,state)
 
         elif solver_param['solver_mode'] == 'Adaptive ROM':

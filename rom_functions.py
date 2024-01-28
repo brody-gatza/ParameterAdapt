@@ -22,9 +22,9 @@ def precomputer(solver_param,state):
 
         iter = solver_param['iter']
 
-        training_data_cons = state['cons_results_save']
-        training_data_prim = state['prim_results_save']
-        first_snapshot     = training_data_cons[:,:,iter-1]
+        training_data_cons = state['cons_results_save'][:,:,0:iter]
+        training_data_prim = state['prim_results_save'][:,:,0:iter]
+        first_snapshot     = training_data_cons[:,:,-1]
 
 
     POD_energy_limit   = 100-solver_param['pod_energy']
@@ -58,7 +58,7 @@ def precomputer(solver_param,state):
 
         tall_thin_data[:, indx] = cen_norm_data[:,:,indx].ravel(order='C')
 
-    V, S, U = np.linalg.svd(tall_thin_data, full_matrices=True)
+    V, S, U = np.linalg.svd(tall_thin_data, full_matrices=False)
 
     square_sum_singular_values = np.sum(S**2)
 
@@ -68,24 +68,29 @@ def precomputer(solver_param,state):
 
     print(f'to capture '+ str(solver_param['pod_energy']) +' percent of energy '+ str(truncation_indx[0][0])+ ' mode must be used')
 
-    time.sleep(1.5)
+    time.sleep(0.5)
 
-    norm_matrix_size = state_var_num * cell_num
+    if solver_param['solver_mode'] == 'Adaptive ROM':
 
-    norm_matrix_diag = np.array([])
+        basis           = V
 
-    for indx in range(0,state_var_num):
+    else:
 
-        temp = np.full(cell_num , norm_factor[indx])
-        norm_matrix_diag = np.append(norm_matrix_diag,temp)
+        basis         = V[:,0:truncation_indx[0][0]]
+        # basis         = V[:,0:1]
+        # basis           = V
+    
+    normalizor_size = 3*solver_param['cell_number']
 
-    norm_matrix = np.diag(norm_matrix_diag)
+    denormalizor = np.zeros(normalizor_size)
 
-    # basis         = V[:,0:truncation_indx[0][0]]
-    basis         = V[:,0:30]
-    # basis         = V
-    denormalizor    = norm_matrix
-    normalizor      = np.linalg.inv(denormalizor)
+    for indx in range(normalizor_size):
+        
+        norm_factor_index = int(np.floor(indx/solver_param['cell_number']))
+
+        denormalizor[indx] = norm_factor[norm_factor_index]
+
+    normalizor      = 1/denormalizor
     q_ref           = first_snapshot.ravel(order='C')
 
     print(str(len(basis[0,:])) + ' modes are going to be used in this simulation')
@@ -128,8 +133,6 @@ def red2full_state_calculator(solver_param,rom_param,state):
 
     if solver_param['rom_method'] == 'Galerkin':
 
-        state = solver_functions.residual_calculator(solver_param,rom_param,state)
-
         if solver_param['hyper'] == False:
 
             RES_solver       = state['d_flux_dx']
@@ -148,7 +151,7 @@ def red2full_state_calculator(solver_param,rom_param,state):
         denormalizor     = rom_param['denormalizor']
         basis            = rom_param['basis']
 
-        dQ_red_dt        = basis.T @ normalizor @ RES
+        dQ_red_dt        = basis.T @ (normalizor * RES)
 
         state['Q_cons']  = Q0_red
 
@@ -158,7 +161,7 @@ def red2full_state_calculator(solver_param,rom_param,state):
 
         Q_red            = state['Q_cons']
 
-        Q_full_order_solver= q_ref + (denormalizor @ basis @ Q_red) 
+        Q_full_order_solver= q_ref + (denormalizor * (basis @ Q_red)) 
 
         Q_full_order_user  = solver_functions.results_solver2user_converter(solver_param['cell_number']-4,Q_full_order_solver)
 
@@ -364,12 +367,11 @@ def adaptive_rom_progress(solver_param,rom_param,state,iter):
 
         elif iter == int(solver_param['init_training_win']):
             
-            # Q 101
             state = solver_functions.residual_calculator(solver_param,rom_param,state)
             state = time_integrator_functions.advance_time(solver_param,state)
 
-            # V 101 and Qr 101
             rom_param = precomputer(solver_param,state)
+
 
     else:
 
@@ -380,44 +382,54 @@ def adaptive_rom_progress(solver_param,rom_param,state,iter):
             Q_tilda_old_user_int = Q_tilda_old_user[:,2:-2]
             Q_tilda_old_solver_int = solver_functions.results_user2solver_converter(Q_tilda_old_user_int)
 
+            state['Q_cons'] = Q_tilda_old
+
+            state = solver_functions.residual_calculator(solver_param,rom_param,state)
             state , rom_param = red2full_state_calculator(solver_param,rom_param,state)
 
             Q_red_new = rom_param['q_red0']
 
-            Q_tilda_new = state['Q_cons']
-            Q_tilda_new_user = solver_functions.results_solver2user_converter(solver_param['cell_number'],Q_tilda_new)
-            Q_tilda_new_user_int = Q_tilda_new_user[:,2:-2]
-            Q_tilda_new_solver_int = solver_functions.results_user2solver_converter(Q_tilda_new_user_int)
+            Q_tilda_predict = state['Q_cons']
+            Q_tilda_predict_user = solver_functions.results_solver2user_converter(solver_param['cell_number'],Q_tilda_predict)
+            Q_tilda_predict_user_int = Q_tilda_predict_user[:,2:-2]
+            Q_tilda_predict_solver_int = solver_functions.results_user2solver_converter(Q_tilda_predict_user_int)
 
             state['Q_cons'] = Q_tilda_old
 
             state = solver_functions.residual_calculator(solver_param,rom_param,state)
             state = time_integrator_functions.advance_time(solver_param,state)
 
-
             Q_bar_new = state['Q_cons']
             Q_bar_new_user = solver_functions.results_solver2user_converter(solver_param['cell_number'],Q_bar_new)
             Q_bar_new_user_int = Q_bar_new_user[:,2:-2]
             Q_bar_new_solver_int = solver_functions.results_user2solver_converter(Q_bar_new_user_int)
 
+            q_ref            = rom_param['q_ref']
+            normalizor       = rom_param['normalizor']
+            denormalizor     = rom_param['denormalizor']
 
-            del_basis = ( ((Q_bar_new_solver_int-Q_tilda_new_solver_int).reshape(-1,1))@(Q_red_new.reshape(1,-1)) ) / (np.linalg.norm(Q_red_new) ** 2)
-            rom_param['basis']  = rom_param['basis'] + del_basis
+            del_basis = ( (normalizor.reshape(-1,1)*(Q_bar_new_solver_int-Q_tilda_predict_solver_int).reshape(-1,1))@(Q_red_new.reshape(1,-1)) ) / (np.linalg.norm(Q_red_new)**2)
 
-            new_basis  = rom_param['basis']
-            q_ref      = rom_param['q_ref']
-            denormalizor = rom_param['denormalizor']
+            rom_param['basis'] = rom_param['basis'] + del_basis
 
-            Q_bar_new_int_check = q_ref + (denormalizor @ new_basis @ Q_red_new) 
+            Q0_red           = rom_param['q_red0']
+            q_ref            = rom_param['q_ref']
+            normalizor       = rom_param['normalizor']
+            denormalizor     = rom_param['denormalizor']
 
-            diff = Q_bar_new_int_check - Q_bar_new_solver_int
+            Q_full_order_solver= q_ref + (denormalizor * (rom_param['basis'] @ Q_red_new)) 
 
-            breakpoint()
+            Q_full_order_user  = solver_functions.results_solver2user_converter(solver_param['cell_number']-4,Q_full_order_solver)
 
+            Q_full_order_user  = np.column_stack((Q_full_order_user[:,0], Q_full_order_user[:,0], Q_full_order_user , Q_full_order_user[:,-1] , Q_full_order_user[:,-1]))
 
-            state['Q_cons'] = Q_tilda_new
+            Q_tilda_correct            = Q_full_order_user
+            Q_tilda_correct_user       = solver_functions.results_solver2user_converter(solver_param['cell_number'],Q_tilda_correct)
+            Q_tilda_correct_user_int   = Q_tilda_correct_user[:,2:-2]
+            Q_tilda_correct_solver_int = solver_functions.results_user2solver_converter(Q_tilda_correct_user_int)
 
-    
+            state['Q_cons'] = Q_tilda_correct
+ 
     return state, solver_param , rom_param
 
 
