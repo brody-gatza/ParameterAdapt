@@ -171,7 +171,7 @@ def red2full_state_calculator(solver_param,rom_param,state):
 
         rom_param['q_red0']    = Q_red
 
-        state['d_flux_dx'] = RES_solver
+        state['d_flux_dx'] = RES
 
 
     return state , rom_param
@@ -228,18 +228,21 @@ def sample_point_finder(solver_param,rom_param):
             S_indx_user = QDEIM_sample_point_finder(basis,solver_param['cell_number'])
 
     elif solver_param['sampling_method'] == 'Gappy POD':
+            
 
-            S_indx_user = np.array([
-    153, 155, 157, 159, 167, 168, 169, 175, 176, 181,
-    183, 186, 189, 192, 193, 197, 199, 200, 204, 208,
-    221, 222, 226, 232, 238, 242, 244, 247, 258, 261,
-    267, 275, 278, 289, 294, 294, 303, 307, 310, 312,
-    313, 319, 324, 326, 331, 333, 335, 341, 343, 345
-], dtype=int)
+            center = np.arange(200,300,1,dtype=int)
+            left        = np.arange(0,50,1,dtype=int)
+            # right       = np.arange(490,499,1,dtype=int)
+
+            # S_indx_user = np.concatenate((left,center,right))
+            S_indx_user = np.concatenate((left,center))
+            # S_indx_user = center
+
+
 
     elif solver_param['sampling_method'] == 'Gappy POD + E':
             
-            num_samples = 25
+            num_samples = 150
 
             S_indx_user = GappyPODE_sample_point_finder(basis,num_samples,solver_param['cell_number'])
     
@@ -391,7 +394,7 @@ def adaptive_rom_progress(solver_param,rom_param,state,iter):
             q_ref            = rom_param['q_ref']
             normalizor       = rom_param['normalizor']
             denormalizor     = rom_param['denormalizor']
-            
+
             # Q tilda (ROM) before any update
             Q_tilda_old = state['Q_cons']
             Q_tilda_old_user = solver_functions.results_solver2user_converter(solver_param['cell_number'],Q_tilda_old)
@@ -401,6 +404,8 @@ def adaptive_rom_progress(solver_param,rom_param,state,iter):
             # Find new Q tilda using old basis (prediction)
             state = solver_functions.residual_calculator(solver_param,rom_param,state)
             state , rom_param = red2full_state_calculator(solver_param,rom_param,state)
+            Q_bar_residual_unsampled= state['d_flux_dx']
+            
 
             # new Q_r
             Q_red_new = rom_param['q_red0']
@@ -420,6 +425,7 @@ def adaptive_rom_progress(solver_param,rom_param,state,iter):
                 state['Q_cons'] = Q_bar_star_old
 
                 state = solver_functions.residual_calculator(solver_param,rom_param,state)
+                Q_bar_residual_sampled = state['d_flux_dx'][rom_param['S_indx_solver']]
                 state = time_integrator_functions.advance_time(solver_param,state)
 
                 Q_bar_star_new = state['Q_cons']
@@ -438,6 +444,7 @@ def adaptive_rom_progress(solver_param,rom_param,state,iter):
             else:
                  
                 state              = solver_functions.residual_calculator(solver_param,rom_param,state)
+                Q_bar_residual_sampled     = state['d_flux_dx']
                 state['Q_cons']    = Q_tilda_old_solver_int[rom_param['S_indx_solver']]
                 state              = time_integrator_functions.advance_time(solver_param,state)
                 Q_bar_new_sampling = state['Q_cons']
@@ -451,7 +458,9 @@ def adaptive_rom_progress(solver_param,rom_param,state,iter):
             # Update the basis
             del_basis = ( (normalizor.reshape(-1,1)*(Q_bar_new_solver_int-Q_tilda_predict_solver_int).reshape(-1,1))@(Q_red_new.reshape(1,-1)) ) / (np.linalg.norm(Q_red_new)**2)
             rom_param['basis'] = rom_param['basis'] + del_basis
-
+            if np.isnan(rom_param['basis'].all()):
+                print("The value is NaN.")
+                
             # Find Q tilda (ROM) with new basis(correction)
             Q_tilda_correct_solver_int= q_ref + (denormalizor * (rom_param['basis'] @ Q_red_new)) 
             Q_tilda_correct_user_int  = solver_functions.results_solver2user_converter(solver_param['cell_number']-4,Q_tilda_correct_solver_int)
@@ -460,43 +469,48 @@ def adaptive_rom_progress(solver_param,rom_param,state,iter):
 
             state['Q_cons'] = Q_tilda_correct_solver_full
 
-            # rom_param = sample_point_finder(solver_param,rom_param)
-
+            rom_param = sample_point_finder(solver_param,rom_param)
 
             # Update the precompute term of HyperReduction with new basis and samples
-
+            
             # num_req_samples = np.shape(rom_param['basis'])[1]
 
-            num_req_samples = 50
+            # Q_bar_residual = Q_bar_residual_unsampled
+            # Q_bar_residual[rom_param['S_indx_solver']] = Q_bar_residual_sampled
 
-            interp_error = Q_bar_new_solver_int.reshape(-1,1) - (rom_param['basis']@np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver']]))@Q_bar_new_solver_int[rom_param['S_indx_solver']].reshape(-1,1)
-            interp_error_indx = np.argsort(np.squeeze(interp_error))[::-1]
-            S_indx_solver     = interp_error_indx[0:num_req_samples]
-            S_indx_user       = solver2user_indx_converter(S_indx_solver,solver_param['cell_number'])
-            S_indx_user       = np.sort(np.unique(S_indx_user))
-            S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+            # num_req_samples = 120
 
-            num_selected_samples = len(S_indx_user)
-            counter = 0
+            # interp_error      = (normalizor*Q_bar_residual).reshape(-1,1) - (rom_param['basis']@np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver']]))@(normalizor*Q_bar_residual)[rom_param['S_indx_solver']].reshape(-1,1)
+            # interp_error_indx = np.argsort(np.squeeze(interp_error))[::-1]
+            # S_indx_solver     = interp_error_indx[0:num_req_samples]
+            # S_indx_user       = solver2user_indx_converter(S_indx_solver,solver_param['cell_number'])
+            # S_indx_user       = np.sort(np.unique(S_indx_user))
+            # S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
 
-            while num_selected_samples < num_req_samples:
+            # num_selected_samples = len(S_indx_user)
+            # counter = 0
 
-                start_indx = num_req_samples + counter
-                end_indx   = num_req_samples + counter + 1
+            # while num_selected_samples < num_req_samples:
 
-                new_indx = interp_error_indx[start_indx:end_indx]
-                S_indx_solver=np.append(S_indx_solver,new_indx)
+            #     start_indx = num_req_samples + counter
+            #     end_indx   = num_req_samples + counter + 1
 
-                S_indx_user       = solver2user_indx_converter(S_indx_solver,solver_param['cell_number'])
-                S_indx_user       = np.sort(np.unique(S_indx_user))
-                S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
-                num_selected_samples = len(S_indx_user)
-                counter = counter + 1
+            #     new_indx = interp_error_indx[start_indx:end_indx]
+            #     S_indx_solver=np.append(S_indx_solver,new_indx)
 
-            rom_param['S_indx_solver'] = S_indx_solver
-            rom_param['S_indx_user']   = S_indx_user
-            pcc                        = hyper_precomputer(rom_param['basis'],S_indx_solver)
-            rom_param['hyper_precompute'] = pcc
+            #     S_indx_user       = solver2user_indx_converter(S_indx_solver,solver_param['cell_number'])
+            #     S_indx_user       = np.sort(np.unique(S_indx_user))
+            #     S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+            #     num_selected_samples = len(S_indx_user)
+            #     counter = counter + 1
+
+            # rom_param['S_indx_solver'] = S_indx_solver
+            # rom_param['S_indx_user']   = S_indx_user
+            # pcc                        = hyper_precomputer(rom_param['basis'],S_indx_solver)
+            # rom_param['hyper_precompute'] = pcc
+
+            # breakpoint()
+
 
     return state, solver_param , rom_param
 
