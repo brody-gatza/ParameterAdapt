@@ -465,7 +465,7 @@ def single_adaptive_rom_progress(solver_param,rom_param,state,iter):
 
             state['Q_cons'] = Q_tilda_correct_solver_full
 
-            rom_param = sample_point_finder(solver_param,rom_param)
+            # rom_param = sample_point_finder(solver_param,rom_param)
 
             # Update the precompute term of HyperReduction with new basis and samples
             
@@ -473,43 +473,49 @@ def single_adaptive_rom_progress(solver_param,rom_param,state,iter):
             # Q_bar_residual = Q_bar_residual_unsampled
             # Q_bar_residual[rom_param['S_indx_solver']] = Q_bar_residual_sampled
 
-            # num_req_samples = len(rom_param['S_indx_user'])
+            num_req_samples = len(rom_param['S_indx_user'])
 
             # error = 0
             # while error < 1e-6:
 
-            #     interp_error      = (Q_bar_residual).reshape(-1,1) - (rom_param['basis']@np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver']]))@(Q_bar_residual)[rom_param['S_indx_solver']].reshape(-1,1)
-            #     interp_error_indx = np.argsort(np.squeeze(interp_error))[::-1]
-            #     S_indx_solver     = interp_error_indx[0:num_req_samples]
-            #     S_indx_user       = solver2user_indx_converter(S_indx_solver,solver_param['cell_number'])
-            #     S_indx_user       = np.sort(np.unique(S_indx_user))
-            #     S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+            interpolated_Q_bar_new_solver_int= rom_param['basis']@np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver']])@(Q_bar_new_solver_int)[rom_param['S_indx_solver']].reshape(-1,1)
 
-            #     num_selected_samples = len(S_indx_user)
-            #     counter = 0
+            # plt.clf()
+            # plt.plot(Q_bar_new_solver_int)
+            # plt.plot(Q_bar_test.reshape(1,-1).ravel()*denormalizor+q_ref)
 
-            #     while num_selected_samples < num_req_samples:
+            interp_error      = np.abs(Q_bar_new_solver_int - (interpolated_Q_bar_new_solver_int.reshape(1,-1).ravel()*denormalizor+q_ref))
+            interp_error_indx = np.argsort(np.squeeze(interp_error))[::-1]
+            S_indx_solver     = interp_error_indx[0:num_req_samples]
+            S_indx_user       = solver2user_indx_converter(S_indx_solver,solver_param['cell_number'])
+            S_indx_user       = np.sort(np.unique(S_indx_user))
+            S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
 
-            #         start_indx = num_req_samples + counter
-            #         end_indx   = num_req_samples + counter + 1
+            num_selected_samples = len(S_indx_user)
+            counter = 0
 
-            #         new_indx = interp_error_indx[start_indx:end_indx]
-            #         S_indx_solver=np.append(S_indx_solver,new_indx)
+            while num_selected_samples < num_req_samples:
 
-            #         S_indx_user       = solver2user_indx_converter(S_indx_solver,solver_param['cell_number'])
-            #         S_indx_user       = np.sort(np.unique(S_indx_user))
-            #         S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
-            #         num_selected_samples = len(S_indx_user)
-            #         counter = counter + 1
+                start_indx = num_req_samples + counter
+                end_indx   = num_req_samples + counter + 1
 
-            #     rom_param['S_indx_solver'] = S_indx_solver
-            #     rom_param['S_indx_user']   = S_indx_user
+                new_indx = interp_error_indx[start_indx:end_indx]
+                S_indx_solver=np.append(S_indx_solver,new_indx)
 
-            #     interp_error_new    = (normalizor*Q_bar_residual).reshape(-1,1) - (rom_param['basis']@np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver']]))@(normalizor*Q_bar_residual)[rom_param['S_indx_solver']].reshape(-1,1)
-            #     error = np.linalg.norm(interp_error_new - interp_error)
-            #     print('re-sampling....')
-            # pcc                        = hyper_precomputer(rom_param['basis'],S_indx_solver)
-            # rom_param['hyper_precompute'] = pcc
+                S_indx_user       = solver2user_indx_converter(S_indx_solver,solver_param['cell_number'])
+                S_indx_user       = np.sort(np.unique(S_indx_user))
+                S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+                num_selected_samples = len(S_indx_user)
+                counter = counter + 1
+
+            rom_param['S_indx_solver'] = S_indx_solver
+            rom_param['S_indx_user']   = S_indx_user
+
+                # interp_error_new    = (normalizor*Q_bar_residual).reshape(-1,1) - (rom_param['basis']@np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver']]))@(normalizor*Q_bar_residual)[rom_param['S_indx_solver']].reshape(-1,1)
+                # error = np.linalg.norm(interp_error_new - interp_error)
+                # print('re-sampling....')
+            pcc                        = hyper_precomputer(rom_param['basis'],S_indx_solver)
+            rom_param['hyper_precompute'] = pcc
 
             # breakpoint()
 
