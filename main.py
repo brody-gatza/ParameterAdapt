@@ -115,7 +115,7 @@ class UI(customtkinter.CTk):
         self.hyper_method_checkbox.grid(row=5,column=0,padx=5, pady=10)
 
         self.hyper_method_entry_var = customtkinter.StringVar()
-        self.hyper_method_options = ['DEIM','QDEIM','Gappy POD','Gappy POD + E']
+        self.hyper_method_options = ['DEIM','QDEIM','Gappy POD','Gappy POD + Shock','Gappy POD + E']
         self.hyper_method = customtkinter.CTkOptionMenu(self.solver_mode_frame , values=self.hyper_method_options ,state='disabled',variable=self.hyper_method_entry_var)
         self.hyper_method.grid(row=5,column=1,padx=5, pady=10)
 

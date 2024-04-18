@@ -55,6 +55,12 @@ def driver(self):
     
     visual_param        = visualization_functions.initial_plot(axs,solver_param,visual_param)
 
+    # # Create a new figure
+    # fig_basis = plt.figure()
+
+    # # Add axes to the figure
+    # ax_basis = fig_basis.add_subplot(1, 1, 1)  # 1 row, 1 column, first plot
+
     # begin simulation
     start_time = time.time()
 
@@ -74,7 +80,14 @@ def driver(self):
 
         elif solver_param['solver_mode'] == 'Adaptive ROM':
 
-            state, solver_param , rom_param = rom_functions.adaptive_rom_progress(solver_param,rom_param,state,iter)
+            state, solver_param , rom_param  = rom_functions.adaptive_rom_progress(solver_param,rom_param,state,iter)
+            # if iter >=10:
+            #     ax_basis.cla()
+            #     for i in range(9):
+                    
+            #         ax_basis.plot(rom_param['basis'][0:500,i],label='mode' + str(i))
+            #         ax_basis.legend()
+            #         ax_basis.set_ylim([-1,1])
             
         # convert cons to prim
         state = solver_functions.cons2prim_converter(solver_param,state)

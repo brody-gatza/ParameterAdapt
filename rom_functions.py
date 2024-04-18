@@ -228,11 +228,11 @@ def sample_point_finder(solver_param,rom_param):
             
             S_indx_user = QDEIM_sample_point_finder(basis,solver_param['cell_number'])
 
-    elif solver_param['sampling_method'] == 'Gappy POD':
+    elif solver_param['sampling_method'] == 'Gappy POD' or solver_param['sampling_method'] == 'Gappy POD + Shock':
             
 
-            center = np.arange(200,300,1,dtype=int)
-            left        = np.arange(0,50,1,dtype=int)
+            center = np.arange(245,255,1,dtype=int)
+            left        = np.arange(0,10,1,dtype=int)
             # right       = np.arange(490,499,1,dtype=int)
 
             # S_indx_user = np.concatenate((left,center,right))
@@ -486,8 +486,10 @@ def adaptive_rom_progress(solver_param,rom_param,state,iter):
             # Update Samples
 
             if sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0:
-                
-                rom_param = adapt_sample(solver_param,rom_param,F)
+
+                ### adapt sample ###
+
+                rom_param,state = adapt_sample(solver_param,rom_param,F,state)
 
     return state, solver_param , rom_param
 
@@ -606,7 +608,7 @@ def adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_tilda_p
     
     return rom_param , F
 
-def adapt_sample(solver_param,rom_param,F):
+def adapt_sample(solver_param,rom_param,F,state):
 
     basis = rom_param['basis']
 
@@ -621,12 +623,14 @@ def adapt_sample(solver_param,rom_param,F):
             S_indx_solver= user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
 
     elif solver_param['sampling_method'] == 'Gappy POD':
-        
+
         num_req_samples = len(rom_param['S_indx_user'])
+
         basis_pinv = np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver'],:])
 
         interp_error      = np.abs(F[:,-1] - (rom_param['basis']@basis_pinv)@F[rom_param['S_indx_solver'],-1])
         interp_error_indx = np.argsort(np.squeeze(interp_error))[::-1]
+        
         S_indx_solver     = interp_error_indx[0:num_req_samples]
         S_indx_user       = solver2user_indx_converter(S_indx_solver,solver_param['cell_number'])
         S_indx_user       = np.sort(np.unique(S_indx_user))
@@ -646,9 +650,120 @@ def adapt_sample(solver_param,rom_param,F):
             S_indx_user       = solver2user_indx_converter(S_indx_solver,solver_param['cell_number'])
             S_indx_user       = np.sort(np.unique(S_indx_user))
             S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+
             num_selected_samples = len(S_indx_user)
             counter = counter + 1
 
+    elif solver_param['sampling_method'] == 'Gappy POD + Shock':
+
+        Q_tilda_correct_solver_full = state['Q_cons']
+
+        # if solver_param['iter'] == 300:
+
+        # breakpoint()
+
+        solver_param['hyper'] = False
+        solver_param['dt'] = solver_param['unsampled_update_freq'] * solver_param['dt']
+
+        state['Q_cons'] = state['Q_bar']
+
+        state = solver_functions.residual_calculator(solver_param,rom_param,state)
+        state = time_integrator_functions.advance_time(solver_param,state)
+
+        Q_bar_shock = state['Q_cons']
+        Q_bar_shock_solver_int = solver_functions.solver_eliminate_ghost(solver_param,Q_bar_shock)
+        
+        ### future shock ###
+
+        rho_bar_shock = Q_bar_shock_solver_int[0:500]
+
+        # plt.figure()
+        # plt.plot(rho_bar_shock,label='future shock')
+
+
+        diff_rho_bar_shock = np.diff(rho_bar_shock)
+
+        sorted_diff_rho_bar_shock = np.sort(np.where(diff_rho_bar_shock != 0))[0]
+
+        # deflection_points = sorted_diff_rho_bar_shock[0:3]
+
+        future_shock_head = sorted_diff_rho_bar_shock[-1]
+        future_shock_tail = future_shock_head - 3
+
+        # ### current shock ###
+
+        # current_rho_bar_shock = Q_tilda_correct_solver_int[0:500]
+
+        # current_diff_rho_bar_shock = np.abs(np.diff(current_rho_bar_shock))
+
+        # current_sorted_diff_rho_bar_shock = np.flip(np.argsort(current_diff_rho_bar_shock))
+
+        # current_deflection_points = np.sort(current_sorted_diff_rho_bar_shock[0:5])
+
+        # current_shock_head = current_deflection_points[4]
+        # current_shock_tail = current_deflection_points[3]
+
+        ### shock capturing sampling ###
+
+        shock_range = np.arange(future_shock_head-2,future_shock_tail+2,1)
+        num_req_samples_shock = len(shock_range)
+
+    
+        ### normal sampling ###
+        # num_req_samples = len(rom_param['S_indx_user'])-num_req_samples_shock
+        num_req_samples = 20
+        basis_pinv = np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver'],:])
+
+        interp_error      = np.abs(F[:,-1] - (rom_param['basis']@basis_pinv)@F[rom_param['S_indx_solver'],-1])
+        interp_error_indx = np.argsort(np.squeeze(interp_error))[::-1]
+
+        
+        S_indx_solver     = interp_error_indx[0:num_req_samples]
+        S_indx_user       = solver2user_indx_converter(S_indx_solver,solver_param['cell_number'])
+        S_indx_user       = np.sort(np.unique(S_indx_user))
+
+        for indx in S_indx_user:
+
+            if indx in shock_range:
+
+                indices_to_delete = np.where(S_indx_user == indx)
+                S_indx_user = np.delete(S_indx_user, indices_to_delete)
+
+        S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+
+        num_selected_samples = len(S_indx_user)
+        counter = 0
+
+        while num_selected_samples < num_req_samples:
+
+            start_indx = num_req_samples + counter
+            end_indx   = num_req_samples + counter + 1
+
+            new_indx = interp_error_indx[start_indx:end_indx]
+            S_indx_solver=np.append(S_indx_solver,new_indx)
+
+            S_indx_user       = solver2user_indx_converter(S_indx_solver,solver_param['cell_number'])
+            S_indx_user       = np.sort(np.unique(S_indx_user))
+
+            for indx in S_indx_user:
+
+                if indx in shock_range:
+
+                    indices_to_delete = np.where(S_indx_user == indx)
+                    S_indx_user = np.delete(S_indx_user, indices_to_delete)
+
+            S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+
+            num_selected_samples = len(S_indx_user)
+            counter = counter + 1
+
+        S_indx_user       = np.sort(np.append(S_indx_user,shock_range))
+        S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+
+        solver_param['hyper'] = True
+        solver_param['dt'] = solver_param['dt'] / solver_param['unsampled_update_freq']
+
+        state['Q_cons'] = Q_tilda_correct_solver_full
 
     elif solver_param['sampling_method'] == 'Gappy POD + E':
             
@@ -664,4 +779,4 @@ def adapt_sample(solver_param,rom_param,F):
     pcc                        = hyper_precomputer(rom_param['basis'],S_indx_solver)
     rom_param['hyper_precompute'] = pcc
 
-    return rom_param
+    return rom_param , state
