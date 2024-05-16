@@ -27,6 +27,11 @@ def precomputer(solver_param,state):
         first_snapshot     = training_data_cons[:,:,-1]
         # first_snapshot     = np.mean(training_data_cons,axis=2)
 
+        training_data_path_cons = solver_param['FOM_result_dir']
+        training_data_path_prim = training_data_path_cons.replace(' cons.npy',' prim.npy')
+
+        training_data_prim      = np.load(training_data_path_prim)
+
 
     POD_energy_limit   = 100-solver_param['pod_energy']
     # first_snapshot     = np.mean(training_data,axis=2)

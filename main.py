@@ -521,8 +521,8 @@ class UI(customtkinter.CTk):
             self.hyper_method_checkbox.configure(state = 'disabled')
             self.hyper_method_checkbox_check_var.set(1)
             self.hyper_method.configure(state = 'normal')
-            self.FOM_file.configure(state = 'disabled')
-            self.FOM_file_button.configure(state = 'disabled')
+            self.FOM_file.configure(state = 'normal')
+            self.FOM_file_button.configure(state = 'normal')
             self.training_window.configure(state = 'normal')
             self.unsampled_update_freq.configure(state = 'normal')              
 
