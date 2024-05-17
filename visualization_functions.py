@@ -147,10 +147,13 @@ def in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param):
     plot31.set_data(x,y31)
     plot41.set_data(x,y41)
 
-    axs[0,0].set_ylim(min(y11,default=0)*0.0099 , max(y11,default=0)*1.1)
-    axs[0,1].set_ylim(min(y21,default=0)*0.0099 , max(y21,default=0)*1.1)
-    axs[1,0].set_ylim(min(y31,default=0)*0.0099 , max(y31,default=0)*1.1)
-    axs[1,1].set_ylim(min(y41,default=0)*0.0099 , max(y41,default=0)*1.1)
+    # axs[0,0].set_ylim(min(y11,default=0)*0.0099 , max(y11,default=0)*1.1)
+    # axs[0,1].set_ylim(min(y21,default=0)*0.0099 , max(y21,default=0)*1.1)
+    # axs[1,0].set_ylim(min(y31,default=0)*0.0099 , max(y31,default=0)*1.1)
+    # axs[1,1].set_ylim(min(y41,default=0)*0.0099 , max(y41,default=0)*1.1)
+    
+
+    # breakpoint()
 
     
     # # axs[0,0].set_ylim(0 , 6)
@@ -158,15 +161,27 @@ def in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param):
     # # axs[1,0].set_ylim(0 , 8)
     # # axs[1,1].set_ylim(min(y4,default=0)*0.0099 , max(y4,default=0)*1.001)
 
-    axs[0,0].set_xlim( 0 , x[-2]*1.05)
-    axs[0,1].set_xlim( 0 , x[-2]*1.05)
-    axs[1,0].set_xlim( 0 , x[-2]*1.05)
-    axs[1,1].set_xlim( 0 , x[-2]*1.05)
+    # axs[0,0].set_xlim( 0 , x[-2]*1.05)
+    # axs[0,1].set_xlim( 0 , x[-2]*1.05)
+    # axs[1,0].set_xlim( 0 , x[-2]*1.05)
+    # axs[1,1].set_xlim( 0 , x[-2]*1.05)
 
     axs[0,0].set_ylabel(solver_param['variable1'])
     axs[0,1].set_ylabel(solver_param['variable2'])
     axs[1,0].set_ylabel(solver_param['variable3'])
     axs[1,1].set_ylabel(solver_param['variable4'])
+
+    axs[0,0].relim()
+    axs[0,0].autoscale()
+
+    axs[0,1].relim()
+    axs[0,1].autoscale()
+
+    axs[1,0].relim()
+    axs[1,0].autoscale()
+
+    axs[1,1].relim()
+    axs[1,1].autoscale()
 
     if solver_param['solver_mode'] == 'ROM' or (solver_param['plot_fom_flag'] == True and iter > int(solver_param['init_training_win'])):
 
