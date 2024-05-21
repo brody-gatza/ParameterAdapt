@@ -131,11 +131,11 @@ def update_ghost_cell(solver_param,state):
     
     if solver_param['non_reflective_bc']:
 
-        Q_prim_user[:,0:2]   = Q_prim_user[:,3].reshape(-1, 1)
+        Q_prim_user[:,0:2]   = Q_prim_user[:,2].reshape(-1, 1)
 
         Q_prim_user[:,-2:]   = Q_prim_user[:,-3].reshape(-1, 1)
 
-        Q_cons_user[:,0:2]   = Q_cons_user[:,3].reshape(-1, 1)
+        Q_cons_user[:,0:2]   = Q_cons_user[:,2].reshape(-1, 1)
 
         Q_cons_user[:,-2:]   = Q_cons_user[:,-3].reshape(-1, 1)
 
@@ -150,7 +150,6 @@ def update_ghost_cell(solver_param,state):
         Q_cons_user[:,-2:]   = Q_cons_user[:,2:4]
         Q_cons_user[:,1]     = Q_cons_user[:,-3]
         Q_cons_user[:,-2]    = Q_cons_user[:,2]
-
 
     Q_prim_solver = results_user2solver_converter(Q_prim_user)
     Q_cons_solver = results_user2solver_converter(Q_cons_user)
