@@ -1,0 +1,58 @@
+# solver setup
+
+solver_mode 		= fom
+rom_method  		= galerkin
+pod_energy  		= 99.999
+hyper	    		= true
+hyper_method		= qdeim
+init_training_win 	= 10
+
+# time discretization
+dt            = 1e-3
+num_steps     = 3000
+time_scheme   = explicit_fd_euler
+dual_time     = false
+res_tol       = 1e-5
+
+# space discretization
+x_initial   = 0
+x_final     = 1
+cell_number = 500 
+
+# inlet BC
+#press_inlet      = 1
+#temp_inlet       = 300
+#vel_inlet        = 0.1
+#rho_inlet        = 1
+#mass_frac_inlet  = [1.0, 0.0]
+
+# outlet BC
+#press_outlet      = 0.1
+#temp_outlet       = 300
+#vel_outlet        = 0.1
+#rho_outlet        = 0.1
+#mass_frac_outlet = [1.0, 0.0]
+
+# Initial Condition
+
+x_interval_ic = [[0,0.5],[0.5,0.502],[0.502,0.5]]
+press_ic      = [0.001,0.01,0.001]
+temp_ic       = [300,300,300]
+vel_ic        = [0.001,0.001,0.001]
+rho_ic        = [1,1,1]
+mass_frac_ic  = [[1.0, 0.0],[1.0, 0.0],[1.0, 0.0]]
+
+# gas model
+gas_model   = ideal gas model
+flux_scheme = roe
+
+# Visualization
+
+variable1 	= Density
+variable2 	= Pressure
+variable3 	= Velocity
+variable4 	= None
+update_interval = 100
+
+
+

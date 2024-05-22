@@ -5,7 +5,7 @@ rom_method  		= galerkin
 pod_energy  		= 99.999
 hyper	    		= true
 hyper_method		= qdeim
-init_training_win 	= 100
+init_training_win 	= 10
 
 # time discretization
 dt            = 5e-5
