@@ -691,14 +691,14 @@ def adapt_sample(solver_param,rom_param,F,state):
         # plt.plot(rho_bar_shock,label='future shock')
 
 
-        diff_rho_bar_shock = np.diff(rho_bar_shock)
+        mid_shock_indx = np.argsort(np.diff(np.diff(rho_bar_shock)))[0]
 
-        sorted_diff_rho_bar_shock = np.sort(np.where(diff_rho_bar_shock != 0))[0]
+        # sorted_diff_rho_bar_shock = np.sort(np.where(diff_rho_bar_shock != 0))[0]
 
         # deflection_points = sorted_diff_rho_bar_shock[0:3]
 
-        future_shock_head = sorted_diff_rho_bar_shock[-1]
-        future_shock_tail = future_shock_head - 3
+        # future_shock_head = sorted_diff_rho_bar_shock[-1]
+        # future_shock_tail = future_shock_head - 3
 
         # ### current shock ###
 
@@ -715,7 +715,7 @@ def adapt_sample(solver_param,rom_param,F,state):
 
         ### shock capturing sampling ###
 
-        shock_range = np.arange(future_shock_head-2,future_shock_tail+2,1)
+        shock_range = np.arange(mid_shock_indx-10,mid_shock_indx+10,1)
         num_req_samples_shock = len(shock_range)
 
     
