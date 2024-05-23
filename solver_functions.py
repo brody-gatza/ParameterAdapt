@@ -421,8 +421,8 @@ def second_order_roe_flux_calculator(solver_param,rom_param,state):
         range_flux = S_indx_user + 2 
 
         range_flux_neighbor_left   = range_flux - 1
-        # range_flux_neighbor_right  = range_flux + 1 
-        range_flux = np.concatenate((range_flux,range_flux_neighbor_left))
+        range_flux_neighbor_right  = range_flux + 1 
+        range_flux = np.concatenate((range_flux,range_flux_neighbor_left,range_flux_neighbor_right))
         range_flux = np.sort(np.unique(range_flux))
 
 
@@ -470,7 +470,7 @@ def second_order_roe_flux_calculator(solver_param,rom_param,state):
         diffusion[:,j] = 0.5 * A @ (Q_cons_user[:,j]-Q_cons_user[:,j-1]) / vol
 
         flux[0,j] = 0.5*(rho[2*j]*vx[2*j]                 + rho[2*j+1]*vx[2*j+1])                         - diffusion[0,j] 
-        flux[1,j] = 0.5*(rho[2*j]*vx[2*j]**2 + press[2*j] + rho[2*j+1]*vx[2*j+1]+press[2*j+1])         - diffusion[1,j] 
+        flux[1,j] = 0.5*(rho[2*j]*vx[2*j]**2 + press[2*j] + rho[2*j+1]*vx[2*j+1]**2+press[2*j+1])         - diffusion[1,j] 
         flux[2,j] = 0.5*(vx[2*j]*(en_L+press[2*j])        + vx[2*j+1]*(en_R+press[2*j+1]))                - diffusion[2,j] 
 
     # breakpoint()

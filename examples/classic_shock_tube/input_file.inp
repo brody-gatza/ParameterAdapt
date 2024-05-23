@@ -38,8 +38,8 @@ cell_number = 500
 x_interval_ic = [[0,0.5],[0.5,1]]
 press_ic      = [1,0.1]
 temp_ic       = [300,300]
-vel_ic        = [0.1,0.1]
-rho_ic        = [1,0.1]
+vel_ic        = [0.001,0.001]
+rho_ic        = [1,0.125]
 mass_frac_ic  = [[1.0, 0.0],[1.0, 0.0]]
 
 # gas model
