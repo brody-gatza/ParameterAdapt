@@ -8,8 +8,8 @@ hyper_method		= qdeim
 init_training_win 	= 10
 
 # time discretization
-dt            = 1e-3
-num_steps     = 5000
+dt            = 5e-5
+num_steps     = 3500
 time_scheme   = explicit_fd_euler
 dual_time     = false
 res_tol       = 1e-5
@@ -35,10 +35,10 @@ cell_number = 500
 
 # Initial Condition
 
-x_interval_ic = [[0,0.5],[0.5,0.502],[0.502,1]]
-press_ic      = [0.001,0.01,0.001]
+x_interval_ic = [[0,0.48],[0.48,0.52],[0.52,1]]
+press_ic      = [0.0001,10,0.0001]
 temp_ic       = [300,300,300]
-vel_ic        = [0.001,0.001,0.001]
+vel_ic        = [0,0,0]
 rho_ic        = [1,1,1]
 mass_frac_ic  = [[1.0, 0.0],[1.0, 0.0],[1.0, 0.0]]
 
