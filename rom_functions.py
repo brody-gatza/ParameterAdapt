@@ -420,7 +420,7 @@ def adaptive_rom_progress(solver_param,rom_param,state,iter):
             sampling_adapt_freq = solver_param['unsampled_update_freq']
 
             # Run a FOM at whole domain to update unsampled points at a specific freq
-            if sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0:
+            if (sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0) or (iter == int(solver_param['init_training_win'])+1):
                 # breakpoint()
                 Q_bar_star_old = state['Q_bar']
                 solver_param['hyper'] = False
