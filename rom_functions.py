@@ -495,7 +495,7 @@ def adaptive_rom_progress(solver_param,rom_param,state,iter):
         
             # Update Samples
 
-            if sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0:
+            if (sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0) or (iter == int(solver_param['init_training_win'])+1):
 
                 ### adapt sample ###
 
@@ -691,7 +691,17 @@ def adapt_sample(solver_param,rom_param,F,state):
         # plt.plot(rho_bar_shock,label='future shock')
 
 
-        mid_shock_indx = np.argsort(np.diff(np.diff(rho_bar_shock)))[0]
+        second_derv_density = np.gradient(np.gradient(rho_bar_shock))
+
+        deflection_points = np.argsort(second_derv_density)[-2:]
+
+        first_shock   = deflection_points[0]
+        shorck_range1 = np.arange(first_shock-10,first_shock+10,1)
+
+        second_shock   = deflection_points[1]
+        shorck_range2 = np.arange(second_shock-10,second_shock+10,1)
+
+        shock_range = np.sort(np.unique(np.append(shorck_range1,shorck_range2)))
 
         # sorted_diff_rho_bar_shock = np.sort(np.where(diff_rho_bar_shock != 0))[0]
 
@@ -715,8 +725,8 @@ def adapt_sample(solver_param,rom_param,F,state):
 
         ### shock capturing sampling ###
 
-        shock_range = np.arange(mid_shock_indx-10,mid_shock_indx+10,1)
-        num_req_samples_shock = len(shock_range)
+        # shock_range = np.arange(mid_shock_indx-10,mid_shock_indx+10,1)
+        # num_req_samples_shock = len(shock_range)
 
     
         ### normal sampling ###
