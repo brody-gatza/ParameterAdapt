@@ -295,8 +295,18 @@ def first_order_roe_flux_calculator(solver_param,rom_param,state):
     vx     = Q_prim_user[1,:]
     press  = Q_prim_user[2,:]
 
+    
+
     gamma  = solver_param['gamma']
     vol    = solver_param['vol']
+
+    # breakpoint()
+
+    # c_max = np.max(np.abs(np.sqrt(gamma*press/rho)))
+
+    # cfl = c_max*solver_param['dt']/vol
+
+    # dt = 0.08*vol/c_max
 
     S_indx_user = rom_param['S_indx_user']
 
@@ -359,7 +369,7 @@ def first_order_roe_flux_calculator(solver_param,rom_param,state):
         flux[1,j+1] = 0.5*(rho[j]*vx[j]**2 + press[j] + rho[j+1]*vx[j+1]**2+press[j+1])              - diffusion[1,j+1] 
         flux[2,j+1] = 0.5*(vx[j]*(en[j]+press[j])     + vx[j+1]*(en[j+1]+press[j+1]))             - diffusion[2,j+1] 
 
-    
+    # breakpoint()
     state['flux_cons'] = flux
 
     return state
