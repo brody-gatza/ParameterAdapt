@@ -523,7 +523,7 @@ def adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_tilda_p
 
         basis_num_row,basis_num_col = np.shape(rom_param['basis'])
         
-        window_size = 10
+        window_size = basis_num_col+1
 
         snapshot_to_taken = np.arange(iter-window_size+1,iter)
 
@@ -564,8 +564,8 @@ def adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_tilda_p
         # Create a matrix of snapshots with results from past and q bar
 
         basis_num_row,basis_num_col = np.shape(rom_param['basis'])
-        
-        window_size = 10
+        breakpoint()
+        window_size = basis_num_col+1
 
         snapshot_to_taken = np.arange(iter-window_size+1,iter)
 
@@ -596,7 +596,7 @@ def adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_tilda_p
 
         basis_num_row,basis_num_col = np.shape(rom_param['basis'])
         
-        window_size = 10
+        window_size = basis_num_col+1
 
         snapshot_to_taken = np.arange(iter-window_size+1,iter)
 
@@ -685,7 +685,7 @@ def adapt_sample(solver_param,rom_param,F,state):
         
         ### future shock ###
 
-        rho_bar_shock = Q_bar_shock_solver_int[0:500]
+        rho_bar_shock = Q_bar_shock_solver_int[0:solver_param['cell_number']]
 
         # plt.figure()
         # plt.plot(rho_bar_shock,label='future shock')
@@ -696,10 +696,10 @@ def adapt_sample(solver_param,rom_param,F,state):
         deflection_points = np.argsort(second_derv_density)[-2:]
 
         first_shock   = deflection_points[0]
-        shorck_range1 = np.arange(first_shock-10,first_shock+10,1)
+        shorck_range1 = np.arange(first_shock-20,first_shock+20,1)
 
         second_shock   = deflection_points[1]
-        shorck_range2 = np.arange(second_shock-10,second_shock+10,1)
+        shorck_range2 = np.arange(second_shock-20,second_shock+20,1)
 
         shock_range = np.sort(np.unique(np.append(shorck_range1,shorck_range2)))
 
