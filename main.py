@@ -408,7 +408,11 @@ class UI(customtkinter.CTk):
 
         self.fom_plot_check_var = customtkinter.BooleanVar()
         self.fom_plot = customtkinter.CTkCheckBox(self.visual_frame , text='Plot FOM Data',variable=self.fom_plot_check_var)
-        self.fom_plot.grid(row=6,column=1, pady=10,sticky='ew')              
+        self.fom_plot.grid(row=6,column=0)
+
+        self.profile_check_var = customtkinter.BooleanVar()
+        self.profile = customtkinter.CTkCheckBox(self.visual_frame , text='Perform Profiling',variable=self.profile_check_var)
+        self.profile.grid(row=6,column=1)             
 
         # ######################  IC  ######################
 
@@ -1054,13 +1058,19 @@ class UI(customtkinter.CTk):
         except ImportError as e:
             print(f"Error reloading module: {rom_functions}")
 
-        # with cProfile.Profile() as pr:
+        if self.profile_check_var.get() == True:
 
-        ui_solver_bridge.driver(self)
+            with cProfile.Profile() as pr:
 
-        # stats = pstats.Stats(pr)
-        # stats.sort_stats(pstats.SortKey.TIME)
-        # stats.dump_stats(filename='needs_profiling2.prof')
+                ui_solver_bridge.driver(self)
+            
+            stats = pstats.Stats(pr)
+            stats.sort_stats(pstats.SortKey.TIME)
+            stats.dump_stats(filename=self.working_dir_entry_var.get() +'/'+ 'profiling_results.prof')
+
+        else: 
+
+            ui_solver_bridge.driver(self)
 
 
                                                              

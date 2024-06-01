@@ -59,12 +59,6 @@ def driver(self):
     
     visual_param        = visualization_functions.initial_plot(axs,solver_param,visual_param)
 
-    # # Create a new figure
-    # fig_basis = plt.figure()
-
-    # # Add axes to the figure
-    # ax_basis = fig_basis.add_subplot(1, 1, 1)  # 1 row, 1 column, first plot
-
     # begin simulation
     start_time = time.time()
 
@@ -84,25 +78,8 @@ def driver(self):
 
         elif solver_param['solver_mode'] == 'Adaptive ROM':
 
-            # pr = cProfile.Profile()
-            # pr.enable()
-
             state, solver_param , rom_param  = rom_functions.adaptive_rom_progress(solver_param,rom_param,state,iter)
-            # if iter >=10:
-            #     ax_basis.cla()
-            #     for i in range(9):
-                    
-            #         ax_basis.plot(rom_param['basis'][0:500,i],label='mode' + str(i))
-            #         ax_basis.legend()
-            #         ax_basis.set_ylim([-1,1])
 
-            # pr.disable()
-            # s = io.StringIO()
-            # sortby = SortKey.CUMULATIVE
-            # ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
-            # ps.print_stats()
-            # print(s.getvalue())
-            
         # convert cons to prim
         state = solver_functions.cons2prim_converter(solver_param,state)
 
@@ -113,17 +90,16 @@ def driver(self):
         
         plt.show(block=False)
 
-        # if iter == 59:
-
-        #     breakpoint()
-        #     for i in range(0,59):
-        #         plt.plot(solver_param['x'],state['cons_results_save'][0,:,i],label=i)
-        #         plt.legend()
-        #         plt.show()
-        #         time.sleep(0.01)
         print('Iteration: ' + str(iter+1))
         state['cons_results_save'][:,:,iter] = solver_functions.results_solver2user_converter(solver_param['cell_number'],[state['Q_cons']])[:,2:-2]
-        state['prim_results_save'][:,:,iter] = solver_functions.results_solver2user_converter(solver_param['cell_number'],[state['Q_prim']])[:,2:-2]  
+        state['prim_results_save'][:,:,iter] = solver_functions.results_solver2user_converter(solver_param['cell_number'],[state['Q_prim']])[:,2:-2]
+        
+        if (solver_param['solver_mode'] != 'FOM' and iter > int(solver_param['init_training_win'])): 
+
+            state['q_red_save'][:,iter]                                 = rom_param['q_red0']
+            state['basis_save'][:,:,iter]                               = rom_param['basis']
+            state['S_indx_user_save'][rom_param['S_indx_user'],iter]    = rom_param['S_indx_user']
+            state['S_indx_solver_save'][rom_param['S_indx_solver'],iter]= rom_param['S_indx_solver']
 
     end_time = time.time()
 
@@ -151,6 +127,18 @@ def driver(self):
     # save the results and end the simulation
     np.save( work_dir + '/' +save_title + ' cons.npy' ,state['cons_results_save'])
     np.save( work_dir + '/' +save_title + ' prim.npy' ,state['prim_results_save'])
+
+    if solver_param['solver_mode'] != 'FOM':
+
+        np.save( work_dir + '/' +save_title + ' q_r.npy'                  ,state['q_red_save']        )
+        np.save( work_dir + '/' +save_title + ' basis.npy'                ,state['basis_save']        )
+        np.save( work_dir + '/' +save_title + ' q_ref.npy'                ,state['q_ref_save']        )
+        np.save( work_dir + '/' +save_title + ' norm.npy'                 ,state['normalizor_save']   )
+        np.save( work_dir + '/' +save_title + ' denorm.npy'               ,state['denormalizor_save'] )
+        np.save( work_dir + '/' +save_title + ' samples_user.npy'         ,state['S_indx_user_save']  )
+        np.save( work_dir + '/' +save_title + ' samples_solver.npy'       ,state['S_indx_solver_save'])
+
+
 
     print('Simulation successfully completed !')
 
