@@ -453,7 +453,7 @@ def single_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
                 solver_param['hyper'] = True
                 solver_param['dt'] = solver_param['dt'] / sampling_adapt_freq
 
-                rom_param , F = adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_tilda_predict_solver_int,Q_red_new)
+                rom_param , F = adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_red_new,Q_tilda_predict_solver_int)
             
                 # Find Q tilda (ROM) with new basis(correction)
 
@@ -479,7 +479,7 @@ def single_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
                 # Combine FOM sampled points with FOM Estimation at umsampled
                 Q_bar_new_solver_int[rom_param['S_indx_solver']] = Q_bar_new_sampling
 
-                rom_param , F = adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_tilda_predict_solver_int,Q_red_new)
+                rom_param , F = adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_red_new,Q_tilda_predict_solver_int)
             
                 # Find Q tilda (ROM) with new basis(correction)
 
@@ -520,7 +520,7 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
             state['Q_bar'] = state['Q_cons']
 
     else:   
-            
+
             # read basic parameters
             q_ref            = rom_param['q_ref']
             normalizor       = rom_param['normalizor']
@@ -529,10 +529,6 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
             # Q tilda (ROM) before any update
             Q_tilda_old = state['Q_cons']
             Q_tilda_old_solver_int = solver_functions.solver_eliminate_ghost(solver_param,Q_tilda_old)
-
-            # Find new Q tilda using old basis (prediction)
-            state = solver_functions.residual_calculator(solver_param,rom_param,state)
-            state , rom_param = red2full_state_calculator(solver_param,rom_param,state)
             
             # Find FOM at sampled points
             sampling_adapt_freq = solver_param['unsampled_update_freq']
@@ -558,7 +554,9 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
                 solver_param['hyper'] = True
                 solver_param['dt'] = solver_param['dt'] / sampling_adapt_freq
 
-                rom_param , F = adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_tilda_predict_solver_int=0,Q_red_new=0)
+                Q_red_new = rom_param['basis'].T @ Q_bar_star_new_solver_int
+
+                rom_param , F = adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_red_new,Q_tilda_predict_solver_int=0)
             
                 # Find Q tilda (ROM) with new basis(correction)
 
@@ -573,6 +571,7 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
 
             # Run ROM at sampled points
             else:
+
                 state['Q_cons']    = Q_tilda_old
                 state              = solver_functions.residual_calculator(solver_param,rom_param,state)
                 state['Q_cons']    = Q_tilda_old_solver_int[rom_param['S_indx_solver']]
@@ -585,7 +584,7 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
                 Q_red_new                               = np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver']]) @ decen_norm_Q_bar_new_sampling
                 Q_bar_new_solver_int                    = q_ref + (denormalizor * (rom_param['basis'] @ Q_red_new))
 
-                rom_param , F = adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_tilda_predict_solver_int=0,Q_red_new=0)
+                rom_param , F = adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_red_new,Q_tilda_predict_solver_int=0)
             
                 # Find Q tilda (ROM) with new basis(correction)
                 rom_param['q_red0'] = rom_param['basis'].T @ F [:,-1]
@@ -606,7 +605,7 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
 
     return state, solver_param , rom_param
 
-def adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_tilda_predict_solver_int=0,Q_red_new=0):
+def adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_red_new,Q_tilda_predict_solver_int):
 
     q_ref = rom_param['q_ref']
     normalizor = rom_param['normalizor']
@@ -617,9 +616,9 @@ def adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_tilda_p
         del_basis = ( (normalizor.reshape(-1,1)*(Q_bar_new_solver_int-Q_tilda_predict_solver_int).reshape(-1,1))@(Q_red_new.reshape(1,-1)) ) / (np.linalg.norm(Q_red_new)**2)
         rom_param['basis'] = rom_param['basis'] + del_basis
 
-        F = np.reshape((Q_bar_new_solver_int-q_ref)*normalizor,(-1,1))
-                
-            
+        F   = np.reshape((Q_bar_new_solver_int-q_ref)*normalizor,(-1,1))
+
+                            
     elif solver_param['adaptive_rom_method'] == 'Multi-Snapshot':
 
         # Create a matrix of snapshots with results from past and q bar
@@ -637,6 +636,7 @@ def adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_tilda_p
             # past snapshots
             snapshot_temp_int = solver_functions.results_user2solver_converter(state['cons_results_save'][:,:,snapshot_to_taken[indx]])
             F [:,indx]          = (snapshot_temp_int-q_ref)*normalizor
+
 
         # future snapshot
         F [:,-1]          = (Q_bar_new_solver_int-q_ref)*normalizor
@@ -672,6 +672,7 @@ def adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_tilda_p
         snapshot_to_taken = np.arange(iter-window_size+1,iter)
 
         F  = np.zeros((basis_num_row,window_size))
+        Q_R = np.zeros((basis_num_col,window_size))
 
         for indx in range(window_size-1):
             
@@ -679,14 +680,18 @@ def adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_tilda_p
             snapshot_temp_int = solver_functions.results_user2solver_converter(state['cons_results_save'][:,:,snapshot_to_taken[indx]])
             F [:,indx]          = (snapshot_temp_int-q_ref)*normalizor
 
+            Q_R[:,indx]         = state['q_red_save'][:,snapshot_to_taken[indx]]
+        
         # future snapshot
         F [:,-1]          = (Q_bar_new_solver_int-q_ref)*normalizor
 
-        Q_R = np.linalg.pinv(rom_param['basis']) @ F
+        Q_R[:,-1]         = rom_param['basis'].T @ F [:,-1]
 
         pinv_Q_R = np.linalg.pinv(Q_R)
 
         rom_param['basis'] = F @ pinv_Q_R
+
+        new_basis = rom_param['basis']
 
         # orthogonalize the basis
         rom_param['basis'] , _ = np.linalg.qr(rom_param['basis'])
@@ -798,10 +803,10 @@ def adapt_sample(solver_param,rom_param,F,state):
         deflection_points = np.argsort(second_derv_density)[-2:]
 
         first_shock   = deflection_points[0]
-        shorck_range1 = np.arange(first_shock-20,first_shock+20,1)
+        shorck_range1 = np.arange(first_shock-5,first_shock+5,1)
 
         second_shock   = deflection_points[1]
-        shorck_range2 = np.arange(second_shock-20,second_shock+20,1)
+        shorck_range2 = np.arange(second_shock-5,second_shock+5,1)
 
         shock_range = np.sort(np.unique(np.append(shorck_range1,shorck_range2)))
 
@@ -833,7 +838,7 @@ def adapt_sample(solver_param,rom_param,F,state):
     
         ### normal sampling ###
         # num_req_samples = len(rom_param['S_indx_user'])-num_req_samples_shock
-        num_req_samples = 20
+        num_req_samples = 30
         basis_pinv = np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver'],:])
 
         interp_error      = np.abs(F[:,-1] - (rom_param['basis']@basis_pinv)@F[rom_param['S_indx_solver'],-1])
