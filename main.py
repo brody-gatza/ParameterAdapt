@@ -3,7 +3,7 @@ import customtkinter
 import ast
 from tkinter import ttk
 import importlib
-import pandas as pd
+import numpy as np
 import cProfile
 import pstats
 
@@ -208,91 +208,6 @@ class UI(customtkinter.CTk):
         self.cell_number = customtkinter.CTkEntry(self.space_descritization_frame , textvariable=self.cell_number_entry_var)
         self.cell_number.grid(row=3,column=1,padx=25, pady=10)
 
-        #####################   Inet BC   ######################
-
-        # self.inlet_bc_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
-        # self.inlet_bc_frame.grid(row=1,column=1,padx=10,pady=10 , sticky = 'new')
-
-        # self.inlet_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Inlet Boundary Condition')
-        # self.inlet_label.grid(row=0,column=0,columnspan = 2)
-
-        # self.inlet_press_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Pressure')
-        # self.inlet_press_label.grid(row=1,column=0,padx=15,pady=10) 
-
-        # self.inlet_press_entry_var = customtkinter.StringVar()
-        # self.inlet_press = customtkinter.CTkEntry(self.inlet_bc_frame , textvariable=self.inlet_press_entry_var)
-        # self.inlet_press.grid(row=1,column=1,padx=15,pady=10) 
-
-        # self.inlet_temp_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Temperature')
-        # self.inlet_temp_label.grid(row=2,column=0,padx=15,pady=10)  
-
-        # self.inlet_temp_entry_var = customtkinter.StringVar()
-        # self.inlet_temp = customtkinter.CTkEntry(self.inlet_bc_frame,textvariable=self.inlet_temp_entry_var)
-        # self.inlet_temp.grid(row=2,column=1,padx=15,pady=10) 
-
-        # self.inlet_vel_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Velocity')
-        # self.inlet_vel_label.grid(row=3,column=0,padx=15,pady=10) 
-
-        # self.inlet_vel_entry_var = customtkinter.StringVar()
-        # self.inlet_vel = customtkinter.CTkEntry(self.inlet_bc_frame , textvariable=self.inlet_vel_entry_var)
-        # self.inlet_vel.grid(row=3,column=1,padx=15,pady=10) 
-
-        # self.inlet_rho_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Density')
-        # self.inlet_rho_label.grid(row=4,column=0,padx=15,pady=10) 
-
-        # self.inlet_rho_entry_var = customtkinter.StringVar()
-        # self.inlet_rho = customtkinter.CTkEntry(self.inlet_bc_frame,textvariable=self.inlet_rho_entry_var)
-        # self.inlet_rho.grid(row=4,column=1,padx=15,pady=10) 
-
-        # self.inlet_mass_frac_label = customtkinter.CTkLabel(self.inlet_bc_frame,text='Mass Fraction')
-        # self.inlet_mass_frac_label.grid(row=5,column=0,padx=15,pady=10) 
-
-        # self.inlet_mass_frac_entry_var = customtkinter.StringVar()
-        # self.inlet_mass_frac = customtkinter.CTkEntry(self.inlet_bc_frame,textvariable=self.inlet_mass_frac_entry_var)
-        # self.inlet_mass_frac.grid(row=5,column=1,padx=15,pady=10) 
-
-        # ######################   Outlet BC   ######################
-
-        # self.outlet_bc_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
-        # self.outlet_bc_frame.grid(row=1,column=2,padx=10,pady=10 , sticky = 'new')
-
-        # self.outlet_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Outlet Boundary Condition')
-        # self.outlet_label.grid(row=0,column=0,columnspan = 2)
-
-        # self.outlet_press_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Pressure')
-        # self.outlet_press_label.grid(row=1,column=0,padx=15,pady=10) 
-
-        # self.outlet_press_entry_var = customtkinter.StringVar()
-        # self.outlet_press = customtkinter.CTkEntry(self.outlet_bc_frame,textvariable=self.outlet_press_entry_var)
-        # self.outlet_press.grid(row=1,column=1,padx=15,pady=10) 
-
-        # self.outlet_temp_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Temperature')
-        # self.outlet_temp_label.grid(row=2,column=0,padx=15,pady=10)  
-
-        # self.outlet_temp_entry_var = customtkinter.StringVar()
-        # self.outlet_temp = customtkinter.CTkEntry(self.outlet_bc_frame,textvariable=self.outlet_temp_entry_var)
-        # self.outlet_temp.grid(row=2,column=1,padx=15,pady=10) 
-
-        # self.outlet_vel_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Velocity')
-        # self.outlet_vel_label.grid(row=3,column=0,padx=15,pady=10) 
-
-        # self.outlet_vel_entry_var = customtkinter.StringVar()
-        # self.outlet_vel = customtkinter.CTkEntry(self.outlet_bc_frame,textvariable=self.outlet_vel_entry_var)
-        # self.outlet_vel.grid(row=3,column=1,padx=15,pady=10) 
-
-        # self.outlet_rho_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Density')
-        # self.outlet_rho_label.grid(row=4,column=0,padx=15,pady=10) 
-
-        # self.outlet_rho_entry_var = customtkinter.StringVar()
-        # self.outlet_rho = customtkinter.CTkEntry(self.outlet_bc_frame,textvariable=self.outlet_rho_entry_var)
-        # self.outlet_rho.grid(row=4,column=1,padx=15,pady=10) 
-
-        # self.outlet_mass_frac_label = customtkinter.CTkLabel(self.outlet_bc_frame,text='Mass Fraction')
-        # self.outlet_mass_frac_label.grid(row=5,column=0,padx=15,pady=10) 
-
-        # self.outlet_mass_frac_entry_var = customtkinter.StringVar()
-        # self.outlet_mass_frac = customtkinter.CTkEntry(self.outlet_bc_frame,textvariable=self.outlet_mass_frac_entry_var)
-        # self.outlet_mass_frac.grid(row=5,column=1,padx=15,pady=10)
 
         #####################   Gas Model   ######################
         
@@ -306,8 +221,8 @@ class UI(customtkinter.CTk):
         self.gas_model_label.grid(row=1 , column=0)
 
         self.gas_model_entry_var = customtkinter.StringVar()
-        self.gas_model_options = ['Ideal Gas Model']
-        self.gas_model = customtkinter.CTkOptionMenu(self.physics_frame , values=self.gas_model_options)
+        self.gas_model_options = ['Non-Reacting Air','H2/Air Combustion']
+        self.gas_model = customtkinter.CTkOptionMenu(self.physics_frame , values=self.gas_model_options , variable=self.gas_model_entry_var,command=self.gas_model_callback)
         self.gas_model.grid(row=1,column=1 , padx = 5 , pady = 10)
 
         self.flux_scheme_label = customtkinter.CTkLabel(self.physics_frame , text='Flux Scheme')
@@ -318,10 +233,13 @@ class UI(customtkinter.CTk):
         self.flux_scheme = customtkinter.CTkOptionMenu(self.physics_frame , values=self.flux_scheme_options , variable=self.flux_scheme_entry_var)
         self.flux_scheme.grid(row=2,column=1 , padx = 15 , pady = 10)
 
-
         self.limiter_checkbox_check_var = customtkinter.BooleanVar()
         self.limiter_checkbox = customtkinter.CTkCheckBox(self.physics_frame , text='Limiter',variable=self.limiter_checkbox_check_var)
-        self.limiter_checkbox.grid(row=1,column=2,columnspan = 2 ,rowspan = 2,padx=5, pady=10)             
+        self.limiter_checkbox.grid(row=1,column=2)
+
+        self.viscous_checkbox_check_var = customtkinter.BooleanVar()
+        self.viscous_checkbox = customtkinter.CTkCheckBox(self.physics_frame , text='Viscous',variable=self.viscous_checkbox_check_var)
+        self.viscous_checkbox.grid(row=2,column=2)     
 
         # ######################   Input File  ######################
 
@@ -416,15 +334,19 @@ class UI(customtkinter.CTk):
 
         # ######################  IC  ######################
 
-        # self.ic_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
-        # self.ic_frame.grid(row=1,column=3,padx=10,pady=10 , sticky = 'new')
-        # self.ic_frame.columnconfigure(0,weight=1)
+        self.ic_frame = customtkinter.CTkFrame(self.set_up_frame,corner_radius=20)
+        self.ic_frame.grid(row=6,column=6,padx=10,pady=10 , sticky = 'new')
+        self.ic_frame.columnconfigure(0,weight=1)
 
-        # self.ic_label = customtkinter.CTkLabel(self.ic_frame , text='Initial Conditions')
-        # self.ic_label.grid(row=0,column=0,pady=10)
+        self.ic_label = customtkinter.CTkLabel(self.ic_frame , text='Initial and Boundary Conditions')
+        self.ic_label.grid(row=0,column=0,pady=10)
 
-        # self.ic_listbox = customtkinter.CTkButton(self.ic_frame,text='Configure IC',command=self.IC_conf)
-        # self.ic_listbox.grid(row=1,column=0,padx=10,pady=10,sticky='ew')
+        self.ic_listbox = customtkinter.CTkButton(self.ic_frame,text='Configure IC',command=self.IC_conf)
+        self.ic_listbox.grid(row=1,column=0,padx=10,pady=10,sticky='ew')
+
+        self.bc_listbox = customtkinter.CTkButton(self.ic_frame,text='Configure BC',command=self.BC_conf)
+        self.bc_listbox.grid(row=2,column=0,padx=10,pady=10,sticky='ew')
+    
 
         ######################  RUN  ######################
 
@@ -481,8 +403,7 @@ class UI(customtkinter.CTk):
         elif selected_option == 'Implicit - BD Euler':
 
             self.res_tol.configure(state='normal')
-
-        
+     
     def solver_mode_checkbox_callback(self,option):
 
         if option == 'FOM':
@@ -539,8 +460,7 @@ class UI(customtkinter.CTk):
             self.FOM_file_button.configure(state = 'normal')
             self.training_window.configure(state = 'normal')
             self.unsampled_update_freq.configure(state = 'normal')              
-
-    
+  
     def working_dir_callback(self):
 
         self.working_dir_path = customtkinter.filedialog.askdirectory()
@@ -573,6 +493,7 @@ class UI(customtkinter.CTk):
 
             self.fill_gui_from_inp_file()
             self.fill_gui_from_inp_file_IC()
+            self.fill_gui_from_inp_file_BC()
             
         except FileNotFoundError:
 
@@ -583,14 +504,12 @@ class UI(customtkinter.CTk):
 
             print(f"Error: Unable to read the file.")
             return None
-        
-        
+               
     def FOM_file_open_callback(self):
 
         self.FOM_file_path = customtkinter.filedialog.askopenfilename()
         self.FOM_file.delete(0, customtkinter.END)
         self.FOM_file.insert(0,string=self.FOM_file_path)
-
 
     def fill_gui_from_inp_file(self):
 
@@ -631,6 +550,16 @@ class UI(customtkinter.CTk):
 
                 self.res_tol_entry_var.set(parameters['res_tol'])
 
+            if variable == 'gas_model':
+
+                if parameters['gas_model'] == 'Non-Reacting Air':
+
+                    self.gas_model_entry_var.set(self.gas_model_options[0])
+
+                elif parameters['gas_model'] == 'H2/Air Combustion':
+
+                    self.gas_model_entry_var.set(self.gas_model_options[1])
+
             if variable == 'x_initial':
 
                 self.mesh_x_init_entry_var.set(parameters['x_initial'])
@@ -643,61 +572,19 @@ class UI(customtkinter.CTk):
 
                 self.cell_number_entry_var.set(parameters['cell_number'])
 
-            if variable == 'press_inlet':
-
-                self.inlet_press_entry_var.set(parameters['press_inlet'])
-            
-            if variable == 'temp_inlet':
-
-                self.inlet_temp_entry_var.set(parameters['temp_inlet'])
-
-            if variable == 'vel_inlet':
-
-                self.inlet_vel_entry_var.set(parameters['vel_inlet'])
-
-            if variable == 'rho_inlet':
-
-                self.inlet_rho_entry_var.set(parameters['rho_inlet'])                       
-
-            if variable == 'mass_frac_inlet':
-
-                self.inlet_mass_frac_entry_var.set(parameters['mass_frac_inlet'])    
-
-            if variable == 'press_outlet':
-
-                self.outlet_press_entry_var.set(parameters['press_outlet'])
-            
-            if variable == 'temp_outlet':
-
-                self.outlet_temp_entry_var.set(parameters['temp_outlet'])
-
-            if variable == 'vel_outlet':
-
-                self.outlet_vel_entry_var.set(parameters['vel_outlet'])
-
-            if variable == 'rho_outlet':
-
-                self.outlet_rho_entry_var.set(parameters['rho_outlet'])                  
-
-            if variable == 'mass_frac_outlet':
-
-                self.outlet_mass_frac_entry_var.set(parameters['mass_frac_outlet'])
-
-            if variable == 'gas_model':
-
-                if parameters['gas_model'] == 'ideal gas model':
-
-                    self.gas_model_entry_var.set(self.gas_model_options[0])
-
             if variable == 'flux_scheme':
 
-                if parameters['flux_scheme'] == 'roe':
+                if parameters['flux_scheme'] == 'roe1':
 
                     self.flux_scheme_entry_var.set(self.flux_scheme_options[0])
+
+                elif parameters['flux_scheme'] == 'roe2':
+
+                    self.flux_scheme_entry_var.set(self.flux_scheme_options[1])
                     
                 elif parameters['flux_scheme'] == 'rusanov':
 
-                    self.flux_scheme_entry_var.set(self.flux_scheme_options[1])
+                    self.flux_scheme_entry_var.set(self.flux_scheme_options[2])
 
             if variable == 'solver_mode':
 
@@ -736,6 +623,16 @@ class UI(customtkinter.CTk):
                 elif parameters['hyper'] == 'true':
                     
                     self.hyper_method_checkbox_check_var.set(True)
+
+            if variable == 'viscosity':
+
+                if parameters['viscosity'] == 'false':
+
+                    self.viscous_checkbox_check_var.set(False)
+
+                elif parameters['viscosity'] == 'true':
+                    
+                    self.viscous_checkbox_check_var.set(True)            
 
             if variable == 'hyper_method':
 
@@ -790,53 +687,193 @@ class UI(customtkinter.CTk):
                 self.visual_update_interval_entry_var.set(parameters['update_interval'])
 
     def fill_gui_from_inp_file_IC(self):
-
-        self.IC_conf()
-
+    
         parameters =  self.parameters
 
-        num_ic_region = len(ast.literal_eval(parameters['x_interval_ic']))
+        # read npy file if exist
 
-        for indx in range(0,num_ic_region):
+        if 'ic_path' in parameters:
 
-            for variable in parameters:
-                            
-                if variable == 'x_interval_ic':
+            IC_file_path = parameters['ic_path']
+            self.ic_data = np.load(IC_file_path)
+            print('Reading IC File Sucessfully Completed')
+
+        # read the regions manually entered 
+
+        else:
+
+            self.IC_conf()
+
+            num_ic_region = len(ast.literal_eval(parameters['x_interval_ic']))
+
+            for indx in range(0,num_ic_region):
+
+                for variable in parameters:
+                                
+                    if variable == 'x_interval_ic':
+                        
+                        x_interval = ast.literal_eval(parameters['x_interval_ic'])
+                        self.IC_x_init_entry_var.set(x_interval[indx][0])
+                        self.IC_x_final_entry_var.set(x_interval[indx][1])
+
+                    if variable == 'press_ic':
+
+                        pressure = ast.literal_eval(parameters['press_ic'])
+                        self.IC_press_entry_var.set(pressure[indx]) 
+
+                    if variable == 'temp_ic':
+                        
+                        temperature = ast.literal_eval(parameters['temp_ic'])
+                        self.IC_temp_entry_var.set(temperature[indx])
+
+                    if variable == 'vel_ic':
+
+                        velocity = ast.literal_eval(parameters['vel_ic'])
+                        self.IC_vel_entry_var.set(velocity[indx]) 
+
+                    if variable == 'rho_ic':
+                        
+                        velocity = ast.literal_eval(parameters['rho_ic'])
+                        self.IC_density_entry_var.set(velocity[indx])
+
+                    if variable == 'mass_frac_ic':
+
+                        mass_fraction = ast.literal_eval(parameters['mass_frac_ic'])
+                        self.IC_mf_entry_var.set(str(mass_fraction[indx]))
+
+                self.IC_row_insert()
+
+            self.pass_ic_data()
+    
+    def fill_gui_from_inp_file_BC(self):
+
+        parameters = self.parameters
+
+        self.BC_conf()
+
+        for variable in parameters:
+
+            if variable == 'inlet_bc':
+                
+                if parameters['inlet_bc'] == 'periodic':
+
+                    self.inlet_period_checkbox_check_var.set(1)
+
+                if parameters['inlet_bc'] == 'wall':
+
+                    self.inlet_wall_checkbox_check_var.set(1)
+
+            if variable == 'outlet_bc':
+
+                if parameters['outlet_bc'] == 'periodic':
                     
-                    x_interval = ast.literal_eval(parameters['x_interval_ic'])
-                    self.IC_x_init_entry_var.set(x_interval[indx][0])
-                    self.IC_x_final_entry_var.set(x_interval[indx][1])
+                    self.outlet_period_checkbox_check_var.set(1)
 
-                if variable == 'press_ic':
+                if parameters['outlet_bc'] == 'wall':
 
-                    pressure = ast.literal_eval(parameters['press_ic'])
-                    self.IC_press_entry_var.set(pressure[indx]) 
+                    self.outlet_wall_checkbox_check_var.set(1)
 
-                if variable == 'temp_ic':
-                    
-                    temperature = ast.literal_eval(parameters['temp_ic'])
-                    self.IC_temp_entry_var.set(temperature[indx])
+            if variable == 'rho_inlet':
 
-                if variable == 'vel_ic':
+                if parameters['rho_inlet'] == 'extrap':
 
-                    velocity = ast.literal_eval(parameters['vel_ic'])
-                    self.IC_vel_entry_var.set(velocity[indx]) 
+                    self.inlet_extrap_density_checkbox_check_var.set(1)
 
-                if variable == 'rho_ic':
-                    
-                    velocity = ast.literal_eval(parameters['rho_ic'])
-                    self.IC_density_entry_var.set(velocity[indx])
+                else:
 
-                if variable == 'mass_frac_ic':
+                    self.inlet_rho_entry_var.set(parameters['rho_inlet']) 
 
-                    mass_fraction = ast.literal_eval(parameters['mass_frac_ic'])
-                    self.IC_mf_entry_var.set([mass_fraction[indx]])
+            if variable == 'vel_inlet':
 
-            self.IC_row_insert()
+                if parameters['vel_inlet'] == 'extrap':
 
-        self.pass_ic_data()
+                    self.inlet_extrap_velocity_checkbox_check_var.set(1)
 
-        
+                else:
+
+                    self.inlet_vel_entry_var.set(parameters['vel_inlet'])                 
+
+            if variable == 'press_inlet':
+
+                if parameters['press_inlet'] == 'extrap':
+
+                    self.inlet_extrap_press_checkbox_check_var.set(1)
+
+                else:
+
+                    self.inlet_press_entry_var.set(parameters['press_inlet'])                
+
+            if variable == 'temp_inlet':
+
+                if parameters['temp_inlet'] == 'extrap':
+
+                    self.inlet_extrap_temp_checkbox_check_var.set(1)
+
+                else:                
+
+                    self.inlet_temp_entry_var.set(parameters['temp_inlet'])
+
+            if variable == 'mass_frac_inlet':
+
+                if parameters['mass_frac_inlet'] == 'extrap':
+
+                    self.inlet_extrap_MF_checkbox_check_var.set(1)
+
+                else:                
+
+                    self.inlet_mass_frac_entry_var.set(parameters['mass_frac_inlet'])  
+              
+            if variable == 'rho_outlet':
+
+                if parameters['rho_outlet'] == 'extrap':
+
+                    self.outlet_extrap_density_checkbox_check_var.set(1)
+
+                else:                
+
+                    self.outlet_rho_entry_var.set(parameters['rho_outlet'])
+
+            if variable == 'vel_outlet':
+
+                if parameters['vel_outlet'] == 'extrap':
+
+                    self.outlet_extrap_velocity_checkbox_check_var.set(1)
+
+                else:                
+
+                    self.outlet_vel_entry_var.set(parameters['vel_outlet'])            
+                
+            if variable == 'press_outlet':
+
+                if parameters['press_outlet'] == 'extrap':
+
+                    self.outlet_extrap_press_checkbox_check_var.set(1)
+
+                else:                
+
+                    self.outlet_press_entry_var.set(parameters['press_outlet'])
+            
+            if variable == 'temp_outlet':
+
+                if parameters['temp_outlet'] == 'extrap':
+
+                    self.outlet_extrap_temp_checkbox_check_var.set(1)
+
+                else:
+
+                  self.outlet_temp_entry_var.set(parameters['temp_outlet'])
+
+            if variable == 'mass_frac_outlet':
+
+                if parameters['mass_frac_outlet'] == 'extrap':
+
+                    self.outlet_extrap_MF_checkbox_check_var.set(1)
+
+                else:
+
+                    self.outlet_mass_frac_entry_var.set(parameters['mass_frac_outlet'])
+
+        self.pass_bc_data()
 
     def IC_conf(self):
 
@@ -864,7 +901,7 @@ class UI(customtkinter.CTk):
         self.IC_data_table_frame.rowconfigure(8,weight=1)
         self.IC_data_table_frame.grid(row=0,column=0,padx = 10 , pady =10 , sticky='ew')
 
-        self.tree = ttk.Treeview(self.IC_data_table_frame, columns=("x_init", "x_final", "Pressure","Temperature","Velocity","Density","Mass Fraction"), show="headings" , selectmode ='browse')
+        self.tree = ttk.Treeview(self.IC_data_table_frame, columns=("x_init", "x_final", "Pressure","Temperature","Velocity","Density","Mass Fraction"), show="headings" , selectmode ='extended')
         self.tree.heading("x_init"       , text="x init")
         self.tree.heading("x_final"      , text="x final")
         self.tree.heading("Pressure"     , text="Pressure")
@@ -917,19 +954,252 @@ class UI(customtkinter.CTk):
         self.IC_mf_entry.grid(row=1,column=13)
 
         self.IC_add_button = customtkinter.CTkButton(self.IC_data_table_frame, text="Add",command=self.IC_row_insert)
-        self.IC_add_button.grid(row=2,column=2,columnspan=2 ,pady=10,sticky='ew')
+        self.IC_add_button.grid(row=2,column=1,columnspan=2 ,pady=10,sticky='ew')
 
-        self.IC_remove_button = customtkinter.CTkButton(self.IC_data_table_frame, text="Remove",command=self.IC_row_remove)
-        self.IC_remove_button.grid(row=2,column=6,columnspan=2 ,pady=10,sticky='ew')
+        self.IC_remove_button = customtkinter.CTkButton(self.IC_data_table_frame, text="Remove Selected",command=self.IC_row_remove)
+        self.IC_remove_button.grid(row=2,column=4,columnspan=2 ,pady=10,sticky='ew')
+
+        self.IC_remove_all_button = customtkinter.CTkButton(self.IC_data_table_frame, text="Remove All",command=self.IC_row_remove_all)
+        self.IC_remove_all_button.grid(row=2,column=9,columnspan=2 ,pady=10,sticky='ew')
 
         self.IC_file_read = customtkinter.CTkButton(self.IC_data_table_frame, text="Read IC File",command=self.IC_file_read_fun)
-        self.IC_file_read.grid(row=2,column=10,columnspan=2,pady=10,sticky='ew')
+        self.IC_file_read.grid(row=2,column=12,columnspan=2,pady=10,sticky='ew')
 
         if hasattr(self, 'ic_data'):
 
             for row in self.ic_data:
                 self.tree.insert("", "end", values=row)
 
+    def BC_conf(self):
+
+        self.bc_windows = customtkinter.CTkToplevel()
+        self.bc_windows.protocol("WM_DELETE_WINDOW",self.pass_bc_data)
+        self.bc_windows.attributes("-topmost", True)
+        self.bc_windows_width   = 800
+        self.bc_windows_height  = 330
+        self.bc_windows_x       = (self.screen_width/2)-(self.bc_windows_width /2)
+        self.bc_windows_y       = (self.screen_height/2)-(self.bc_windows_height /2)
+        self.bc_windows.geometry(f'{self.bc_windows_width}x{self.bc_windows_height}+{int(self.bc_windows_x)}+{int(self.bc_windows_y)}')
+        self.bc_windows.title('Boundary Condition Configuration')
+
+        self.inlet_frame = customtkinter.CTkFrame(self.bc_windows,corner_radius=20)
+        self.inlet_frame.grid(row=0,column=0,padx=10,pady=10)
+        self.inlet_frame.columnconfigure(3,weight=1)
+
+        self.inlet_label = customtkinter.CTkLabel(self.inlet_frame,text='Inlet Boundary Condition')
+        self.inlet_label.grid(row=0,column=1,columnspan = 2)
+
+        self.inlet_rho_label = customtkinter.CTkLabel(self.inlet_frame,text='Density')
+        self.inlet_rho_label.grid(row=1,column=0,padx=15,pady=10)
+
+        self.inlet_rho_entry_var = customtkinter.StringVar()
+        self.inlet_rho = customtkinter.CTkEntry(self.inlet_frame,textvariable=self.inlet_rho_entry_var)
+        self.inlet_rho.grid(row=1,column=1,padx=15,pady=10) 
+
+        self.inlet_vel_label = customtkinter.CTkLabel(self.inlet_frame,text='Velocity')
+        self.inlet_vel_label.grid(row=2,column=0,padx=15,pady=10) 
+
+        self.inlet_vel_entry_var = customtkinter.StringVar()
+        self.inlet_vel = customtkinter.CTkEntry(self.inlet_frame , textvariable=self.inlet_vel_entry_var)
+        self.inlet_vel.grid(row=2,column=1,padx=15,pady=10) 
+
+        self.inlet_press_label = customtkinter.CTkLabel(self.inlet_frame,text='Pressure')
+        self.inlet_press_label.grid(row=3,column=0,padx=15,pady=10) 
+
+        self.inlet_press_entry_var = customtkinter.StringVar()
+        self.inlet_press = customtkinter.CTkEntry(self.inlet_frame , textvariable=self.inlet_press_entry_var)
+        self.inlet_press.grid(row=3,column=1,padx=15,pady=10) 
+
+        self.inlet_temp_label = customtkinter.CTkLabel(self.inlet_frame,text='Temperature')
+        self.inlet_temp_label.grid(row=4,column=0,padx=15,pady=10)  
+
+        self.inlet_temp_entry_var = customtkinter.StringVar()
+        self.inlet_temp = customtkinter.CTkEntry(self.inlet_frame,textvariable=self.inlet_temp_entry_var)
+        self.inlet_temp.grid(row=4,column=1,padx=15,pady=10) 
+
+        self.inlet_mass_frac_label = customtkinter.CTkLabel(self.inlet_frame,text='Mass Fraction')
+        self.inlet_mass_frac_label.grid(row=5,column=0,padx=15,pady=10) 
+
+        self.inlet_mass_frac_entry_var = customtkinter.StringVar()
+        self.inlet_mass_frac = customtkinter.CTkEntry(self.inlet_frame,textvariable=self.inlet_mass_frac_entry_var)
+        self.inlet_mass_frac.grid(row=5,column=1,padx=15,pady=10) 
+
+        self.inlet_period_checkbox_check_var = customtkinter.BooleanVar()
+        self.inlet_period_checkbox = customtkinter.CTkCheckBox(self.inlet_frame , text='Periodic',variable=self.inlet_period_checkbox_check_var)
+        self.inlet_period_checkbox.grid(row=6,column=0,padx=5, pady=10)
+
+        self.inlet_wall_checkbox_check_var = customtkinter.BooleanVar()
+        self.inlet_wall_checkbox = customtkinter.CTkCheckBox(self.inlet_frame , text='Wall',variable=self.inlet_wall_checkbox_check_var)
+        self.inlet_wall_checkbox.grid(row=6,column=1,padx=5, pady=10)
+
+        self.inlet_extrap_density_checkbox_check_var = customtkinter.BooleanVar()
+        self.inlet_extrap_density_checkbox = customtkinter.CTkCheckBox(self.inlet_frame , text='Extrapolate',variable=self.inlet_extrap_density_checkbox_check_var)
+        self.inlet_extrap_density_checkbox.grid(row=1,column=4)
+
+        self.inlet_extrap_velocity_checkbox_check_var = customtkinter.BooleanVar()
+        self.inlet_extrap_velocity_checkbox = customtkinter.CTkCheckBox(self.inlet_frame , text='Extrapolate',variable=self.inlet_extrap_velocity_checkbox_check_var)
+        self.inlet_extrap_velocity_checkbox.grid(row=2,column=4)
+
+        self.inlet_extrap_press_checkbox_check_var = customtkinter.BooleanVar()
+        self.inlet_extrap_press_checkbox = customtkinter.CTkCheckBox(self.inlet_frame , text='Extrapolate',variable=self.inlet_extrap_press_checkbox_check_var)
+        self.inlet_extrap_press_checkbox.grid(row=3,column=4)
+
+        self.inlet_extrap_temp_checkbox_check_var = customtkinter.BooleanVar()
+        self.inlet_extrap_temp_checkbox = customtkinter.CTkCheckBox(self.inlet_frame , text='Extrapolate',variable=self.inlet_extrap_temp_checkbox_check_var)
+        self.inlet_extrap_temp_checkbox.grid(row=4,column=4)
+
+        self.inlet_extrap_MF_checkbox_check_var = customtkinter.BooleanVar()
+        self.inlet_extrap_MF_checkbox = customtkinter.CTkCheckBox(self.inlet_frame , text='Extrapolate',variable=self.inlet_extrap_MF_checkbox_check_var)
+        self.inlet_extrap_MF_checkbox.grid(row=5,column=4)
+
+
+        ###########################################################
+
+        self.outlet_frame = customtkinter.CTkFrame(self.bc_windows,corner_radius=20)
+        self.outlet_frame.grid(row=0,column=1,padx=10,pady=10)
+        self.outlet_frame.columnconfigure(3,weight=1)
+
+        self.outlet_label = customtkinter.CTkLabel(self.outlet_frame,text='Outlet Boundary Condition')
+        self.outlet_label.grid(row=0,column=6,columnspan = 2)
+
+        self.outlet_rho_label = customtkinter.CTkLabel(self.outlet_frame,text='Density')
+        self.outlet_rho_label.grid(row=1,column=6,padx=15,pady=10)
+
+        self.outlet_rho_entry_var = customtkinter.StringVar()
+        self.outlet_rho = customtkinter.CTkEntry(self.outlet_frame,textvariable=self.outlet_rho_entry_var)
+        self.outlet_rho.grid(row=1,column=7,padx=15,pady=10) 
+
+        self.outlet_vel_label = customtkinter.CTkLabel(self.outlet_frame,text='Velocity')
+        self.outlet_vel_label.grid(row=2,column=6,padx=15,pady=10) 
+
+        self.outlet_vel_entry_var = customtkinter.StringVar()
+        self.outlet_vel = customtkinter.CTkEntry(self.outlet_frame , textvariable=self.outlet_vel_entry_var)
+        self.outlet_vel.grid(row=2,column=7,padx=15,pady=10) 
+
+        self.outlet_press_label = customtkinter.CTkLabel(self.outlet_frame,text='Pressure')
+        self.outlet_press_label.grid(row=3,column=6,padx=15,pady=10) 
+
+        self.outlet_press_entry_var = customtkinter.StringVar()
+        self.outlet_press = customtkinter.CTkEntry(self.outlet_frame , textvariable=self.outlet_press_entry_var)
+        self.outlet_press.grid(row=3,column=7,padx=15,pady=10) 
+
+        self.outlet_temp_label = customtkinter.CTkLabel(self.outlet_frame,text='Temperature')
+        self.outlet_temp_label.grid(row=4,column=6,padx=15,pady=10) 
+
+        self.outlet_temp_entry_var = customtkinter.StringVar()
+        self.outlet_temp = customtkinter.CTkEntry(self.outlet_frame,textvariable=self.outlet_temp_entry_var)
+        self.outlet_temp.grid(row=4,column=7,padx=15,pady=10) 
+
+        self.outlet_mass_frac_label = customtkinter.CTkLabel(self.outlet_frame,text='Mass Fraction')
+        self.outlet_mass_frac_label.grid(row=5,column=6,padx=15,pady=10) 
+
+        self.outlet_mass_frac_entry_var = customtkinter.StringVar()
+        self.outlet_mass_frac = customtkinter.CTkEntry(self.outlet_frame,textvariable=self.outlet_mass_frac_entry_var)
+        self.outlet_mass_frac.grid(row=5,column=7,padx=15,pady=10) 
+
+        self.outlet_period_checkbox_check_var = customtkinter.BooleanVar()
+        self.outlet_period_checkbox = customtkinter.CTkCheckBox(self.outlet_frame , text='Periodic',variable=self.outlet_period_checkbox_check_var)
+        self.outlet_period_checkbox.grid(row=6,column=6,padx=5, pady=10)
+
+        self.outlet_wall_checkbox_check_var = customtkinter.BooleanVar()
+        self.outlet_wall_checkbox = customtkinter.CTkCheckBox(self.outlet_frame , text='Wall',variable=self.outlet_wall_checkbox_check_var)
+        self.outlet_wall_checkbox.grid(row=6,column=7,padx=5, pady=10)
+
+        self.outlet_extrap_density_checkbox_check_var = customtkinter.BooleanVar()
+        self.outlet_extrap_density_checkbox = customtkinter.CTkCheckBox(self.outlet_frame , text='Extrapolate',variable=self.outlet_extrap_density_checkbox_check_var)
+        self.outlet_extrap_density_checkbox.grid(row=1,column=10)
+
+        self.outlet_extrap_velocity_checkbox_check_var = customtkinter.BooleanVar()
+        self.outlet_extrap_velocity_checkbox = customtkinter.CTkCheckBox(self.outlet_frame , text='Extrapolate',variable=self.outlet_extrap_velocity_checkbox_check_var)
+        self.outlet_extrap_velocity_checkbox.grid(row=2,column=10)
+        
+        self.outlet_extrap_press_checkbox_check_var = customtkinter.BooleanVar()
+        self.outlet_extrap_press_checkbox = customtkinter.CTkCheckBox(self.outlet_frame , text='Extrapolate',variable=self.outlet_extrap_press_checkbox_check_var)
+        self.outlet_extrap_press_checkbox.grid(row=3,column=10)
+
+        self.outlet_extrap_temp_checkbox_check_var = customtkinter.BooleanVar()
+        self.outlet_extrap_temp_checkbox = customtkinter.CTkCheckBox(self.outlet_frame , text='Extrapolate',variable=self.outlet_extrap_temp_checkbox_check_var)
+        self.outlet_extrap_temp_checkbox.grid(row=4,column=10)
+
+        self.outlet_extrap_MF_checkbox_check_var = customtkinter.BooleanVar()
+        self.outlet_extrap_MF_checkbox = customtkinter.CTkCheckBox(self.outlet_frame , text='Extrapolate',variable=self.outlet_extrap_MF_checkbox_check_var)
+        self.outlet_extrap_MF_checkbox.grid(row=5,column=10)
+
+        if hasattr(self, 'bc_data'):
+
+            bc_array = self.bc_data
+
+            inlet_att_list = ['inlet_rho_entry_var',
+                            'inlet_vel_entry_var',
+                            'inlet_press_entry_var',
+                            'inlet_temp_entry_var',
+                            'inlet_mass_frac_entry_var']
+
+            outlet_att_list = ['outlet_rho_entry_var',
+                            'outlet_vel_entry_var',
+                            'outlet_press_entry_var',
+                            'outlet_temp_entry_var',
+                            'outlet_mass_frac_entry_var']
+            
+            inlet_extrap_list= ['inlet_extrap_density_checkbox_check_var',
+                                'inlet_extrap_velocity_checkbox_check_var',
+                                'inlet_extrap_press_checkbox_check_var',
+                                'inlet_extrap_temp_checkbox_check_var',
+                                'inlet_extrap_MF_checkbox_check_var']
+
+            outlet_extrap_list = ['outlet_extrap_density_checkbox_check_var',
+                                'outlet_extrap_velocity_checkbox_check_var',
+                                'outlet_extrap_press_checkbox_check_var',
+                                'outlet_extrap_temp_checkbox_check_var',
+                                'outlet_extrap_MF_checkbox_check_var']
+
+            condition_met = False
+
+            if np.any(bc_array[:,0]) == 'periodic':
+                
+                self.inlet_period_checkbox_check_var.set(1)
+                condition_met = True
+                
+            elif np.any(bc_array[:,0]) == 'wall':
+            
+                self.inlet_wall_checkbox_check_var.set(1)
+                condition_met = True
+            
+            if not condition_met:
+
+                for item in range(len(inlet_att_list)):
+
+                    if bc_array[item,0] == 'extrapolate':
+        
+                        getattr(self, inlet_extrap_list[item]).set(1)
+                        
+                    else : 
+
+                        getattr(self, inlet_att_list[item]).set(bc_array[item,0])
+
+            condition_met = False
+
+            if np.any(bc_array[:,1]) == 'periodic':
+
+               self.outlet_period_checkbox_check_var.set(1)
+               condition_met = True 
+
+            elif np.any(bc_array[:,1]) == 'wall':
+            
+                self.outlet_wall_checkbox_check_var.set(1)
+                condition_met = True
+            
+            if not condition_met:
+
+                for item in range(len(outlet_att_list)):
+
+                    if bc_array[item,1] == 'extrapolate':
+        
+                        getattr(self, outlet_extrap_list[item]).set(1)
+
+                    else : 
+
+                        getattr(self, outlet_att_list[item]).set(bc_array[item,1])
 
     def IC_row_insert(self):
 
@@ -956,58 +1226,25 @@ class UI(customtkinter.CTk):
     def IC_row_remove(self):
 
         selected_item = self.tree.selection()
+
         if selected_item:
-            self.tree.delete(selected_item)
+
+            for item in selected_item:
+
+                self.tree.delete(item)
+    
+    def IC_row_remove_all(self):
+
+        for item in self.tree.get_children():
+            self.tree.delete(item)
 
     def IC_file_read_fun(self):
-
+        
         self.new_windows.withdraw()
         IC_file_path = customtkinter.filedialog.askopenfilename()
         self.new_windows.deiconify()
-        IC_data = pd.read_excel(IC_file_path)
-        print('Reading Excel File Sucessfully Completed')
-        
-        num_ic_region = len(IC_data['press_ic'])
-
-        parameters = ("x_interval_ic", "press_ic","temp_ic","vel_ic","rho_ic","mass_frac_ic")
-
-        for indx in range(0,num_ic_region):
-
-            for variable in parameters:
-                            
-                if variable == 'x_interval_ic':
-                    
-                    x_interval = ast.literal_eval(IC_data[variable][indx])
-                    self.IC_x_init_entry_var.set(x_interval[0])
-                    self.IC_x_final_entry_var.set(x_interval[1])
-
-                if variable == 'press_ic':
-
-                    pressure = IC_data[variable][indx]
-                    self.IC_press_entry_var.set(pressure) 
-
-                if variable == 'temp_ic':
-                    
-                    temperature = IC_data[variable][indx]
-                    self.IC_temp_entry_var.set(temperature)
-
-                if variable == 'vel_ic':
-
-                    velocity = IC_data[variable][indx]
-                    self.IC_vel_entry_var.set(velocity) 
-
-                if variable == 'rho_ic':
-                    
-                    density = IC_data[variable][indx]
-                    self.IC_density_entry_var.set(density)
-
-                if variable == 'mass_frac_ic':
-
-                    mass_fraction = ast.literal_eval(IC_data[variable][indx])
-                    self.IC_mf_entry_var.set([mass_fraction])
-
-            self.IC_row_insert()        
-
+        self.ic_data = np.load(IC_file_path)
+        print('Reading IC File Sucessfully Completed')
 
     def pass_ic_data(self):
 
@@ -1019,6 +1256,101 @@ class UI(customtkinter.CTk):
 
         self.ic_data = data_array
         self.new_windows.destroy()
+
+    def pass_bc_data(self):
+        
+        inlet_att_list = ['inlet_rho_entry_var',
+                          'inlet_vel_entry_var',
+                          'inlet_press_entry_var',
+                          'inlet_temp_entry_var',
+                          'inlet_mass_frac_entry_var']
+
+        outlet_att_list = ['outlet_rho_entry_var',
+                          'outlet_vel_entry_var',
+                          'outlet_press_entry_var',
+                          'outlet_temp_entry_var',
+                          'outlet_mass_frac_entry_var']
+        
+        inlet_extrap_list= ['inlet_extrap_density_checkbox_check_var',
+                            'inlet_extrap_velocity_checkbox_check_var',
+                            'inlet_extrap_press_checkbox_check_var',
+                            'inlet_extrap_temp_checkbox_check_var',
+                            'inlet_extrap_MF_checkbox_check_var']
+
+        outlet_extrap_list = ['outlet_extrap_density_checkbox_check_var',
+                              'outlet_extrap_velocity_checkbox_check_var',
+                              'outlet_extrap_press_checkbox_check_var',
+                              'outlet_extrap_temp_checkbox_check_var',
+                              'outlet_extrap_MF_checkbox_check_var']
+
+        bc_array = np.empty((5,2) , dtype='object')
+
+        condition_met = False
+
+        if self.inlet_period_checkbox_check_var.get():
+
+            bc_array[:,0] = 'periodic'
+            condition_met = True
+
+        elif self.inlet_wall_checkbox_check_var.get():
+            
+            bc_array[:,0] = 'wall'
+            condition_met = True
+
+        if not condition_met:
+
+            for item in range(len(inlet_att_list)):
+
+                att     = getattr(self, inlet_att_list[item]).get()
+                att_exp = getattr(self, inlet_extrap_list[item]).get()
+
+                if att_exp:
+                    
+                    bc_array[item,0] = 'extrapolate'
+
+                else : 
+
+                    bc_array[item,0] = att
+
+        condition_met = False
+
+        if self.outlet_period_checkbox_check_var.get():
+
+            bc_array[:,1] = 'periodic'
+            condition_met = True
+
+        elif self.outlet_wall_checkbox_check_var.get():
+            
+            bc_array[:,1] = 'wall'
+            condition_met = True
+
+        if not condition_met:
+
+            for item in range(len(outlet_att_list)):
+
+                att     = getattr(self, outlet_att_list[item]).get()
+                att_exp = getattr(self, outlet_extrap_list[item]).get()
+
+                if att_exp:
+                    
+                    bc_array[item,1] = 'extrapolate'
+
+                else : 
+
+                    bc_array[item,1] = att
+    
+        self.bc_data = bc_array
+        self.bc_windows.destroy()
+
+    def gas_model_callback(self,gas_model_entry_var):
+
+        if gas_model_entry_var == 'H2/Air Combustion':
+
+            self.viscous_checkbox_check_var.set(1)
+
+        else:
+
+            self.viscous_checkbox_check_var.set(0)
 
     def run_callback(self):
 
@@ -1078,9 +1410,4 @@ if __name__ == "__main__":
 
     app = UI()  
     app.mainloop()
-
-
-
-
-
 

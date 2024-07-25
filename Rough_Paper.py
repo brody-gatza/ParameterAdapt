@@ -1,37 +1,27 @@
+import sys
 import numpy as np
+import cantera as ct
 import matplotlib.pyplot as plt
 
+gas = ct.Solution('gri30.yaml')
 
-full_basis    = np.load(r"C:\Users\mohag\OneDrive - University of Kansas\KU - Aerospace PhD\Research Related\basis_update_sampled_only_comparsion\colliding_shocks\full_basis_update\Adaptive ROM 3000 snapshots Explicit - FD Euler GalerkinGappy POD + Shock basis.npy")
-sampled_basis = np.load(r"C:\Users\mohag\OneDrive - University of Kansas\KU - Aerospace PhD\Research Related\basis_update_sampled_only_comparsion\colliding_shocks\sampled_basis_update\Adaptive ROM 3000 snapshots Explicit - FD Euler GalerkinGappy POD + Shock basis.npy")
-svd_basis     = np.load(r"C:\Users\mohag\OneDrive - University of Kansas\KU - Aerospace PhD\Research Related\basis_update_sampled_only_comparsion\colliding_shocks\svd_basis_update\Adaptive ROM 3000 snapshots Explicit - FD Euler GalerkinGappy POD + Shock basis.npy")
+Temp=3000
+Press=ct.one_atm
+X=  'CH4:1.0, O2:1.0, N2:3.76'
 
+gas.TPX = Temp, Press, X
 
-fig,ax = plt.subplots(3,3,sharex=True)
+for i in [ 1,  2,  3,  6, 12, 13, 34, 37, 47]:
+    # gas.net_production_rates[i]
+    # gas.species_name[i]
+    print('new prod rate of ' + str(gas.species_names[i]) + ' is ' + str(gas.net_production_rates[i]))
 
-ax = ax.flatten()
-
-iter_list=np.array([11,1000,2000,2999])
-
-for iter in iter_list:
-
-    for mode in range(9):
-
-        ax[mode].cla()
-
-        ax[mode].plot(full_basis[:,mode,iter],color='tab:blue'  ,label='full')
-        ax[mode].plot(sampled_basis[:,mode,iter],color='tab:red',label='sampled')
-        ax[mode].plot(svd_basis[:,mode,iter],color='black',label='svd')
-
-        ax[mode].relim()
-        ax[mode].autoscale()
-
-        ax[mode].legend()
-
-        ax[mode].set_title('mode = ' + str(mode))
+# np.where(gas.net_production_rates!=0)
 
 
-    print(iter)
-    plt.pause(1)
 
-plt.show(block=True)
+# gas.equilibrate('TP')
+
+
+# gas.net_progress_rates
+

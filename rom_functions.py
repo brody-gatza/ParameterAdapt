@@ -107,7 +107,7 @@ def precomputer(solver_param,state):
     rom_param['training_data_prim'] = training_data_prim
 
     Q_cons_solver = state['Q_cons']
-    Q_cons_user   = solver_functions.results_solver2user_converter(cell_num,Q_cons_solver)
+    Q_cons_user   = solver_functions.results_solver2user_converter(solver_param['num_state_var'],cell_num,Q_cons_solver)
     Q_cons_interior_user = Q_cons_user[:,2:-2]
     Q_cons_interior_solver = solver_functions.results_user2solver_converter(Q_cons_interior_user) 
     rom_param['q_red0'] = basis.T @ Q_cons_interior_solver
@@ -145,7 +145,7 @@ def red2full_state_calculator(solver_param,rom_param,state):
         if solver_param['hyper'] == False:
 
             RES_solver       = state['d_flux_dx']
-            RES_user         = solver_functions.results_solver2user_converter(solver_param['cell_number'],RES_solver)
+            RES_user         = solver_functions.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],RES_solver)
             RES              = RES_user[:,2:-2].ravel()
 
         else:
@@ -172,7 +172,7 @@ def red2full_state_calculator(solver_param,rom_param,state):
 
         Q_full_order_solver= q_ref + (denormalizor * (basis @ Q_red)) 
 
-        Q_full_order_user  = solver_functions.results_solver2user_converter(solver_param['cell_number']-4,Q_full_order_solver)
+        Q_full_order_user  = solver_functions.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number']-4,Q_full_order_solver)
 
         Q_full_order_user  = np.column_stack((Q_full_order_user[:,0], Q_full_order_user[:,0], Q_full_order_user , Q_full_order_user[:,-1] , Q_full_order_user[:,-1]))
 
@@ -459,8 +459,8 @@ def single_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
 
                 Q_tilda_correct_solver_int= q_ref + (denormalizor * (rom_param['basis']  @ Q_red_new ))
                 
-                Q_tilda_correct_solver_full= solver_functions.solver_add_ghost(solver_param,Q_tilda_correct_solver_int)
-
+                Q_tilda_correct_solver_full= solver_functions.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int)
+                
                 state['Q_cons'] = Q_tilda_correct_solver_full
 
 
@@ -485,7 +485,7 @@ def single_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
 
                 Q_tilda_correct_solver_int= q_ref + (denormalizor * (rom_param['basis']  @ Q_red_new ))
 
-                Q_tilda_correct_solver_full= solver_functions.solver_add_ghost(solver_param,Q_tilda_correct_solver_int)
+                Q_tilda_correct_solver_full= solver_functions.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int)
 
                 state['Q_cons'] = Q_tilda_correct_solver_full
             
@@ -564,7 +564,7 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
 
                 Q_tilda_correct_solver_int= q_ref + (denormalizor * (rom_param['basis'] @ rom_param['q_red0'] ))
 
-                Q_tilda_correct_solver_full= solver_functions.solver_add_ghost(solver_param,Q_tilda_correct_solver_int)
+                Q_tilda_correct_solver_full= solver_functions.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int)
 
                 state['Q_cons'] = Q_tilda_correct_solver_full
 
@@ -591,7 +591,7 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
 
                 Q_tilda_correct_solver_int= q_ref + (denormalizor * (rom_param['basis'] @ rom_param['q_red0'] ))
                 
-                Q_tilda_correct_solver_full= solver_functions.solver_add_ghost(solver_param,Q_tilda_correct_solver_int)
+                Q_tilda_correct_solver_full= solver_functions.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int)
 
                 state['Q_cons'] = Q_tilda_correct_solver_full
             

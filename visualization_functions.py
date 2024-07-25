@@ -4,7 +4,7 @@ import solver_functions
 def visual_var_collector(solver_param):
 
     visual_options            = ['Density','Pressure','Temprature','Velocity','Heat Release','Mass Fraction']
-    visual_options_indx_stack = [   0     ,     2    ,      0     ,     1    ,      0       ,       0       ]
+    visual_options_indx_stack = [   0     ,     2    ,      3     ,     1    ,      0       ,       0       ]
     
     for item in visual_options:
 
@@ -106,7 +106,7 @@ def initial_plot(axs,solver_param,visual_param):
 
 def in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param):
 
-    prim_results = solver_functions.results_solver2user_converter(solver_param['cell_number'],state['Q_prim'])
+    prim_results = solver_functions.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],state['Q_prim'])
 
     x = solver_param['x']
 
@@ -119,7 +119,10 @@ def in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param):
     y11= prim_results[visual_var1,2:-2]
     y21= prim_results[visual_var2,2:-2]
     y31= prim_results[visual_var3,2:-2]
-    y41= prim_results[visual_var4,2:-2]
+    # y41= prim_results[visual_var4,2:-2]
+    y41= state['heat_release'][2:-2]
+    # y41= state['int_energy'][2:-2]
+
 
     if y11.size == 0 : 
 
@@ -157,7 +160,7 @@ def in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param):
 
     
     # # axs[0,0].set_ylim(0 , 6)
-    # # axs[0,1].set_ylim(970000 , 987500)
+    # axs[0,1].set_ylim(100e3 , 102e3)
     # # axs[1,0].set_ylim(0 , 8)
     # # axs[1,1].set_ylim(min(y4,default=0)*0.0099 , max(y4,default=0)*1.001)
 

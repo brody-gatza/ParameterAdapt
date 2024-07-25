@@ -1,17 +1,16 @@
 import solver_functions
-import non_linear_terms
 import time_integrator_functions
 import visualization_functions
 import rom_functions
 import numpy as np
 import matplotlib.pyplot as plt
 import time
+import cantera as ct
 
-
-import cProfile, pstats, io
-from pstats import SortKey
 
 def driver(self):
+
+    breakpoint()
     
     # collect all of variables from user interface
     solver_param = solver_functions.solver_parameters_collector(self)
@@ -20,10 +19,11 @@ def driver(self):
     state = solver_functions.initialize_state(solver_param)
 
     # get the initial condition
+
     state = solver_functions.ic_generator(solver_param,state)
 
     # add ghost cells
-    state = solver_functions.update_ghost_cell(solver_param,state)
+    # state = solver_functions.update_ghost_cell(solver_param,state)
 
     # convert prim to cons
     state = solver_functions.prim2cons_converter(solver_param, state)
@@ -81,19 +81,23 @@ def driver(self):
             state, solver_param , rom_param  = rom_functions.adaptive_rom_progress(solver_param,rom_param,state,iter)
 
         # convert cons to prim
+
         state = solver_functions.cons2prim_converter(solver_param,state)
 
         state = solver_functions.update_ghost_cell(solver_param,state)
-
+    
         # visualization
         visualization_functions.in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param)
         
         plt.show(block=False)
 
+        # breakpoint()
+
         print('Iteration: ' + str(iter+1))
-        state['cons_results_save'][:,:,iter] = solver_functions.results_solver2user_converter(solver_param['cell_number'],[state['Q_cons']])[:,2:-2]
-        state['prim_results_save'][:,:,iter] = solver_functions.results_solver2user_converter(solver_param['cell_number'],[state['Q_prim']])[:,2:-2]
-        
+        state['cons_results_save'][:,:,iter] = solver_functions.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],[state['Q_cons']])[:,2:-2]
+        state['prim_results_save'][:,:,iter] = solver_functions.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],[state['Q_prim']])[:,2:-2]
+
+
         if (solver_param['solver_mode'] != 'FOM' and iter > int(solver_param['init_training_win'])): 
 
             state['q_red_save'][:,iter]                                 = rom_param['q_red0']

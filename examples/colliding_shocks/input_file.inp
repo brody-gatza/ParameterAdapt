@@ -20,18 +20,18 @@ x_final     = 1
 cell_number = 500 
 
 # inlet BC
-#press_inlet      = 1
-#temp_inlet       = 300
-#vel_inlet        = 0.1
-#rho_inlet        = 1
-#mass_frac_inlet  = [1.0, 0.0]
+rho_inlet        = extrap
+vel_inlet        = extrap
+press_inlet      = extrap
+temp_inlet       = extrap
+mass_frac_inlet  = extrap
 
 # outlet BC
-#press_outlet      = 0.1
-#temp_outlet       = 300
-#vel_outlet        = 0.1
-#rho_outlet        = 0.1
-#mass_frac_outlet = [1.0, 0.0]
+rho_outlet        = extrap
+vel_outlet        = extrap
+press_outlet      = extrap
+temp_outlet       = extrap
+mass_frac_outlet  = extrap
 
 # Initial Condition
 
