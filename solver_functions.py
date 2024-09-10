@@ -15,6 +15,7 @@ def solver_parameters_collector(self):
 
         solver_param['solver_mode'] = 'ROM'
         solver_param['pod_energy'] = float(self.energy_capture_entry_var.get())
+        solver_param['init_training_win'] = self.training_window_entry_var.get()
 
     elif self.adaptive_rom_mode_checkbox_check_var.get() == True:
 
@@ -191,7 +192,6 @@ def update_ghost_cell(solver_param,state):
     Q_prim   = state['Q_prim']
     Q_cons   = state['Q_cons']
     Q_prim_user = results_solver2user_converter(solver_param['num_prim_var'],num_cell,Q_prim)
-    Q_cons_user = results_solver2user_converter(solver_param['num_state_var'],num_cell,Q_cons)
 
     if solver_param['gas_model'] != 'Non-Reacting Air':
 
@@ -266,11 +266,8 @@ def update_ghost_cell(solver_param,state):
 
     
     Q_prim_solver = results_user2solver_converter(Q_prim_user)
-    Q_cons_solver = results_user2solver_converter(Q_cons_user)
     
     state['Q_prim'] = Q_prim_solver
-    # state['Q_cons'] = Q_cons_solver
-
     state = prim2cons_converter(solver_param,state)
 
     return state
@@ -752,10 +749,13 @@ def backup_first_order_roe_inviscid_flux_calculator(solver_param,rom_param,state
 def first_order_roe_inviscid_flux_calculator(solver_param,rom_param,state):
 
     if solver_param['gas_model'] == 'Non-Reacting Air':
+
+        state            = cons2prim_converter(solver_param,state)
+        state            = update_ghost_cell(solver_param,state)
     
         Q_cons           = state['Q_cons']
-        state            = cons2prim_converter(solver_param,state)
         Q_prim           = state['Q_prim']
+
         Q_cons_user      = results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
         Q_prim_user      = results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
 
@@ -840,10 +840,13 @@ def first_order_roe_inviscid_flux_calculator(solver_param,rom_param,state):
     ### If It is a Multi-Species Case ###
 
     else :
-            
+        
+        state            = cons2prim_converter(solver_param,state)
+        state            = update_ghost_cell(solver_param,state)
+
         Q_cons           = state['Q_cons']
-        # state            = cons2prim_converter(solver_param,state)
         Q_prim           = state['Q_prim']
+
         Q_cons_user      = results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
         Q_prim_user      = results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
 
@@ -1016,7 +1019,7 @@ def first_order_roe_inviscid_flux_calculator(solver_param,rom_param,state):
             flux[2,j+1] = 0.5*(vx[j]*(en[j]+press[j])     + vx[j+1]*(en[j+1]+press[j+1]))             + 0.5 * dissipation[2 ,0]
             flux[3:,j+1]= 0.5*(rho[j]*vx[j]*Y[:,j]        + rho[j+1]*vx[j+1]*Y[:,j+1] )               + 0.5 * dissipation[3:,0]
             
-    # breakpoint()
+
     state['flux_cons'] = flux
 
     return state
@@ -1135,8 +1138,12 @@ def first_order_rusanov_viscous_flux_calculator(solver_param,rom_param,state):
 
 def first_order_roe_viscous_flux_calculator(solver_param,rom_param,state):
 
+    state            = cons2prim_converter(solver_param,state)
+    state            = update_ghost_cell(solver_param,state)
+
     Q_cons           = state['Q_cons']
     Q_prim           = state['Q_prim']
+
     Q_cons_user      = results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
     Q_prim_user      = results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
 
@@ -1150,8 +1157,8 @@ def first_order_roe_viscous_flux_calculator(solver_param,rom_param,state):
     Y_ct   = find_mass_fraction_full_cantera(Y)
 
 
-    vol    = solver_param['vol']
-    dx     = vol
+    vol           = solver_param['vol']
+    dx            = vol
     num_state_var = solver_param['num_state_var']
     num_species   = solver_param['num_species']
 
@@ -1670,7 +1677,14 @@ def source_calculator(solver_param,rom_param,state):
 
         source_terms[indx+3,:] = net_production_rate_ct[0,:,indx] * MW_species[indx] * vol
 
+
     state['source_terms'] = source_terms.ravel()
+
+    if solver_param['hyper'] == True:
+
+        source_terms_int = solver_eliminate_ghost(solver_param,state['source_terms'])
+
+        state['source_terms'] = source_terms_int[rom_param['S_indx_solver']]
 
     state['d_flux_dx'] = state['d_flux_dx'] + state['source_terms']
 

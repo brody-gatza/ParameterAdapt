@@ -81,11 +81,11 @@ def precomputer(solver_param,state):
 
     else:
 
-        basis         = V[:,0:truncation_indx[0][0]]
-        # basis         = V[:,0:1]
+        # basis         = V[:,0:truncation_indx[0][0]]
+        basis         = V[:,0:2]
         # basis           = V
     
-    normalizor_size = 3*solver_param['cell_number']
+    normalizor_size = solver_param['num_state_var']*solver_param['cell_number']
 
     denormalizor = np.zeros(normalizor_size)
 
@@ -112,7 +112,7 @@ def precomputer(solver_param,state):
     Q_cons_interior_solver = solver_functions.results_user2solver_converter(Q_cons_interior_user) 
     rom_param['q_red0'] = basis.T @ Q_cons_interior_solver
 
-    num_consv_var = 3
+    num_consv_var = solver_param['num_state_var']
     
     S_indx_user   = np.arange(0,solver_param['cell_number'])
     pcc           = 0
@@ -153,6 +153,7 @@ def red2full_state_calculator(solver_param,rom_param,state):
             RES_solver       = state['d_flux_dx']   
             RES              = pcc @ RES_solver
 
+        q_old = state['Q_cons']
 
         Q0_red           = rom_param['q_red0']
         q_ref            = rom_param['q_ref']
@@ -181,7 +182,6 @@ def red2full_state_calculator(solver_param,rom_param,state):
         rom_param['q_red0']    = Q_red
 
         state['d_flux_dx'] = RES
-
 
     return state , rom_param
 
@@ -250,11 +250,11 @@ def sample_point_finder(solver_param,rom_param):
 
     elif solver_param['sampling_method'] == 'Gappy POD + E':
             
-            num_samples = 100
+            num_samples = 800
 
             S_indx_user = GappyPODE_sample_point_finder(basis,num_samples,solver_param['cell_number'])
     
-    num_consv_var  = 3
+    num_consv_var  = solver_param['num_state_var']
     S_indx_solver = user2solver_indx_converter(S_indx_user,num_consv_var,solver_param['cell_number'])
     pcc           = hyper_precomputer(basis,S_indx_solver)
 
@@ -737,12 +737,12 @@ def adapt_sample(solver_param,rom_param,F,state):
     if solver_param['sampling_method'] == 'DEIM':
 
             S_indx_user  = DEIM_sample_point_finder(basis,solver_param['cell_number'])
-            S_indx_solver= user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+            S_indx_solver= user2solver_indx_converter(S_indx_user,solver_param['num_state_var'],solver_param['cell_number'])
 
     elif solver_param['sampling_method'] == 'QDEIM':
             
             S_indx_user = QDEIM_sample_point_finder(basis,solver_param['cell_number'])
-            S_indx_solver= user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+            S_indx_solver= user2solver_indx_converter(S_indx_user,solver_param['num_state_var'],solver_param['cell_number'])
 
     elif solver_param['sampling_method'] == 'Gappy POD':
 
@@ -756,7 +756,7 @@ def adapt_sample(solver_param,rom_param,F,state):
         S_indx_solver     = interp_error_indx[0:num_req_samples]
         S_indx_user       = solver2user_indx_converter(S_indx_solver,solver_param['cell_number'])
         S_indx_user       = np.sort(np.unique(S_indx_user))
-        S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+        S_indx_solver     = user2solver_indx_converter(S_indx_user,solver_param['num_state_var'],solver_param['cell_number'])
 
         num_selected_samples = len(S_indx_user)
         counter = 0
@@ -771,7 +771,7 @@ def adapt_sample(solver_param,rom_param,F,state):
 
             S_indx_user       = solver2user_indx_converter(S_indx_solver,solver_param['cell_number'])
             S_indx_user       = np.sort(np.unique(S_indx_user))
-            S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+            S_indx_solver     = user2solver_indx_converter(S_indx_user,solver_param['num_state_var'],solver_param['cell_number'])
 
             num_selected_samples = len(S_indx_user)
             counter = counter + 1
@@ -861,7 +861,7 @@ def adapt_sample(solver_param,rom_param,F,state):
                 indices_to_delete = np.where(S_indx_user == indx)
                 S_indx_user = np.delete(S_indx_user, indices_to_delete)
 
-        S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+        S_indx_solver     = user2solver_indx_converter(S_indx_user,solver_param['num_state_var'],solver_param['cell_number'])
 
         num_selected_samples = len(S_indx_user)
         counter = 0
@@ -884,13 +884,13 @@ def adapt_sample(solver_param,rom_param,F,state):
                     indices_to_delete = np.where(S_indx_user == indx)
                     S_indx_user = np.delete(S_indx_user, indices_to_delete)
 
-            S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+            S_indx_solver     = user2solver_indx_converter(S_indx_user,solver_param['num_state_var'],solver_param['cell_number'])
 
             num_selected_samples = len(S_indx_user)
             counter = counter + 1
 
         S_indx_user       = np.sort(np.append(S_indx_user,shock_range))
-        S_indx_solver     = user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+        S_indx_solver     = user2solver_indx_converter(S_indx_user,solver_param['num_state_var'],solver_param['cell_number'])
 
         solver_param['hyper'] = True
         solver_param['dt'] = solver_param['dt'] / solver_param['unsampled_update_freq']
@@ -902,7 +902,7 @@ def adapt_sample(solver_param,rom_param,F,state):
         num_samples = 100
 
         S_indx_user = GappyPODE_sample_point_finder(basis,num_samples,solver_param['cell_number'])
-        S_indx_solver= user2solver_indx_converter(S_indx_user,3,solver_param['cell_number'])
+        S_indx_solver= user2solver_indx_converter(S_indx_user,solver_param['num_state_var'],solver_param['cell_number'])
 
 
     rom_param['S_indx_solver'] = S_indx_solver

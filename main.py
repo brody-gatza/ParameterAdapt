@@ -440,6 +440,7 @@ class UI(customtkinter.CTk):
             self.FOM_file.configure(state = 'normal')
             self.FOM_file_button.configure(state = 'normal')
             self.training_window.delete(0, customtkinter.END)
+            self.training_window.insert(0,'0')
             self.training_window.configure(state = 'disabled')
             self.unsampled_update_freq.configure(state = 'disabled')
             

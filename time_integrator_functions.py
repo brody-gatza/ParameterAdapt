@@ -18,7 +18,6 @@ def explicit_fd_euler( solver_param,state ):
     dt    = solver_param['dt']
     Q_old = state['Q_cons']
     dQ_dt = state['d_flux_dx']
-
     d_Q   = dt * dQ_dt 
     Q_new = Q_old + d_Q
 

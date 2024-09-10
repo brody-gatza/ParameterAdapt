@@ -78,6 +78,8 @@ def driver(self):
 
         elif solver_param['solver_mode'] == 'Adaptive ROM':
 
+            # update the ghost cells
+
             state, solver_param , rom_param  = rom_functions.adaptive_rom_progress(solver_param,rom_param,state,iter)
 
         # convert cons to prim
@@ -96,7 +98,6 @@ def driver(self):
         print('Iteration: ' + str(iter+1))
         state['cons_results_save'][:,:,iter] = solver_functions.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],[state['Q_cons']])[:,2:-2]
         state['prim_results_save'][:,:,iter] = solver_functions.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],[state['Q_prim']])[:,2:-2]
-
 
         if (solver_param['solver_mode'] != 'FOM' and iter > int(solver_param['init_training_win'])): 
 
@@ -141,7 +142,6 @@ def driver(self):
         np.save( work_dir + '/' +save_title + ' denorm.npy'               ,state['denormalizor_save'] )
         np.save( work_dir + '/' +save_title + ' samples_user.npy'         ,state['S_indx_user_save']  )
         np.save( work_dir + '/' +save_title + ' samples_solver.npy'       ,state['S_indx_solver_save'])
-
 
 
     print('Simulation successfully completed !')

@@ -119,8 +119,8 @@ def in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param):
     y11= prim_results[visual_var1,2:-2]
     y21= prim_results[visual_var2,2:-2]
     y31= prim_results[visual_var3,2:-2]
-    # y41= prim_results[visual_var4,2:-2]
-    y41= state['heat_release'][2:-2]
+    y41= prim_results[visual_var4,2:-2]
+    # y41= state['heat_release'][2:-2]
     # y41= state['int_energy'][2:-2]
 
 
