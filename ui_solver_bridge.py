@@ -78,14 +78,12 @@ def driver(self):
 
         elif solver_param['solver_mode'] == 'Adaptive ROM':
 
-            # update the ghost cells
-
             state, solver_param , rom_param  = rom_functions.adaptive_rom_progress(solver_param,rom_param,state,iter)
 
         # convert cons to prim
-
         state = solver_functions.cons2prim_converter(solver_param,state)
 
+        # update the ghost cells
         state = solver_functions.update_ghost_cell(solver_param,state)
     
         # visualization

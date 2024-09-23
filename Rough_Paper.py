@@ -11,93 +11,160 @@ import numpy as np
 # basis           = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame\basis_save.npy")
 # S_indx_solver   = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame\S_indx_solver_save_all.npy")
 
+samples = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame_with_perturbation\Adaptive ROM 35000 snapshots Explicit - FD Euler GalerkinQDEIM samples_user.npy")
 
 # res_fom = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame\res_fom.npy")
 # res_rom = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame\res_rom.npy")
 
+# fom_super_small = np.load(r"C:\GIT_Fork\ROMify\examples\classic_shock_tube\FOM 30000 snapshots Explicit - FD Euler prim_dt_1en6.npy")
 
-fom = np.load(r"C:\GIT_Fork\ROMify\examples\transient_flame\FOM 10000 snapshots Explicit - FD Euler prim.npy")
-arom = np.load(r"C:\GIT_Fork\ROMify\examples\transient_flame\Adaptive ROM 100000 snapshots Explicit - FD Euler GalerkinQDEIM prim.npy")
-samples = np.load(r"C:\GIT_Fork\ROMify\examples\transient_flame\Adaptive ROM 100000 snapshots Explicit - FD Euler GalerkinQDEIM samples_user.npy")
-# arom = np.load(r"C:\GIT_Fork\ROMify\examples\classic_shock_tube\Adaptive ROM 3000 snapshots Explicit - FD Euler GalerkinQDEIM prim.npy")
 
-# basis = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame\basis.npy")
-# norm = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame\norm.npy")
-# denorm = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame\denorm.npy")
-# qref = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame\q_ref.npy")
+fom = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame_with_perturbation\FOM 35000 snapshots Explicit - FD Euler prim.npy")
 
-# T = fom[3,:,6000].ravel()
-# P = fom[2,:,6000].ravel()
-# u = fom[1,:,6000].ravel()
+# ic_data = fom_small[:,:,-1]
 
-# slice_source = fom[:,201,6000]
+# np.save(r"C:\GIT_Fork\ROMify\examples\free_flame\steady_IC_pert.npy",ic_data)
 
-# fom[:,0:201,6000] = slice_source[:,np.newaxis]
+# fom_small = np.load(r"C:\GIT_Fork\ROMify\examples\classic_shock_tube\FOM 3000 snapshots Explicit - FD Euler prim_dt_1en5.npy")
+arom = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame_with_perturbation\Adaptive ROM 35000 snapshots Explicit - FD Euler GalerkinQDEIM prim.npy")
 
-# np.save(r"C:\GIT_Fork\ROMify\examples\transient_flame\steady_IC_trans.npy",fom[:,:,6000])
 
-# T = fom[3,:,6000].ravel()
-# P = fom[2,:,6000].ravel()
-# u = fom[1,:,6000].ravel()
+# fom_large = np.load(r"C:\GIT_Fork\ROMify\examples\classic_shock_tube\FOM 300 snapshots Explicit - FD Euler prim_dt_1en4.npy")
 
-fig , ax = plt.subplots(3,1)
 
-# fig.suptitle('Adaptive ROM dt=5e-5 vs. FOM dt=5e-4')
+# # arom = np.load(r"C:\GIT_Fork\ROMify\examples\classic_shock_tube\Adaptive ROM 3000 snapshots Explicit - FD Euler GalerkinQDEIM prim.npy")
 
-# ax[0].plot(T,label='T')
-# ax[1].plot(P,label='P')
-# ax[2].plot(u,label='u')
-# # ax.plot(q_replica,linestyle='--',label='ROM no HR')
-# ax[0].legend()
-# ax[1].legend()
-# ax[2].legend()
+# # basis = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame\basis.npy")
+# # norm = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame\norm.npy")
+# # denorm = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame\denorm.npy")
+# # qref = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame\q_ref.npy")
+
+# # T = fom[3,:,6000].ravel()
+# # P = fom[2,:,6000].ravel()
+# # u = fom[1,:,6000].ravel()
+
+# # slice_source = fom[:,201,6000]
+
+# # fom[:,0:201,6000] = slice_source[:,np.newaxis]
+
+# # np.save(r"C:\GIT_Fork\ROMify\examples\transient_flame\steady_IC_trans.npy",fom[:,:,6000])
+
+# # T = fom[3,:,6000].ravel()
+# # P = fom[2,:,6000].ravel()
+# # u = fom[1,:,6000].ravel()
+
+fig , ax = plt.subplots(2,2)
+
+fig.set_size_inches(15,6)
+
+# # fig.suptitle('Adaptive ROM dt=5e-5 vs. FOM dt=5e-4')
+
+# # ax[0].plot(T,label='T')
+# # ax[1].plot(P,label='P')
+# # ax[2].plot(u,label='u')
+# # # ax.plot(q_replica,linestyle='--',label='ROM no HR')
+# # ax[0].legend()
+# # ax[1].legend()
+# # ax[2].legend()
+
 
 x=np.linspace(0,0.03,1000)
+# iter_axis = np.linspace(0,0.35,300)
+
+# # plt.show()
+# counter = 0
+# counter2 = 0
+
+# e1 = np.zeros(300)
+# e2 = np.zeros(300)
+
+# for iter in range(0,3000,10):
+
+#     # error between AROM and FOM (same dt)
+#     e1[counter] = np.linalg.norm( (arom[:,:,iter].ravel()-fom_small[:,:,iter].ravel()) ) / np.linalg.norm( fom_small[:,:,iter].ravel() )
+#     # error between AROM and FOM (same dt)
+#     e2[counter] = np.linalg.norm( (fom_large[:,:,counter].ravel()-fom_small[:,:,iter].ravel()) ) / np.linalg.norm( fom_small[:,:,iter].ravel() )
+
+#     counter = counter + 1
+
+# ax.plot(iter_axis,e1      ,label='AROM vs FOM (equal dt)')
+# ax.plot(iter_axis,e2      ,label='FOM (large dt) vs FOM (small dt)')
+
+# ax.set_ylabel('normalized error')
+# ax.set_xlabel('t')
+
+
+# ax.legend()
+
+
 
 # plt.show()
-counter = 0
 
-for iter in range(0,100000,1000):
+
+for iter in range(0,35000,200):
 
     s_indx = np.nonzero(samples[:,iter])[0]
 
-    ax[0].cla()
-    ax[1].cla()
-    ax[2].cla()
+    ax[0,0].cla()
+    ax[1,0].cla()
+    ax[0,1].cla()
+    ax[1,1].cla()
 
-    rho = fom[0,:,counter].ravel()
-    u   = fom[1,:,counter].ravel()
-    T   = fom[3,:,counter].ravel()
+
+    rho = fom[0,:,iter].ravel()
+    u   = fom[1,:,iter].ravel()
+    P   = fom[2,:,iter].ravel()
+    T   = fom[3,:,iter].ravel()
 
     a_rho = arom[0,:,iter].ravel()
     a_u   = arom[1,:,iter].ravel()
+    a_P   = arom[2,:,iter].ravel()
     a_T   = arom[3,:,iter].ravel()
 
-    ax[0].plot(x,rho      ,color='black',label='FOM-rho')
-    ax[1].plot(x,u        ,color='blue',label='FOM-u')
-    ax[2].plot(x,T        ,color='red',label='FOM-T')
+#     P_fom_super_small    = fom_super_small[2,:,counter2].ravel()
+    # P_fom_small    = fom_small[2,:,iter].ravel()
+#     P_arom_small   = arom[2,:,iter].ravel()
+#     P_fom_large    = fom_large[2,:,counter].ravel()
 
-    ax[0].plot(x,rho      ,color='black',linestyle='--',label='AROM-rho')
-    ax[1].plot(x,u        ,color='blue',linestyle='--',label='AROM-u')
-    ax[2].plot(x,a_T      ,color='red',linestyle='--',label='AROM-T')
+#     ax.plot(x,P_fom_super_small      ,label='FOM-super-small')
+    # ax.plot(x,P_fom_small      ,label='FOM-small')
+#     ax.plot(x,P_arom_small     ,label='AROM')
+#     ax.plot(x,P_fom_large      ,label='FOM_large')
+    ax[0,0].plot(x,rho      ,color='tab:blue'  ,label='FOM')
+    ax[1,0].plot(x,u        ,color='tab:green' ,label='FOM')
+    # ax[0,1].plot(x,P        ,color='tab:orange',label='FOM')
+    ax[1,1].plot(x,T        ,color='tab:red'   ,label='FOM')
 
-    ax[0].scatter(x[s_indx] , rho[s_indx]      ,color='black')
-    ax[1].scatter(x[s_indx] , u[s_indx]        ,color='black')
-    ax[2].scatter(x[s_indx] , a_T[s_indx]      ,color='black')
+    ax[0,0].plot(x,a_rho      ,linestyle='--',color='tab:blue'  ,label='A-ROM')
+    ax[1,0].plot(x,a_u        ,linestyle='--',color='tab:green' ,label='A-ROM')
+    ax[0,1].plot(x,a_P        ,linestyle='--',color='tab:orange',label='A-ROM')
+    ax[1,1].plot(x,a_T        ,linestyle='--',color='tab:red'   ,label='A-ROM')
 
-    ax[0].legend()
-    ax[1].legend()
-    ax[2].legend()
+    ax[0,0].scatter(x[s_indx] , rho[s_indx]      ,color='black')
+    ax[1,0].scatter(x[s_indx] , u[s_indx]        ,color='black')
+    ax[0,1].scatter(x[s_indx] , a_P[s_indx]      ,color='black')
+    ax[1,1].scatter(x[s_indx] , a_T[s_indx]      ,color='black')
 
-    ax[0].set_xlabel('x[m]')
-    ax[1].set_xlabel('x[m]')
-    ax[2].set_xlabel('x[m]')
+    ax[0,0].legend()
+    ax[1,0].legend()
+    ax[0,1].legend()
+    ax[1,1].legend()
 
-    ax[0].set_ylabel('rho[kg/m3]')
-    ax[1].set_ylabel('u[m/s]')
-    ax[2].set_ylabel('T[K]')
+#     ax.set_xlabel('x[m]')
+    ax[0,0].set_xlabel('x[m]')
+    ax[1,0].set_xlabel('x[m]')
+    ax[0,1].set_xlabel('x[m]')
+    ax[1,1].set_xlabel('x[m]')
 
-    counter = counter + 100
+    ax[0,0].set_ylabel('Density[kg/m3]')
+    ax[1,0].set_ylabel('Velocity[m/s]')
+    ax[0,1].set_ylabel('Pressure[Pa]')
+    ax[1,1].set_ylabel('Temperature[K]')
+#     ax.set_ylabel('P')
+
+    ax[0,1].set_ylim(95e3,105e3)
+#     counter = counter + 1
+#     counter2 = counter2 + 100
 
     plt.pause(1e-6)
     
