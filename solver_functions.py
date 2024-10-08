@@ -128,6 +128,10 @@ def initialize_state(solver_param):
         state['gas'].basis = 'mass'
         state['gas_array'] = ct.SolutionArray(state['gas'],(1,int(solver_param['cell_number'])+4))
 
+        # heat release is also plotted part of prim when there is a combustion case
+        state['prim_results_save']      = np.zeros(( num_prim_var+1  , int(solver_param['cell_number'])    , int(int(solver_param['num_step'])))  )
+
+
     return state
 
 def ic_generator(solver_param,state):
@@ -206,6 +210,7 @@ def update_ghost_cell(solver_param,state):
         inlet_bc  = solver_param['bc_data'][eqn,0]
         outlet_bc = solver_param['bc_data'][eqn,1]
 
+        ################################################## inlet ################################################## 
         
         ##### periodic ##### 
 
@@ -213,13 +218,9 @@ def update_ghost_cell(solver_param,state):
 
             Q_prim_user[eqn,0:2] = Q_prim_user[eqn,-2:].reshape(-1,1)
 
-        if outlet_bc == 'periodic':
-
-            Q_prim_user[eqn,-2:] = Q_prim_user[eqn,0:2].reshape(-1,1)
-
         ##### wall ##### 
 
-        if inlet_bc == 'wall':
+        elif inlet_bc == 'wall':
             
             # velocity
             if eqn == 1: 
@@ -230,7 +231,69 @@ def update_ghost_cell(solver_param,state):
 
                 Q_prim_user[eqn,0:2] = Q_prim_user[eqn,2].reshape(-1,1)
 
-        if outlet_bc == 'wall':
+        ##### value/extrap ##### 
+
+        else:
+            
+            ##### extrap #####
+
+            if inlet_bc == 'extrapolate':
+
+                Q_prim_user[eqn,0:2] = Q_prim_user[eqn,2].reshape(-1,1)
+
+            ##### value ##### 
+
+            else: 
+                
+                if eqn == 4:
+
+                    if '/' in inlet_bc:
+                        
+                        parts = inlet_bc.split('/')
+
+                        value = float(parts[0])  # value
+                        A     = float(parts[1])  # amplitude
+                        f     = float(parts[2])  # frequency
+
+                        t = state['time']
+
+                        Q_prim_user[4:,0:2] = value + A*np.sin(f*t)
+
+                    else:
+                    
+                        Q_prim_user[4:,0:2] = np.array(eval(inlet_bc)).reshape(-1,1)
+
+                else:
+
+                    if '/' in inlet_bc:
+                        
+                        parts = inlet_bc.split('/')
+
+                        value = float(parts[0])  # value
+                        A     = float(parts[1])  # amplitude
+                        f     = float(parts[2])  # frequency
+
+                        t = state['time']
+
+                        Q_prim_user[eqn,0:2] = value + A*np.sin(f*t)
+
+
+                    else:
+
+                        Q_prim_user[eqn,0:2] = float(inlet_bc)
+
+
+        ################################################## outlet ################################################## 
+        
+        ##### periodic ##### 
+
+        if outlet_bc == 'periodic':
+
+            Q_prim_user[eqn,-2:] = Q_prim_user[eqn,0:2].reshape(-1,1)
+
+        ##### wall ##### 
+
+        elif outlet_bc == 'wall':
 
             # velocity
             if eqn == 1: 
@@ -241,95 +304,175 @@ def update_ghost_cell(solver_param,state):
 
                 Q_prim_user[eqn,-2:] = Q_prim_user[eqn,-3].reshape(-1,1)
 
-        ##### inlet extrapolate ##### 
-
-        if inlet_bc == 'extrapolate':
-
-            Q_prim_user[eqn,0:2] = Q_prim_user[eqn,2].reshape(-1,1)
+        ##### value/extrap ##### 
 
         else:
             
-            if eqn == 4:
+            ##### extrap #####
 
-                if '/' in inlet_bc:
-                    
-                    parts = inlet_bc.split('/')
+            if outlet_bc == 'extrapolate':
 
-                    value = float(parts[0])  # value
-                    A     = float(parts[1])  # amplitude
-                    f     = float(parts[2])  # frequency
+                Q_prim_user[eqn,-2:] = Q_prim_user[eqn,-3].reshape(-1,1)
 
-                    t = state['time']
-
-                    Q_prim_user[4:,0:2] = value + A*np.sin(f*t)
-
-                else:
-                
-                    Q_prim_user[4:,0:2] = np.array(eval(inlet_bc)).reshape(-1,1)
+            ##### value ##### 
 
             else:
 
-                if '/' in inlet_bc:
+                if eqn == 4:
+
+                    if '/' in outlet_bc:
+                        
+                        parts = outlet_bc.split('/')
+
+                        value = float(parts[0])  # value
+                        A     = float(parts[1])  # amplitude
+                        f     = float(parts[2])  # frequency
+
+                        t = state['time']
+
+                        Q_prim_user[4:,-2:] = value + A*np.sin(f*t)
+
+                    else:
                     
-                    parts = inlet_bc.split('/')
-
-                    value = float(parts[0])  # value
-                    A     = float(parts[1])  # amplitude
-                    f     = float(parts[2])  # frequency
-
-                    t = state['time']
-
-                    Q_prim_user[eqn,0:2] = value + A*np.sin(f*t)
-
+                        Q_prim_user[4:,-2:] = np.array(eval(outlet_bc)).reshape(-1,1)
 
                 else:
 
-                    Q_prim_user[eqn,0:2] = float(inlet_bc)
+                    if '/' in outlet_bc:
+                        
+                        parts = outlet_bc.split('/')
 
-        ##### outlet extrapolate ##### 
+                        value = float(parts[0])  # value
+                        A     = float(parts[1])  # amplitude
+                        f     = float(parts[2])  # frequency
 
-        if outlet_bc == 'extrapolate':
+                        t = state['time']
 
-            Q_prim_user[eqn,-2:] = Q_prim_user[eqn,-3].reshape(-1,1)
+                        Q_prim_user[eqn,-2:] = value + A*np.sin(f*t)
 
-        else:
 
-            if eqn == 4:
-
-                if '/' in outlet_bc:
+                    else:
                     
-                    parts = outlet_bc.split('/')
+                        Q_prim_user[eqn,-2:] = float(outlet_bc)
 
-                    value = float(parts[0])  # value
-                    A     = float(parts[1])  # amplitude
-                    f     = float(parts[2])  # frequency
 
-                    t = state['time']
+        # if outlet_bc == 'periodic':
 
-                    Q_prim_user[4:,-2:] = value + A*np.sin(f*t)
+        #     Q_prim_user[eqn,-2:] = Q_prim_user[eqn,0:2].reshape(-1,1)
 
-                else:
+        # ##### wall ##### 
+
+        # if inlet_bc == 'wall':
+            
+        #     # velocity
+        #     if eqn == 1: 
+
+        #         Q_prim_user[eqn,0:2] = - Q_prim_user[eqn,2].reshape(-1,1)
+
+        #     else:
+
+        #         Q_prim_user[eqn,0:2] = Q_prim_user[eqn,2].reshape(-1,1)
+
+        # if outlet_bc == 'wall':
+
+        #     # velocity
+        #     if eqn == 1: 
+
+        #         Q_prim_user[eqn,-2:] = - Q_prim_user[eqn,-3].reshape(-1,1)
                 
-                    Q_prim_user[4:,-2:] = np.array(eval(outlet_bc)).reshape(-1,1)
+        #     else:
 
-            else:
+        #         Q_prim_user[eqn,-2:] = Q_prim_user[eqn,-3].reshape(-1,1)
 
-                if '/' in outlet_bc:
+        # ##### inlet extrapolate ##### 
+
+        # if inlet_bc == 'extrapolate':
+
+        #     Q_prim_user[eqn,0:2] = Q_prim_user[eqn,2].reshape(-1,1)
+
+        # else:
+            
+        #     if eqn == 4:
+
+        #         if '/' in inlet_bc:
                     
-                    parts = outlet_bc.split('/')
+        #             parts = inlet_bc.split('/')
 
-                    value = float(parts[0])  # value
-                    A     = float(parts[1])  # amplitude
-                    f     = float(parts[2])  # frequency
+        #             value = float(parts[0])  # value
+        #             A     = float(parts[1])  # amplitude
+        #             f     = float(parts[2])  # frequency
 
-                    t = state['time']
+        #             t = state['time']
 
-                    Q_prim_user[eqn,-2:] = value + A*np.sin(f*t)
+        #             Q_prim_user[4:,0:2] = value + A*np.sin(f*t)
+
+        #         else:
+                
+        #             Q_prim_user[4:,0:2] = np.array(eval(inlet_bc)).reshape(-1,1)
+
+        #     else:
+
+        #         if '/' in inlet_bc:
+                    
+        #             parts = inlet_bc.split('/')
+
+        #             value = float(parts[0])  # value
+        #             A     = float(parts[1])  # amplitude
+        #             f     = float(parts[2])  # frequency
+
+        #             t = state['time']
+
+        #             Q_prim_user[eqn,0:2] = value + A*np.sin(f*t)
 
 
-                else:
+        #         else:
+
+        #             Q_prim_user[eqn,0:2] = float(inlet_bc)
+
+        # ##### outlet extrapolate ##### 
+
+        # if outlet_bc == 'extrapolate':
+
+        #     Q_prim_user[eqn,-2:] = Q_prim_user[eqn,-3].reshape(-1,1)
+
+        # else:
+
+        #     if eqn == 4:
+
+        #         if '/' in outlet_bc:
+                    
+        #             parts = outlet_bc.split('/')
+
+        #             value = float(parts[0])  # value
+        #             A     = float(parts[1])  # amplitude
+        #             f     = float(parts[2])  # frequency
+
+        #             t = state['time']
+
+        #             Q_prim_user[4:,-2:] = value + A*np.sin(f*t)
+
+        #         else:
+                
+        #             Q_prim_user[4:,-2:] = np.array(eval(outlet_bc)).reshape(-1,1)
+
+        #     else:
+
+        #         if '/' in outlet_bc:
+                    
+        #             parts = outlet_bc.split('/')
+
+        #             value = float(parts[0])  # value
+        #             A     = float(parts[1])  # amplitude
+        #             f     = float(parts[2])  # frequency
+
+        #             t = state['time']
+
+        #             Q_prim_user[eqn,-2:] = value + A*np.sin(f*t)
+
+
+        #         else:
                  
-                    Q_prim_user[eqn,-2:] = float(outlet_bc)
+        #             Q_prim_user[eqn,-2:] = float(outlet_bc)
 
     
     Q_prim_solver = results_user2solver_converter(Q_prim_user)

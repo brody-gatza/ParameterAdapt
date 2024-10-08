@@ -4,7 +4,7 @@ import solver_functions
 def visual_var_collector(solver_param):
 
     visual_options            = ['Density','Pressure','Temprature','Velocity','Heat Release']
-    visual_options_indx_stack = [   0     ,     2    ,      3     ,     1    ,      1000    ]
+    visual_options_indx_stack = [   0     ,     2    ,      3     ,     1    ,      -1    ]
     
     for item in visual_options:
 
@@ -106,7 +106,7 @@ def initial_plot(axs,solver_param,visual_param):
 
 def in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param):
 
-    prim_results = solver_functions.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],state['Q_prim'])
+    prim_results = state['prim_results_save'][:,:,iter]
 
     x = solver_param['x']
 
@@ -115,29 +115,27 @@ def in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param):
     visual_var3 = visual_param['visual_var3'] 
     visual_var4 = visual_param['visual_var4'] 
 
-    y11= prim_results[visual_var1,2:-2]
-    y21= prim_results[visual_var2,2:-2]
-    y31= prim_results[visual_var3,2:-2]
-    y41= prim_results[visual_var4,2:-2]
-
-    # y41= state['heat_release'][2:-2]
+    y11= prim_results[visual_var1,:]
+    y21= prim_results[visual_var2,:]
+    y31= prim_results[visual_var3,:]
+    y41= prim_results[visual_var4,:]
 
 
     if y11.size == 0 : 
 
-        y11 = 0 * prim_results[0,2:-2]
+        y11 = 0 * prim_results[0,:]
 
     if y21.size == 0 : 
 
-        y21 = 0 * prim_results[0,2:-2]
+        y21 = 0 * prim_results[0,:]
 
     if y31.size == 0 : 
 
-        y31 = 0 * prim_results[0,2:-2]
+        y31 = 0 * prim_results[0,:]
 
     if y41.size == 0 : 
 
-        y41 = 0 * prim_results[0,2:-2]
+        y41 = 0 * prim_results[0,:]
 
     plot11 = visual_param['plot11']
     plot21 = visual_param['plot21']
