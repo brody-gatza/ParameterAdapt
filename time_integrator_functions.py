@@ -1,6 +1,4 @@
-import non_linear_terms
 import numpy as np
-import scipy.optimize 
 
 def advance_time(solver_param,state):
     # time integration
