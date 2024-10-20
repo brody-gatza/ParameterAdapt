@@ -1,23 +1,25 @@
 # solver setup
 
-solver_mode 		= fom
-rom_method  		= galerkin
-pod_energy  		= 99.999
-hyper	    		= true
-hyper_method		= qdeim
-init_training_win 	= 10
+solver_mode 		    = FOM
+rom_method  		    = Galerkin
+arom_method		        = Direct Adapt
+pod_energy  		    = 99.999
+hyper	    		    = True
+hyper_method		    = QDEIM
+init_training_win 	    = 10
+unsampled_update_freq 	= 10
+fom_results_dir		    = ""
 
 # time discretization
-dt            = 3e-10
-num_steps     = 920000
-time_scheme   = explicit_fd_euler
-dual_time     = false
-res_tol       = 1e-5
+dt            = 5e-9
+num_steps     = 60000
+time_scheme   = Explicit - FD Euler
 
 # space discretization
 x_initial   = 0
 x_final     = 0.12
-cell_number = 600 
+cell_number = 800
+
 
 
 # inlet BC
@@ -28,11 +30,11 @@ temp_inlet       = wall
 mass_frac_inlet  = wall
 
 # outlet BC
-rho_outlet        = extrap
-vel_outlet        = extrap
-press_outlet      = extrap
-temp_outlet       = extrap
-mass_frac_outlet  = extrap
+rho_outlet        = extrapolate
+vel_outlet        = extrapolate
+press_outlet      = extrapolate
+temp_outlet       = extrapolate
+mass_frac_outlet  = extrapolate
 
 
 # Initial Condition
@@ -49,16 +51,23 @@ mass_frac_ic  = [[0.012772428, 0.0, 0.0, 0.101362139, 0.0, 0.0, 0.0, 0.0, 0.8858
 
 # gas model
 gas_model   = H2/Air Combustion
-flux_scheme = roe1
-viscosity   = true
+flux_scheme = 2nd Order Roe
+limiter	    = True
+viscous	    = True
 
 # Visualization
 
-variable1 	= Density
-variable2 	= Pressure
-variable3 	= Velocity
-variable4 	= Heat Release
-update_interval = 1000
+variable1 	    = Density
+variable2 	    = Pressure
+variable3 	    = Velocity
+variable4 	    = Heat Release
+update_interval = 100
+plot_fom	    = False
+
+
+# Profiling
+
+profiling	= False
 
 
 

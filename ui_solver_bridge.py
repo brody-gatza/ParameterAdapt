@@ -10,7 +10,7 @@ import cantera as ct
 
 def driver(args,input_param):
 
-    breakpoint()
+    # breakpoint()
     
     # collect all of variables from user interface
     solver_param = solver_functions.solver_parameters_collector(args,input_param)
