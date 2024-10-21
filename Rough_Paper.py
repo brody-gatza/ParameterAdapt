@@ -19,7 +19,7 @@ import numpy as np
 # fom_super_small = np.load(r"C:\GIT_Fork\ROMify\examples\classic_shock_tube\FOM 30000 snapshots Explicit - FD Euler prim_dt_1en6.npy")
 
 
-fom           = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame_with_perturbation\Hybrid ROM 60000 snapshots Explicit - FD Euler GalerkinQDEIM prim.npy")
+fom           = np.load(r"C:\GIT_Fork\ROMify\examples\wall_reflected_detonation\FOM 150000 snapshots Explicit - FD Euler prim.npy")
 # arom_original = np.load(r"C:\Users\mohag\OneDrive - University of Kansas\KU - Aerospace PhD\Research Related\error_analysis_of_ROM\shock_tube_initial_arom\Adaptive ROM 3000 snapshots Explicit - FD Euler GalerkinQDEIM cons.npy")
 # arom_improved = np.load(r"C:\Users\mohag\OneDrive - University of Kansas\KU - Aerospace PhD\Research Related\error_analysis_of_ROM\shock_tube_improved_arom\Adaptive ROM 3000 snapshots Explicit - FD Euler GalerkinQDEIM cons.npy")
 
@@ -86,7 +86,7 @@ fig.set_size_inches(15,6)
 # # ax[2].legend()
 
 
-x=np.linspace(0,0.01,500)
+x=np.linspace(0,0.12,500)
 # iter_axis = np.linspace(0,0.35,300)
 
 # # plt.show()
@@ -122,7 +122,7 @@ x=np.linspace(0,0.01,500)
 # new_error = np.zeros(3000)
 
 
-for iter in range(0,60000,500):
+for iter in range(0,150000,1000):
 
     # s_indx = np.nonzero(samples[:,iter])[0]
 

@@ -10,17 +10,18 @@ init_training_win 	    = 10
 unsampled_update_freq 	= 10
 fom_results_dir		    = ""
 
+#cfl = 0.0025
+#t = 250 micro-sec
+
 # time discretization
-dt            = 5e-9
-num_steps     = 60000
+dt            = 2e-9
+num_steps     = 125000
 time_scheme   = Explicit - FD Euler
 
 # space discretization
 x_initial   = 0
 x_final     = 0.12
-cell_number = 800
-
-
+cell_number = 500
 
 # inlet BC
 rho_inlet        = wall
@@ -61,7 +62,7 @@ variable1 	    = Density
 variable2 	    = Pressure
 variable3 	    = Velocity
 variable4 	    = Heat Release
-update_interval = 100
+update_interval = 1000
 plot_fom	    = False
 
 

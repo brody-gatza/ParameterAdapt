@@ -1537,7 +1537,7 @@ def second_order_roe_flux_calculator(solver_param,rom_param,state):
         for indx in range(1,cell_num):
 
             face_prim_user[:,2*indx]   = Q_prim_user[:,indx-1] + df_dx[:,indx-1] * (dx/2)     # left face 
-            face_prim_user[:,2*indx+1] = Q_prim_user[:,indx]   + df_dx[:,indx] * (dx/2)       # right face 
+            face_prim_user[:,2*indx+1] = Q_prim_user[:,indx]   - df_dx[:,indx] * (dx/2)       # right face 
 
         rho   = face_prim_user[0,:]
         vx    = face_prim_user[1,:]
@@ -1648,10 +1648,10 @@ def second_order_roe_flux_calculator(solver_param,rom_param,state):
         for indx in range(1,cell_num):
 
             face_prim_user[:,2*indx]   = Q_prim_user[:,indx-1] + df_dx_prim[:,indx-1] * (dx/2)     # left face 
-            face_prim_user[:,2*indx+1] = Q_prim_user[:,indx]   + df_dx_prim[:,indx] * (dx/2)       # right face   
+            face_prim_user[:,2*indx+1] = Q_prim_user[:,indx]   - df_dx_prim[:,indx] * (dx/2)       # right face   
 
             face_cons_user[:,2*indx]   = Q_cons_user[:,indx-1] + df_dx_cons[:,indx-1] * (dx/2)     # left face 
-            face_cons_user[:,2*indx+1] = Q_cons_user[:,indx]   + df_dx_cons[:,indx] * (dx/2)       # right face         
+            face_cons_user[:,2*indx+1] = Q_cons_user[:,indx]   - df_dx_cons[:,indx] * (dx/2)       # right face         
 
         # # fill the ghost cells
         face_prim_user[:,0:2] = face_prim_user[:,2].reshape(-1,1)
@@ -1669,7 +1669,6 @@ def second_order_roe_flux_calculator(solver_param,rom_param,state):
 
         Y      = face_prim_user[4:,:]
         Y_ct   = find_mass_fraction_full_cantera(Y)
-
 
 
         num_state_var = solver_param['num_state_var']
