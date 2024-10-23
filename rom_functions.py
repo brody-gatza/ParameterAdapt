@@ -175,7 +175,7 @@ def red2full_state_calculator(solver_param,rom_param,state):
 
         state['d_flux_dx']= dQ_red_dt
 
-        state            = time_integrator_functions.advance_time(solver_param,state)
+        state            = time_integrator_functions.advance_time(solver_param,rom_param,state)
 
         Q_red            = state['Q_cons']
 
@@ -413,12 +413,12 @@ def single_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
         if iter != int(solver_param['init_training_win']):
             
             state = solver_functions.residual_calculator(solver_param,rom_param,state)
-            state = time_integrator_functions.advance_time(solver_param,state)
+            state = time_integrator_functions.advance_time(solver_param,rom_param,state)
 
         elif iter == int(solver_param['init_training_win']):
 
             state = solver_functions.residual_calculator(solver_param,rom_param,state)
-            state = time_integrator_functions.advance_time(solver_param,state)
+            state = time_integrator_functions.advance_time(solver_param,rom_param,state)
 
             rom_param = precomputer(solver_param,state)
             rom_param = sample_point_finder(solver_param,rom_param)
@@ -459,7 +459,7 @@ def single_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
                 state['Q_cons'] = Q_bar_star_old
 
                 state = solver_functions.residual_calculator(solver_param,rom_param,state)
-                state = time_integrator_functions.advance_time(solver_param,state)
+                state = time_integrator_functions.advance_time(solver_param,rom_param,state)
 
                 Q_bar_star_new = state['Q_cons']
                 Q_bar_star_new_solver_int = solver_functions.solver_eliminate_ghost(solver_param,Q_bar_star_new)
@@ -488,7 +488,7 @@ def single_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
                 state['Q_cons']    = Q_tilda_old
                 state              = solver_functions.residual_calculator(solver_param,rom_param,state)
                 state['Q_cons']    = Q_tilda_old_solver_int[rom_param['S_indx_solver']]
-                state              = time_integrator_functions.advance_time(solver_param,state)
+                state              = time_integrator_functions.advance_time(solver_param,rom_param,state)
                 Q_bar_new_sampling = state['Q_cons']
 
                 # Estimate FOM at unsampled points using old basis
@@ -525,12 +525,12 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
         if iter != int(solver_param['init_training_win']):
             
             state = solver_functions.residual_calculator(solver_param,rom_param,state)
-            state = time_integrator_functions.advance_time(solver_param,state)
+            state = time_integrator_functions.advance_time(solver_param,rom_param,state)
 
         elif iter == int(solver_param['init_training_win']):
 
             state = solver_functions.residual_calculator(solver_param,rom_param,state)
-            state = time_integrator_functions.advance_time(solver_param,state)
+            state = time_integrator_functions.advance_time(solver_param,rom_param,state)
 
             rom_param = precomputer(solver_param,state)
             rom_param = sample_point_finder(solver_param,rom_param)
@@ -562,7 +562,7 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
                 state['Q_cons'] = Q_bar_star_old
 
                 state = solver_functions.residual_calculator(solver_param,rom_param,state)
-                state = time_integrator_functions.advance_time(solver_param,state)
+                state = time_integrator_functions.advance_time(solver_param,rom_param,state)
 
                 Q_bar_star_new = state['Q_cons']
                 Q_bar_star_new_solver_int = solver_functions.solver_eliminate_ghost(solver_param,Q_bar_star_new)
@@ -595,7 +595,7 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
                 state['Q_cons']    = Q_tilda_old
                 state              = solver_functions.residual_calculator(solver_param,rom_param,state)
                 state['Q_cons']    = Q_tilda_old_solver_int[rom_param['S_indx_solver']]
-                state              = time_integrator_functions.advance_time(solver_param,state)
+                state              = time_integrator_functions.advance_time(solver_param,rom_param,state)
                 Q_bar_new_sampling = state['Q_cons']
 
                 # Estimate FOM at unsampled points using old basis (DEIM Equation)
@@ -811,7 +811,7 @@ def adapt_sample(solver_param,rom_param,F,state):
         state['Q_cons'] = state['Q_bar']
 
         state = solver_functions.residual_calculator(solver_param,rom_param,state)
-        state = time_integrator_functions.advance_time(solver_param,state)
+        state = time_integrator_functions.advance_time(solver_param,rom_param,state)
 
         Q_bar_shock = state['Q_cons']
         Q_bar_shock_solver_int = solver_functions.solver_eliminate_ghost(solver_param,Q_bar_shock)

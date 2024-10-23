@@ -1,8 +1,8 @@
 # solver setup
 
-solver_mode 		= Adaptive ROM
+solver_mode 		= FOM
 rom_method  		= Galerkin
-arom_method		= Direct Adapt
+arom_method		    = Direct Adapt
 pod_energy  		= 99.999
 hyper	    		= True
 hyper_method		= QDEIM
@@ -11,8 +11,8 @@ unsampled_update_freq 	= 10
 fom_results_dir		= ""
 
 # time discretization
-dt            = 5e-5
-num_steps     = 3000
+dt            = 1e-4
+num_steps     = 1500
 time_scheme   = Explicit - FD Euler
 
 # space discretization
@@ -47,13 +47,15 @@ mass_frac_ic  = [[1.0, 0.0],[1.0, 0.0]]
 
 
 # gas model
-gas_model   = Non-Reacting Air
-flux_scheme = 1st Order Roe
-limiter	    = False
-viscous	    = False
+gas_model       = Non-Reacting Air
+flux_scheme     = 2nd Order Roe
+limiter	        = True
+limiter_method  = barth
+viscous	        = False
 
 # Visualization
 
+visual      = True
 variable1 	= Density
 variable2 	= Pressure
 variable3 	= Velocity

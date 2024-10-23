@@ -94,13 +94,16 @@ except ImportError as e:
     print(f"Error reloading module: {rom_functions}")
 
 
+# collect all of variables from input file and prepare them for simulation
+solver_param = solver_functions.solver_parameters_collector(args,input_param)
+
 # start running the simulation
 
 if input_param['profiling'] == True:
 
     with cProfile.Profile() as pr:
 
-        ui_solver_bridge.driver(args,input_param)
+        state = ui_solver_bridge.driver(args,solver_param)
     
     stats = pstats.Stats(pr)
     stats.sort_stats(pstats.SortKey.TIME)
@@ -108,4 +111,8 @@ if input_param['profiling'] == True:
 
 else: 
 
-    ui_solver_bridge.driver(args,input_param)
+    state = ui_solver_bridge.driver(args,solver_param)
+    # solver_functions.results_recorder(solver_param, state)
+
+
+

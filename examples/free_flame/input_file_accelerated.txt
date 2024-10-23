@@ -40,6 +40,7 @@ mass_frac_outlet  = extrap
 # gas model
 gas_model   = H2/Air Combustion
 flux_scheme = roe1
+limiter_method  = barth
 viscosity   = true
 
 # Visualization

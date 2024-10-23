@@ -1,7 +1,6 @@
 import numpy as np
 import cantera as ct
 
-
 def solver_parameters_collector(args,input_param):
 
     solver_param = {}
@@ -106,9 +105,11 @@ def solver_parameters_collector(args,input_param):
     solver_param['gamma']         =  1.4 
     solver_param['flux_scheme']   =  input_param['flux_scheme']
     solver_param['limiter']       =  eval(input_param['limiter'])
+    solver_param['limiter_method']=  input_param['limiter_method']
     solver_param['viscous_flag']  =  eval(input_param['viscous'])
 
     ### visualization ###
+    solver_param['visual']              = eval(input_param['visual'])
     solver_param['variable1']           = input_param['variable1']
     solver_param['variable2']           = input_param['variable2']
     solver_param['variable3']           = input_param['variable3']
@@ -658,34 +659,126 @@ def cons2prim_converter(solver_param, state):
 
     return  state
 
-def gradient_calculator(var,dx):
+def slope_limit(df_dx,Q_user,dx,solver_param):
 
-    df_dx = (np.roll(var,-1) - np.roll(var,1)) / (2*dx)
+    if solver_param['limiter_method'] == 'minmod':
+        
+       df_dx = minmod_limiter(df_dx,Q_user,dx)
+
+    elif solver_param['limiter_method'] == 'barth':
+        
+        df_dx = barth_jespersen(df_dx,Q_user,dx,solver_param)
 
     return df_dx
 
-def slope_limit(f, dx, df_dx):
+def minmod_limiter(df_dx,Q_user,dx):
 
-	df_dx = np.maximum(0., np.minimum(1., ( (f-np.roll(f,1,axis=0))/dx)/(df_dx + 1.0e-8*(df_dx==0)))) * df_dx
-	df_dx = np.maximum(0., np.minimum(1., (-(f-np.roll(f,-1,axis=0))/dx)/(df_dx + 1.0e-8*(df_dx==0)))) * df_dx
 
-	return df_dx
+    df_dx = np.maximum(0., np.minimum(1., ( (Q_user-np.roll(Q_user,1,axis=0))/dx)/(df_dx + 1.0e-8*(df_dx==0)))) * df_dx
+    df_dx = np.maximum(0., np.minimum(1., (-(Q_user-np.roll(Q_user,-1,axis=0))/dx)/(df_dx + 1.0e-8*(df_dx==0)))) * df_dx
 
-def extrapolate_center2face( var , d_var , dx):
 
-    # var_left_face  = var - (d_var * dx/2)
-    # var_left_face  = np.roll(var_left_face,-1)
-    # var_right_face = var + (d_var * dx/2)
+    return df_dx
 
-    var_left_face  = np.zeros(len(var)+1)
-    var_right_face = np.zeros(len(var)+1)
+def barth_jespersen(df_dx,Q_user,dx,solver_param):
 
-    for indx in range(1,len(var)):
+    Q_shape  = np.shape(Q_user)
 
-        var_left_face[indx]  = var[indx-1] + d_var[indx-1] * (dx/2)
-        var_right_face[indx] = var[indx] - d_var[indx] * (dx/2)
+    num_vars = Q_shape[0]
+    num_cell = Q_shape[1]
 
-    return var_left_face , var_right_face
+    phi = np.zeros_like(Q_user)
+
+    face_prim_user = np.zeros((num_vars,2*(num_cell)+2))
+    
+    for indx in range(1,num_cell):
+
+        face_prim_user[:,2*indx]   = Q_user[:,indx-1] + df_dx[:,indx-1] * (dx/2)     # left face 
+        face_prim_user[:,2*indx+1] = Q_user[:,indx]   - df_dx[:,indx] * (dx/2)       # right face 
+
+    phi_left1  = 1
+    phi_left2  = 1
+    phi_left3  = 1
+    phi_right1 = 1
+    phi_right2 = 1
+    phi_right3 = 1
+    
+    for var in range(num_vars):
+
+        for indx in range(1,num_cell-1):
+
+            max_neighbor = np.max((Q_user[var,indx-1],Q_user[var,indx],Q_user[var,indx+1]))
+            min_neighbor = np.min((Q_user[var,indx-1],Q_user[var,indx],Q_user[var,indx+1]))
+
+            left_face_estimate  = face_prim_user[var,2*indx+1]  
+            right_face_estimate = face_prim_user[var,2*(indx+1)] 
+            
+            # left face check 
+            if  left_face_estimate - Q_user[var,indx] > 0:
+
+                phi_left1 = np.min(( 1 , (max_neighbor - Q_user[var,indx]) / (left_face_estimate -  Q_user[var,indx]) ))
+
+            elif left_face_estimate - Q_user[var,indx] < 0:
+
+                phi_left2 = np.min(( 1 , (min_neighbor - Q_user[var,indx]) / (left_face_estimate -  Q_user[var,indx]) ))
+
+            else:
+                
+                phi_left3 = 1
+
+
+            # right face check 
+            if  right_face_estimate - Q_user[var,indx] > 0:
+
+                phi_right1 = np.min(( 1 , (max_neighbor - Q_user[var,indx]) / (right_face_estimate -  Q_user[var,indx]) ))
+
+            elif right_face_estimate - Q_user[var,indx] < 0:
+
+                phi_right2 = np.min(( 1 , (min_neighbor - Q_user[var,indx]) / (right_face_estimate -  Q_user[var,indx]) ))
+
+            else:
+                
+                phi_right3 = 1
+
+            phi[var,indx]=np.min((phi_left1,phi_left2,phi_left3,phi_right1,phi_right2,phi_right3))
+
+
+    df_dx = df_dx * phi
+
+    return df_dx
+
+def results_recorder(solver_param,state):
+
+    # prepare the name for the files to be saved
+    work_dir   = solver_param['working_dir']
+
+    if solver_param['solver_mode'] == 'FOM':
+
+        save_title = solver_param['solver_mode'] + ' ' + str(solver_param['num_step']) + ' ' + 'snapshots' + ' ' +solver_param['time_scheme'] 
+
+    elif solver_param['solver_mode'] == 'ROM' or solver_param['solver_mode'] == 'Adaptive ROM' or solver_param['solver_mode'] == 'Hybrid ROM' :
+
+        save_title = solver_param['solver_mode'] + ' ' + str(solver_param['num_step']) + ' ' + 'snapshots' + ' ' + solver_param['time_scheme'] + ' ' + solver_param['rom_method']
+
+        if solver_param['hyper'] == True:
+
+            save_title = save_title + '' + solver_param['sampling_method']
+
+    print('Saving resutls into working directory')
+
+    # save the results and end the simulation
+    np.save( work_dir + '/' +save_title + ' cons.npy' ,state['cons_results_save'])
+    np.save( work_dir + '/' +save_title + ' prim.npy' ,state['prim_results_save'])
+
+    if solver_param['solver_mode'] != 'FOM':
+
+        np.save( work_dir + '/' +save_title + ' q_r.npy'                  ,state['q_red_save']        )
+        np.save( work_dir + '/' +save_title + ' basis.npy'                ,state['basis_save']        )
+        np.save( work_dir + '/' +save_title + ' q_ref.npy'                ,state['q_ref_save']        )
+        np.save( work_dir + '/' +save_title + ' norm.npy'                 ,state['normalizor_save']   )
+        np.save( work_dir + '/' +save_title + ' denorm.npy'               ,state['denormalizor_save'] )
+        np.save( work_dir + '/' +save_title + ' samples_user.npy'         ,state['S_indx_user_save']  )
+        np.save( work_dir + '/' +save_title + ' samples_solver.npy'       ,state['S_indx_solver_save'])    
 
 def rusanov_flux_calculator(solver_param,state):
 
@@ -1524,12 +1617,9 @@ def second_order_roe_flux_calculator(solver_param,rom_param,state):
 
         # limiter
 
-        slope_limiter = solver_param['limiter']
+        if solver_param['limiter']:
 
-        if slope_limiter:
-
-            df_dx = np.maximum(0., np.minimum(1., ( (Q_prim_user-np.roll(Q_prim_user,1,axis=0))/dx)/(df_dx + 1.0e-8*(df_dx==0)))) * df_dx
-            df_dx = np.maximum(0., np.minimum(1., (-(Q_prim_user-np.roll(Q_prim_user,-1,axis=0))/dx)/(df_dx + 1.0e-8*(df_dx==0)))) * df_dx
+            df_dx = slope_limit(df_dx,Q_prim_user,dx,solver_param)
 
         # face_reconstruction
         face_prim_user = np.zeros((solver_param['num_prim_var'],2*(cell_num)+2))

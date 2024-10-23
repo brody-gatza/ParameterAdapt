@@ -48,10 +48,12 @@ mass_frac_ic  = [[1.0, 0.0],[1.0, 0.0],[1.0, 0.0]]
 gas_model   = Non-Reacting Air
 flux_scheme = 2nd Order Roe
 limiter	    = True
+limiter_method = barth 
 viscous	    = False
 
 # Visualization
 
+visual      = True
 variable1 	= Density
 variable2 	= Pressure
 variable3 	= Velocity

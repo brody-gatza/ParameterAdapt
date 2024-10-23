@@ -19,7 +19,8 @@ import numpy as np
 # fom_super_small = np.load(r"C:\GIT_Fork\ROMify\examples\classic_shock_tube\FOM 30000 snapshots Explicit - FD Euler prim_dt_1en6.npy")
 
 
-fom           = np.load(r"C:\GIT_Fork\ROMify\examples\wall_reflected_detonation\FOM 150000 snapshots Explicit - FD Euler prim.npy")
+fom_roe1           = np.load(r"C:\GIT_Fork\ROMify\examples\classic_shock_tube\first_order_roe_FOM 1500 snapshots Explicit - SSPRK2 prim.npy")
+fom_roe2           = np.load(r"C:\GIT_Fork\ROMify\examples\classic_shock_tube\second_order_roe_FOM 1500 snapshots Explicit - SSPRK2 prim.npy")
 # arom_original = np.load(r"C:\Users\mohag\OneDrive - University of Kansas\KU - Aerospace PhD\Research Related\error_analysis_of_ROM\shock_tube_initial_arom\Adaptive ROM 3000 snapshots Explicit - FD Euler GalerkinQDEIM cons.npy")
 # arom_improved = np.load(r"C:\Users\mohag\OneDrive - University of Kansas\KU - Aerospace PhD\Research Related\error_analysis_of_ROM\shock_tube_improved_arom\Adaptive ROM 3000 snapshots Explicit - FD Euler GalerkinQDEIM cons.npy")
 
@@ -122,7 +123,7 @@ x=np.linspace(0,0.12,500)
 # new_error = np.zeros(3000)
 
 
-for iter in range(0,150000,1000):
+for iter in range(0,1500,50):
 
     # s_indx = np.nonzero(samples[:,iter])[0]
 
@@ -132,15 +133,15 @@ for iter in range(0,150000,1000):
     ax[1,1].cla()
 
 
-    hr  = fom[-1,:,iter].ravel()
-    u   = fom[1,:,iter].ravel()
-    P   = fom[2,:,iter].ravel()
-    T   = fom[3,:,iter].ravel()
+    rho1    = fom_roe1[0,:,iter].ravel()
+    u1      = fom_roe1[1,:,iter].ravel()
+    P1      = fom_roe1[2,:,iter].ravel()
+    T1      = fom_roe1[3,:,iter].ravel()
 
-    # a_rho = arom[0,:,iter].ravel()
-    # a_u   = arom[1,:,iter].ravel()
-    # a_P   = arom[2,:,iter].ravel()
-    # a_T   = arom[3,:,iter].ravel()
+    rho2    = fom_roe2[0,:,iter].ravel()
+    u2      = fom_roe2[1,:,iter].ravel()
+    P2      = fom_roe2[2,:,iter].ravel()
+    T2      = fom_roe2[3,:,iter].ravel()
 
 #     P_fom_super_small    = fom_super_small[2,:,counter2].ravel()
     # P_fom_small    = fom_small[2,:,iter].ravel()
@@ -151,25 +152,25 @@ for iter in range(0,150000,1000):
     # ax.plot(x,P_fom_small      ,label='FOM-small')
 #     ax.plot(x,P_arom_small     ,label='AROM')
 #     ax.plot(x,P_fom_large      ,label='FOM_large')
-    ax[0,0].plot(x,hr      ,color='tab:blue'  ,label='FOM')
-    ax[1,0].plot(x,u        ,color='tab:green' ,label='FOM')
-    ax[0,1].plot(x,P        ,color='tab:orange',label='FOM')
-    ax[1,1].plot(x,T        ,color='tab:red'   ,label='FOM')
+    ax[0,0].plot(x,rho1      ,color='tab:blue'   ,label='1st Order Roe')
+    ax[1,0].plot(x,u1         ,color='tab:green' ,label='1st Order Roe')
+    ax[0,1].plot(x,P1         ,color='tab:orange',label='1st Order Roe')
+    ax[1,1].plot(x,T1         ,color='tab:red'   ,label='1st Order Roe')
 
-    # ax[0,0].plot(x,a_rho      ,linestyle='--',color='tab:blue'  ,label='A-ROM')
-    # ax[1,0].plot(x,a_u        ,linestyle='--',color='tab:green' ,label='A-ROM')
-    # ax[0,1].plot(x,a_P        ,linestyle='--',color='tab:orange',label='A-ROM')
-    # ax[1,1].plot(x,a_T        ,linestyle='--',color='tab:red'   ,label='A-ROM')
+    ax[0,0].plot(x,rho2      ,linestyle='--',color='tab:blue'  ,label='2nd Order Roe')
+    ax[1,0].plot(x,u2        ,linestyle='--',color='tab:green' ,label='2nd Order Roe')
+    ax[0,1].plot(x,P2        ,linestyle='--',color='tab:orange',label='2nd Order Roe')
+    ax[1,1].plot(x,T2        ,linestyle='--',color='tab:red'   ,label='2nd Order Roe')
 
     # ax[0,0].scatter(x[s_indx] , rho[s_indx]      ,color='black')
     # ax[1,0].scatter(x[s_indx] , u[s_indx]        ,color='black')
     # ax[0,1].scatter(x[s_indx] , a_P[s_indx]      ,color='black')
     # ax[1,1].scatter(x[s_indx] , a_T[s_indx]      ,color='black')
 
-    # ax[0,0].legend()
-    # ax[1,0].legend()
-    # ax[0,1].legend()
-    # ax[1,1].legend()
+    ax[0,0].legend()
+    ax[1,0].legend()
+    ax[0,1].legend()
+    ax[1,1].legend()
 
 #     ax.set_xlabel('x[m]')
     # ax[0,0].set_xlabel('x[m]')

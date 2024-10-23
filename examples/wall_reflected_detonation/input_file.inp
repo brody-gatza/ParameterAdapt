@@ -14,9 +14,9 @@ fom_results_dir		    = ""
 #t = 250 micro-sec
 
 # time discretization
-dt            = 2e-9
-num_steps     = 125000
-time_scheme   = Explicit - FD Euler
+dt            = 4e-9
+num_steps     = 62500
+time_scheme   = Explicit - SSPRK3
 
 # space discretization
 x_initial   = 0
@@ -51,13 +51,15 @@ mass_frac_ic  = [[0.012772428, 0.0, 0.0, 0.101362139, 0.0, 0.0, 0.0, 0.0, 0.8858
 #ic_path = C:\GIT_Fork\ROMify\examples\wall_reflected_detonation\steady_IC.npy
 
 # gas model
-gas_model   = H2/Air Combustion
-flux_scheme = 2nd Order Roe
-limiter	    = True
-viscous	    = True
+gas_model       = H2/Air Combustion
+flux_scheme     = 2nd Order Roe
+limiter	        = True
+limiter_method  = minmod
+viscous	        = True
 
 # Visualization
 
+visual          = False
 variable1 	    = Density
 variable2 	    = Pressure
 variable3 	    = Velocity
@@ -67,7 +69,6 @@ plot_fom	    = False
 
 
 # Profiling
-
 profiling	= False
 
 
