@@ -153,11 +153,9 @@ def explicit_ssp_rk3( solver_param,rom_param,state ):
 
         iter = solver_param['iter']
 
-        q_old_full = state['cons_results_save'][:,:].ravel()
+        q_old_int = state['cons_results_save'][:,:].ravel()
 
-        q_old = q_old_full[rom_param['S_indx_solver']]
-
-        q_old_full = solver_functions.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],q_old_full)
+        q_old = q_old_int[rom_param['S_indx_solver']]
 
 
         d_flux_dx = state['d_flux_dx']
@@ -169,22 +167,23 @@ def explicit_ssp_rk3( solver_param,rom_param,state ):
         q1     = q_old + 0.5 * dt * res_old
 
         # q2
-        state['Q_cons'] = q_old_full
-        state['Q_cons'][rom_param['S_indx_solver']] = q1
+        q_old_int[rom_param['S_indx_solver']] = q1
+        state['Q_cons'] = solver_functions.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],q_old_int)
         state  = solver_functions.residual_calculator(solver_param,rom_param,state)
         res1 = state['d_flux_dx']
         q2 = q1 + 0.5 * dt * res1
 
+
         # q3
-        state['Q_cons'] = q_old_full
-        state['Q_cons'][rom_param['S_indx_solver']] = q2
+        q_old_int[rom_param['S_indx_solver']] = q2
+        state['Q_cons'] = solver_functions.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],q_old_int)
         state = solver_functions.residual_calculator(solver_param,rom_param,state)
         res2 = state['d_flux_dx']
         q3 = (2*q_old/3) + (1/3)*(q2 + 0.5 * dt * res2)
 
         # q_new
-        state['Q_cons'] = q_old_full
-        state['Q_cons'][rom_param['S_indx_solver']] = q3
+        q_old_int[rom_param['S_indx_solver']] = q3
+        state['Q_cons'] = solver_functions.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],q_old_int)
         state = solver_functions.residual_calculator(solver_param,rom_param,state)
         res3 = state['d_flux_dx']
         q_new = q3 + 0.5 * dt * res3

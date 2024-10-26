@@ -14,8 +14,8 @@ fom_results_max_iter    = ""
 #t = 250 micro-sec
 
 # time discretization
-dt            = 4e-9
-num_steps     = 62500
+dt            = 8e-9
+num_steps     = 31250
 time_scheme   = Explicit - SSPRK3
 
 # space discretization
@@ -52,9 +52,9 @@ mass_frac_ic  = [[0.012772428, 0.0, 0.0, 0.101362139, 0.0, 0.0, 0.0, 0.0, 0.8858
 
 # gas model
 gas_model       = H2/Air Combustion
-flux_scheme     = 2nd Order Roe
-limiter	        = True
-limiter_method  = minmod
+flux_scheme     = 1st Order Roe
+limiter	        = False
+limiter_method  = barth
 viscous	        = True
 
 # Visualization
@@ -64,12 +64,12 @@ variable1 	    = Density
 variable2 	    = Pressure
 variable3 	    = Velocity
 variable4 	    = Heat Release
-update_interval = 1000
+update_interval = 1
 plot_fom	    = False
 
 
 # Saving
-save_interval = 100
+save_interval = 500
 
 
 # Profiling

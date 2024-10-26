@@ -11,8 +11,8 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": [
-                "C:\\GIT_Fork\\ROMify\\examples\\classic_shock_tube",
-                "C:\\GIT_Fork\\ROMify\\examples\\classic_shock_tube\\input_file.inp"
+                "C:\\GIT_Fork\\ROMify\\examples\\wall_reflected_detonation",
+                "C:\\GIT_Fork\\ROMify\\examples\\wall_reflected_detonation\\input_file.inp"
             ]
         }
     ]
