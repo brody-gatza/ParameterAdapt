@@ -12,7 +12,7 @@
             "console": "integratedTerminal",
             "args": [
                 "C:\\GIT_Fork\\ROMify\\examples\\wall_reflected_detonation",
-                "C:\\GIT_Fork\\ROMify\\examples\\wall_reflected_detonation\\input_file.inp"
+                "C:\\GIT_Fork\\ROMify\\examples\\wall_reflected_detonation\\input_file_arom.inp"
             ]
         }
     ]

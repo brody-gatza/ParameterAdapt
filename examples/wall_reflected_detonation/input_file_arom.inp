@@ -1,6 +1,6 @@
 # solver setup
 
-solver_mode 		    = FOM
+solver_mode 		    = Adaptive ROM
 rom_method  		    = Galerkin
 arom_method		        = Direct Adapt
 pod_energy  		    = 99.999
@@ -14,8 +14,8 @@ fom_results_max_iter    = ""
 #t = 250 micro-sec
 
 # time discretization
-dt            = 8e-9
-num_steps     = 31250
+dt            = 4e-10
+num_steps     = 625000
 time_scheme   = Explicit - SSPRK3
 
 # space discretization
@@ -38,17 +38,18 @@ temp_outlet       = extrapolate
 mass_frac_outlet  = extrapolate
 
 
+
 # Initial Condition
 
-x_interval_ic = [[0,0.005],[0.005,0.12]]
-press_ic      = [6687.45,36679.65]
-temp_ic       = [298,621]
-vel_ic        = [0.01,-476]
-rho_ic        = [0.085203447,0.224257236]
-mass_frac_ic  = [[0.012772428, 0.0, 0.0, 0.101362139, 0.0, 0.0, 0.0, 0.0, 0.885865433],[0.012772428, 0.0, 0.0,     0.101362139, 0.0, 0.0, 0.0, 0.0, 0.885865433]]
+#x_interval_ic = [[0,0.005],[0.005,0.12]]
+#press_ic      = [6687.45,36679.65]
+#temp_ic       = [298,621]
+#vel_ic        = [0.01,-476]
+#rho_ic        = [0.085203447,0.224257236]
+#mass_frac_ic  = [[0.012772428, 0.0, 0.0, 0.101362139, 0.0, 0.0, 0.0, 0.0, 0.885865433],[0.012772428, 0.0, 0.0,     0.101362139, 0.0, 0.0, 0.0, 0.0, 0.885865433]]
 
 
-#ic_path = C:\GIT_Fork\ROMify\examples\wall_reflected_detonation\steady_IC.npy
+ic_path = C:\Users\mohag\Desktop\after_reflection_ic.npy
 
 # gas model
 gas_model       = H2/Air Combustion
@@ -59,17 +60,17 @@ viscous	        = True
 
 # Visualization
 
-visual          = False
+visual          = True
 variable1 	    = Density
 variable2 	    = Pressure
 variable3 	    = Velocity
 variable4 	    = Heat Release
-update_interval = 1
+update_interval = 100
 plot_fom	    = False
 
 
 # Saving
-save_interval = 500
+save_interval = 1000
 
 
 # Profiling

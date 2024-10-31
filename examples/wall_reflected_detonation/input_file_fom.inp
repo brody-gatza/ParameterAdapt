@@ -1,0 +1,79 @@
+# solver setup
+
+solver_mode 		    = FOM
+rom_method  		    = Galerkin
+arom_method		        = Direct Adapt
+pod_energy  		    = 99.999
+hyper	    		    = True
+hyper_method		    = QDEIM
+init_training_win 	    = 10
+unsampled_update_freq 	= 10
+fom_results_max_iter    = ""
+
+#cfl = 0.0025
+#t = 250 micro-sec
+
+# time discretization
+dt            = 4e-10
+num_steps     = 15000
+time_scheme   = Explicit - SSPRK3
+
+# space discretization
+x_initial   = 0
+x_final     = 0.12
+cell_number = 500
+
+# inlet BC
+rho_inlet        = wall
+vel_inlet        = wall
+press_inlet      = wall
+temp_inlet       = wall
+mass_frac_inlet  = wall
+
+# outlet BC
+rho_outlet        = extrapolate
+vel_outlet        = extrapolate
+press_outlet      = extrapolate
+temp_outlet       = extrapolate
+mass_frac_outlet  = extrapolate
+
+
+# Initial Condition
+
+x_interval_ic = [[0,0.005],[0.005,0.12]]
+press_ic      = [6687.45,36679.65]
+temp_ic       = [298,621]
+vel_ic        = [0.01,-476]
+rho_ic        = [0.085203447,0.224257236]
+mass_frac_ic  = [[0.012772428, 0.0, 0.0, 0.101362139, 0.0, 0.0, 0.0, 0.0, 0.885865433],[0.012772428, 0.0, 0.0,     0.101362139, 0.0, 0.0, 0.0, 0.0, 0.885865433]]
+
+
+#ic_path = C:\GIT_Fork\ROMify\examples\wall_reflected_detonation\steady_IC.npy
+
+# gas model
+gas_model       = H2/Air Combustion
+flux_scheme     = 1st Order Roe
+limiter	        = False
+limiter_method  = barth
+viscous	        = True
+
+# Visualization
+
+visual          = False
+variable1 	    = Density
+variable2 	    = Pressure
+variable3 	    = Velocity
+variable4 	    = Heat Release
+update_interval = 1
+plot_fom	    = False
+
+
+# Saving
+save_interval = 1000
+
+
+# Profiling
+profiling	= False
+
+
+

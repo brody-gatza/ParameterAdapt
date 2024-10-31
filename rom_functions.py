@@ -115,12 +115,8 @@ def precomputer(solver_param,state):
     if (solver_param['solver_mode'] == 'Adaptive ROM' 
         and solver_param['adaptive_rom_method'] != 'Single-Snapshot'):
 
-        _,basis_num_col = np.shape(rom_param['basis'])
-        window_size = basis_num_col+1
-
-        rom_param['F']        = tall_thin_data
-        rom_param['Q_R']      = np.zeros((basis_num_col,window_size))        
-        rom_param['Q_R'][:,:] = rom_param['q_red0'][:,np.newaxis]
+        rom_param['F']        = tall_thin_data     
+        rom_param['Q_R']      = rom_param['basis'].T @ rom_param['F']
 
     return rom_param
 
@@ -617,10 +613,10 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
 
                 state['Q_bar'] = Q_bar_star_new
 
-                Q_bar_new_sampling = Q_bar_star_new_solver_int[rom_param['S_indx_solver']]
-                Q_bar_new_solver_int = Q_bar_star_new_solver_int
-                solver_param['hyper'] = True
-                solver_param['dt'] = solver_param['dt'] / sampling_adapt_freq
+                Q_bar_new_sampling      = Q_bar_star_new_solver_int[rom_param['S_indx_solver']]
+                Q_bar_new_solver_int    = Q_bar_star_new_solver_int
+                solver_param['hyper']   = True
+                solver_param['dt']      = solver_param['dt'] / sampling_adapt_freq
 
                 Q_red_new = rom_param['basis'].T @ Q_bar_star_new_solver_int
 
@@ -630,7 +626,12 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
 
                 rom_param['q_red0'] = np.linalg.pinv(rom_param['basis']) @ F [:,-1]
 
-                Q_tilda_correct_solver_int= q_ref + (denormalizor * (rom_param['basis'] @ rom_param['q_red0'] ))
+                corrected_cent_norm = rom_param['basis'] @ rom_param['q_red0']
+
+                rom_param['F'][:,-1]   = corrected_cent_norm
+                rom_param['Q_R'][:,-1] = rom_param['q_red0']
+
+                Q_tilda_correct_solver_int= q_ref + (denormalizor * corrected_cent_norm)
 
                 Q_tilda_correct_solver_full= solver_functions.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int)
 
@@ -658,7 +659,12 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
 
                 rom_param['q_red0'] = np.linalg.pinv(rom_param['basis']) @ F [:,-1]
 
-                Q_tilda_correct_solver_int= q_ref + (denormalizor * (rom_param['basis'] @ rom_param['q_red0'] ))
+                corrected_cent_norm = rom_param['basis'] @ rom_param['q_red0']
+
+                rom_param['F'][:,-1]   = corrected_cent_norm
+                rom_param['Q_R'][:,-1] = rom_param['q_red0']
+
+                Q_tilda_correct_solver_int= q_ref + (denormalizor * corrected_cent_norm)
                 
                 Q_tilda_correct_solver_full= solver_functions.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int)
 
@@ -720,9 +726,12 @@ def adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_red_new
             rom_param['basis'] = rom_param['basis'] + del_basis
 
         # orthogonalize the basis
-        rom_param['basis'] , _ = np.linalg.qr(rom_param['basis'])        
-        
+        rom_param['basis'] , _ = np.linalg.qr(rom_param['basis']) 
 
+
+        rom_param['F'] = F
+
+        
     elif solver_param['adaptive_rom_method'] == 'Direct Adapt':
 
         # roll the training window to the left
@@ -740,8 +749,13 @@ def adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_red_new
         # orthogonalize the basis
         rom_param['basis'] , _ , _ = np.linalg.svd(rom_param['basis'],full_matrices=False)
 
+        rom_param['F']      = F
+        rom_param['Q_R']    = Q_R
+
 
     elif solver_param['adaptive_rom_method'] == 'Initiative Adapt':
+
+        basis_num_row,basis_num_col = np.shape(rom_param['basis'])
 
         # roll the training window to the left
         F   = np.roll(rom_param['F']   , shift=-1,axis=1)
@@ -752,6 +766,8 @@ def adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_red_new
         rom_param['basis'],_,_ = np.linalg.svd(F , full_matrices=False)
 
         rom_param['basis'] = rom_param['basis'][:,0:basis_num_col]
+
+        rom_param['F']     = F
         
     
     return rom_param , F
@@ -772,7 +788,8 @@ def adapt_sample(solver_param,rom_param,F,state):
 
     elif solver_param['sampling_method'] == 'Gappy POD':
 
-        num_req_samples = len(rom_param['S_indx_user'])
+        # num_req_samples = len(rom_param['S_indx_user'])
+        num_req_samples = 50
 
         basis_pinv = np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver'],:])
 
@@ -869,7 +886,7 @@ def adapt_sample(solver_param,rom_param,F,state):
     
         ### normal sampling ###
         # num_req_samples = len(rom_param['S_indx_user'])-num_req_samples_shock
-        num_req_samples = 30
+        num_req_samples = 100
         basis_pinv = np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver'],:])
 
         interp_error      = np.abs(F[:,-1] - (rom_param['basis']@basis_pinv)@F[rom_param['S_indx_solver'],-1])

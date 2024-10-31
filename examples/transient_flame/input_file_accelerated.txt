@@ -11,8 +11,8 @@ unsampled_update_freq 	= 10
 fom_results_max_iter    = ""
 
 # time discretization
-dt            = 1e-8
-num_steps     = 3500
+dt            = 1e-9
+num_steps     = 35000
 time_scheme   = Explicit - FD Euler
 
 
@@ -25,18 +25,18 @@ ic_path = C:\GIT_Fork\ROMify\examples\transient_flame\steady_IC_trans_accelerate
 
 
 # inlet BC
-rho_inlet        = extrap
+rho_inlet        = extrapolate
 vel_inlet        = 7.08947279e+01
-press_inlet      = extrap
+press_inlet      = extrapolate
 temp_inlet       = 3.14851035e+02
 mass_frac_inlet  = [8.62408133e-03, -1.98125128e-22, -5.66548507e-17,1.36881642e-01,-1.19575913e-19, -1.35907392e-15, -9.77408847e-16, -7.94368466e-16,8.54494277e-01]
 
 # outlet BC
-rho_outlet        = extrap
-vel_outlet        = extrap
-press_outlet      = extrap
-temp_outlet       = extrap
-mass_frac_outlet  = extrap
+rho_outlet        = extrapolate
+vel_outlet        = extrapolate
+press_outlet      = extrapolate
+temp_outlet       = extrapolate
+mass_frac_outlet  = extrapolate
 
 # gas model
 gas_model       = H2/Air Combustion
