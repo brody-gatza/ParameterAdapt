@@ -789,7 +789,7 @@ def adapt_sample(solver_param,rom_param,F,state):
     elif solver_param['sampling_method'] == 'Gappy POD':
 
         # num_req_samples = len(rom_param['S_indx_user'])
-        num_req_samples = 50
+        num_req_samples = 10
 
         basis_pinv = np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver'],:])
 
@@ -838,80 +838,142 @@ def adapt_sample(solver_param,rom_param,F,state):
 
         rho_bar_shock = Q_bar_shock_solver_int[0:solver_param['cell_number']]
 
-        second_derv_density = np.gradient(np.gradient(rho_bar_shock))
+        first_derv_density  = np.gradient(rho_bar_shock)
 
-        deflection_points = np.argsort(second_derv_density)[-2:]
+        # second_derv_density = np.gradient(np.gradient(rho_bar_shock))
 
-        first_shock   = deflection_points[0]
-        shorck_range1 = np.arange(first_shock-5,first_shock+5,1)
 
-        second_shock   = deflection_points[1]
-        shorck_range2 = np.arange(second_shock-5,second_shock+5,1)
+        # shock    = np.where(np.abs(first_derv_density) >= 1e-5)[0][-1]
+        
+        # shock_range = np.arange(shock-5,shock+5,1)
 
-        shock_range = np.sort(np.unique(np.append(shorck_range1,shorck_range2)))
+        high_grad_area = np.argsort(first_derv_density)
 
-        ### QDEIM ###
+        # deflection_points = np.argsort(second_derv_density)[-2:]
+
+        # first_shock   = deflection_points[0]
+        # shorck_range1 = np.arange(first_shock-5,first_shock+5,1)
+
+        # second_shock   = deflection_points[1]
+        # shorck_range2 = np.arange(second_shock-5,second_shock+5,1)
+
+        # shock_range = np.sort(np.unique(np.append(shorck_range1,shorck_range2)))
+
+        num_req_samples = 10
+
+        ### QDEIM + FGS ###
+        # S_indx_user_qdeim = QDEIM_sample_point_finder(basis,solver_param['cell_number'])
+
+        # num_selected_samples = len(S_indx_user_qdeim)
+
+        # counter = 0
+
+        # while num_selected_samples<num_req_samples:
+
+        #     # add one more point from high gradients
+        #     complt_sample = high_grad_area[0:counter]
+
+        #     S_indx_user       = np.sort(np.unique(np.append(S_indx_user_qdeim,complt_sample)))
+
+        #     num_selected_samples = len(S_indx_user)
+
+        #     counter = counter + 1
+
+
+        ### QDEIM + Random ###
+        # S_indx_user_qdeim = QDEIM_sample_point_finder(basis,solver_param['cell_number'])
+        # S_indx_user_random= np.random.randint(0, solver_param['cell_number'], size=100)
+
+        # num_selected_samples = len(S_indx_user_qdeim)
+
+        # counter = 0
+
+        # while num_selected_samples<num_req_samples:
+
+        #     # add one more point randomly
+        #     complt_sample = S_indx_user_random[0:counter]
+
+        #     S_indx_user       = np.sort(np.unique(np.append(S_indx_user_qdeim,complt_sample)))
+
+        #     num_selected_samples = len(S_indx_user)
+
+        #     counter = counter + 1
+
+        
+        # ### QDEIM + Eigen ###
         S_indx_user_qdeim = QDEIM_sample_point_finder(basis,solver_param['cell_number'])
+        S_indx_user_eigen = GappyPODE_sample_point_finder(basis,100,solver_param['cell_number'])
 
-        for indx in S_indx_user_qdeim:
+        num_selected_samples = len(S_indx_user_qdeim)
 
-            if indx in shock_range:
-
-                indices_to_delete = np.where(shock_range == indx)
-                shock_range = np.delete(shock_range, indices_to_delete)
-
-        S_indx_user       = np.sort(np.append(S_indx_user_qdeim,shock_range))
-
-        ### normal sampling ###
-
-        num_req_samples   = 50
-        basis_pinv        = np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver'],:])
-
-        interp_error      = np.abs(F[:,-1] - (rom_param['basis']@basis_pinv)@F[rom_param['S_indx_solver'],-1])
-        interp_error_indx = np.argsort(np.squeeze(interp_error))[::-1]
-
-        S_indx_solver_interp     = interp_error_indx[0:num_req_samples]
-        S_indx_user_interp       = solver2user_indx_converter(S_indx_solver_interp,solver_param['cell_number'])
-        S_indx_user_interp       = np.sort(np.unique(S_indx_user_interp))
-
-        for indx in S_indx_user_interp:
-
-            if indx in S_indx_user:
-
-                indices_to_delete = np.where(S_indx_user_interp == indx)
-                S_indx_user_interp = np.delete(S_indx_user_interp, indices_to_delete)
-
-        S_indx_user_prefinal       = np.sort(np.append(S_indx_user,S_indx_user_interp)) 
-        S_indx_solver_prefinal     = user2solver_indx_converter(S_indx_user_prefinal,solver_param['num_state_var'],solver_param['cell_number'])
-
-        num_selected_samples = len(S_indx_user_prefinal)
         counter = 0
 
-        if num_selected_samples >= num_req_samples:
+        while num_selected_samples<num_req_samples:
 
-            S_indx_user   = S_indx_user_prefinal[0:num_req_samples]
-            S_indx_solver = user2solver_indx_converter(S_indx_user,solver_param['num_state_var'],solver_param['cell_number'])
+            # add one more point from high gradients
+            complt_sample = S_indx_user_eigen[0:counter]
 
-        else:
+            S_indx_user       = np.sort(np.unique(np.append(S_indx_user_qdeim,complt_sample)))
 
-            while num_selected_samples < num_req_samples:
+            num_selected_samples = len(S_indx_user)
 
-                start_indx = num_req_samples + counter
-                end_indx   = num_req_samples + counter + 1
+            counter = counter + 1
 
-                new_indx              = interp_error_indx[start_indx:end_indx]
-                S_indx_solver_prefinal= np.append(S_indx_solver_prefinal,new_indx)
+        # # Take the first 10 points
+        S_indx_user       = S_indx_user[0:10]
+        S_indx_solver     = user2solver_indx_converter(S_indx_user,solver_param['num_state_var'],solver_param['cell_number'])
 
-                S_indx_user_prefinal       = solver2user_indx_converter(S_indx_solver_prefinal,solver_param['cell_number'])
-                S_indx_user_prefinal       = np.sort(np.unique(S_indx_user_prefinal))
 
-                S_indx_solver_prefinal     = user2solver_indx_converter(S_indx_user_prefinal,solver_param['num_state_var'],solver_param['cell_number'])
+        # ### normal sampling ###
 
-                S_indx_user   = S_indx_user_prefinal
-                S_indx_solver = S_indx_solver_prefinal
+        # num_req_samples   = 50
+        # basis_pinv        = np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver'],:])
 
-                num_selected_samples = len(S_indx_user)
-                counter = counter + 1
+        # interp_error      = np.abs(F[:,-1] - (rom_param['basis']@basis_pinv)@F[rom_param['S_indx_solver'],-1])
+        # interp_error_indx = np.argsort(np.squeeze(interp_error))[::-1]
+
+        # S_indx_solver_interp     = interp_error_indx[0:num_req_samples]
+        # S_indx_user_interp       = solver2user_indx_converter(S_indx_solver_interp,solver_param['cell_number'])
+        # S_indx_user_interp       = np.sort(np.unique(S_indx_user_interp))
+
+        # for indx in S_indx_user_interp:
+
+        #     if indx in S_indx_user:
+
+        #         indices_to_delete = np.where(S_indx_user_interp == indx)
+        #         S_indx_user_interp = np.delete(S_indx_user_interp, indices_to_delete)
+
+        # S_indx_user_prefinal       = np.sort(np.append(S_indx_user,S_indx_user_interp)) 
+        # S_indx_solver_prefinal     = user2solver_indx_converter(S_indx_user_prefinal,solver_param['num_state_var'],solver_param['cell_number'])
+
+        # num_selected_samples = len(S_indx_user_prefinal)
+        # counter = 0
+
+        # if num_selected_samples >= num_req_samples:
+
+        #     S_indx_user   = S_indx_user_prefinal[0:num_req_samples]
+        #     S_indx_solver = user2solver_indx_converter(S_indx_user,solver_param['num_state_var'],solver_param['cell_number'])
+
+        # else:
+
+        #     while num_selected_samples < num_req_samples:
+
+        #         start_indx = num_req_samples + counter
+        #         end_indx   = num_req_samples + counter + 1
+
+        #         new_indx              = interp_error_indx[start_indx:end_indx]
+        #         S_indx_solver_prefinal= np.append(S_indx_solver_prefinal,new_indx)
+
+        #         S_indx_user_prefinal       = solver2user_indx_converter(S_indx_solver_prefinal,solver_param['cell_number'])
+        #         S_indx_user_prefinal       = np.sort(np.unique(S_indx_user_prefinal))
+
+        #         S_indx_solver_prefinal     = user2solver_indx_converter(S_indx_user_prefinal,solver_param['num_state_var'],solver_param['cell_number'])
+
+        #         S_indx_user   = S_indx_user_prefinal
+        #         S_indx_solver = S_indx_solver_prefinal
+
+        #         num_selected_samples = len(S_indx_user)
+        #         counter = counter + 1
 
         # S_indx_user       = np.sort(np.append(S_indx_user,shock_range))
         # S_indx_solver     = user2solver_indx_converter(S_indx_user,solver_param['num_state_var'],solver_param['cell_number'])
