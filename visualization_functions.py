@@ -183,45 +183,45 @@ def in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param):
     axs[1,1].relim()
     axs[1,1].autoscale()
 
-    if solver_param['solver_mode'] == 'ROM' or (solver_param['plot_fom_flag'] == True and iter > int(solver_param['init_training_win'])):
+    # if solver_param['solver_mode'] == 'ROM' or (solver_param['plot_fom_flag'] == True and iter > int(solver_param['init_training_win'])):
 
-        training_data_prim = rom_param['training_data_prim'][:,:,iter]
+    #     training_data_prim = rom_param['training_data_prim'][:,:,iter]
 
-        y12= training_data_prim[visual_var1,:]
-        y22= training_data_prim[visual_var2,:]
-        y32= training_data_prim[visual_var3,:]
-        y42= training_data_prim[visual_var4,:]
+    #     y12= training_data_prim[visual_var1,:]
+    #     y22= training_data_prim[visual_var2,:]
+    #     y32= training_data_prim[visual_var3,:]
+    #     y42= training_data_prim[visual_var4,:]
 
-        if y12.size == 0 : 
+    #     if y12.size == 0 : 
 
-            y12 = 0 * training_data_prim[0,:]
+    #         y12 = 0 * training_data_prim[0,:]
 
-        if y22.size == 0 : 
+    #     if y22.size == 0 : 
 
-            y22 = 0 * training_data_prim[0,:]
+    #         y22 = 0 * training_data_prim[0,:]
 
-        if y32.size == 0 : 
+    #     if y32.size == 0 : 
 
-            y32 = 0 * training_data_prim[0,:]
+    #         y32 = 0 * training_data_prim[0,:]
 
-        if y42.size == 0 : 
+    #     if y42.size == 0 : 
 
-            y42 = 0 * training_data_prim[0,:]
+    #         y42 = 0 * training_data_prim[0,:]
 
-        plot12 = visual_param['plot12']
-        plot22 = visual_param['plot22']
-        plot32 = visual_param['plot32']
-        plot42 = visual_param['plot42']
+    #     plot12 = visual_param['plot12']
+    #     plot22 = visual_param['plot22']
+    #     plot32 = visual_param['plot32']
+    #     plot42 = visual_param['plot42']
 
-        plot12.set_data(x,y12)
-        plot22.set_data(x,y22)
-        plot32.set_data(x,y32)
-        plot42.set_data(x,y42)
+    #     plot12.set_data(x,y12)
+    #     plot22.set_data(x,y22)
+    #     plot32.set_data(x,y32)
+    #     plot42.set_data(x,y42)
 
-        axs[0,0].legend()
-        axs[0,1].legend()
-        axs[1,0].legend()
-        axs[1,1].legend()
+    #     axs[0,0].legend()
+    #     axs[0,1].legend()
+    #     axs[1,0].legend()
+    #     axs[1,1].legend()
 
     if solver_param['hyper'] == True:
 

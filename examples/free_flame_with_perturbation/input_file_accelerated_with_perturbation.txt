@@ -1,18 +1,23 @@
 # solver setup
 
-solver_mode 		= Hybrid ROM
-rom_method  		= Galerkin
-arom_method		    = Direct Adapt
-pod_energy  		= 99.999
-hyper	    		= True
-hyper_method		= QDEIM
-init_training_win 	= 10
-unsampled_update_freq 	= 10
-fom_results_dir		= ""
+solver_mode 		 = Hybrid ROM
+rom_method  		 = Galerkin
+arom_method		     = Direct Adapt
+pod_energy  		 = 99.999
+hyper	    		 = False
+hyper_method		 = QDEIM
+init_training_win 	 = 10
+unsampled_update_freq= 10
+fom_results_dir		 = C:\GIT_Fork\ROMify\examples\free_flame_with_perturbation\
+fom_results_max_iter = 50240
+
+fom_results_start     = 87920
+fom_results_end       = 113040
+fom_results_step      = 50
 
 # time discretization
 dt            = 1e-9
-num_steps     = 30002
+num_steps     = 138160
 time_scheme   = Explicit - FD Euler
 
 # space discretization
@@ -20,14 +25,14 @@ x_initial   = 0
 x_final     = 0.01
 cell_number = 500 
 
-ic_path = C:/GIT_Fork/ROMify/examples/free_flame_with_perturbation/steady_IC_accelerated.npy
+ic_path = C:\GIT_Fork\ROMify\examples\free_flame_with_perturbation\steady_IC_accelerated.npy
 
 # inlet BC
 rho_inlet        = extrapolate
-vel_inlet        = 0.582289
+vel_inlet        = extrapolate
 press_inlet      = extrapolate
-temp_inlet       = 300
-mass_frac_inlet  = [8.62408241e-03, -4.50418926e-19, -8.05978549e-17,1.36881641e-01,-1.83648598e-16, -1.10827066e-15, -1.63931542e-16, -7.94181448e-16 ,8.54494276e-01]
+temp_inlet       = extrapolate
+mass_frac_inlet  = extrapolate
 
 # outlet BC
 rho_outlet        = extrapolate
@@ -40,16 +45,21 @@ mass_frac_outlet  = extrapolate
 gas_model   = H2/Air Combustion
 flux_scheme = 1st Order Roe
 limiter	    = False
+limiter_method = 'barth'
 viscous     = True
 
 # Visualization
 
-variable1 	= Density
-variable2 	= Pressure
-variable3 	= Velocity
-variable4 	= Heat Release
-update_interval = 100
-plot_fom	= False
+visual          = False
+variable1 	    = Density
+variable2 	    = Pressure
+variable3 	    = Velocity
+variable4 	    = Temprature
+update_interval = 300
+plot_fom	    = False
+
+# Saving
+save_interval   = 1
 
 # Profiling
 profiling	= False

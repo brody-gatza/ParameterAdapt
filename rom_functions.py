@@ -21,7 +21,6 @@ def precomputer(solver_param,state):
         training_data_cons , training_data_prim = assemble_snapshots(solver_param)
         first_snapshot                          = training_data_cons[:,:,-1]
 
-
     elif solver_param['solver_mode'] == 'Hybrid ROM':
 
         solver_param['fom_results_max_iter']    = solver_param['iter']
@@ -76,7 +75,7 @@ def precomputer(solver_param,state):
     else:
 
         basis         = V[:,0:truncation_indx[0][0]]
-        # basis         = V[:,0:3]
+        # basis         = V[:,0:5]
         # basis           = V
     
     normalizor_size = solver_param['num_state_var']*solver_param['cell_number']
@@ -95,6 +94,7 @@ def precomputer(solver_param,state):
     rom_param     = {}
 
     rom_param['basis']              = basis
+    rom_param['basis_full']         = V
     rom_param['normalizor']         = normalizor
     rom_param['denormalizor']       = denormalizor
     rom_param['q_ref']              = q_ref
@@ -103,6 +103,7 @@ def precomputer(solver_param,state):
     Q_cons_solver          = state['Q_cons']
     Q_cons_user            = solver_functions.results_solver2user_converter(solver_param['num_state_var'],cell_num,Q_cons_solver)
     Q_cons_interior_user   = Q_cons_user[:,2:-2]
+    # Q_cons_interior_user   = first_snapshot
     Q_cons_interior_solver = solver_functions.results_user2solver_converter(Q_cons_interior_user) 
     rom_param['q_red0']    = basis.T @ Q_cons_interior_solver
 
@@ -122,7 +123,7 @@ def precomputer(solver_param,state):
 
 def assemble_snapshots(solver_param):
 
-    dir_results = os.path.join(solver_param['working_dir'], f"{solver_param['solver_mode']}_results",'cons_prim')
+    dir_results = os.path.join(solver_param['dir_results'], 'cons_prim')
 
     if solver_param['solver_mode'] == 'ROM':
 
@@ -138,19 +139,49 @@ def assemble_snapshots(solver_param):
     sample_prim_snapshot = np.load(os.path.join(dir_results, '0iteration_prim.npy'))
     sample_prim_shape    = np.shape(sample_prim_snapshot)
 
-    training_data_cons = np.zeros((sample_cons_shape[0],sample_cons_shape[1],solver_param['fom_results_max_iter']))
-    training_data_prim = np.zeros((sample_prim_shape[0],sample_prim_shape[1],solver_param['fom_results_max_iter']))
+    if solver_param['solver_mode'] in ['Adaptive ROM','ROM']:
 
-    print('Assembling Snapshots!')
+        step                 = 1 
+        num_snapshot         = int(solver_param['fom_results_max_iter']/step)
+        
+        training_data_cons = np.zeros((sample_cons_shape[0],sample_cons_shape[1],num_snapshot))
+        training_data_prim = np.zeros((sample_prim_shape[0],sample_prim_shape[1],num_snapshot))
 
-    # bring all of snapshots into one matrix
-    for i in range(solver_param['fom_results_max_iter']):
+        print('Assembling Snapshots!')
 
-        file_name_cons = str(i)+'iteration'+'_cons.npy'
-        file_name_prim = str(i)+'iteration'+'_prim.npy'
+        # bring all of snapshots into one matrix
+        for i in range(0,solver_param['fom_results_max_iter'],step):
 
-        training_data_cons[:, :, i] = np.load(os.path.join(dir_results, file_name_cons))
-        training_data_prim[:, :, i] = np.load(os.path.join(dir_results, file_name_prim))
+            file_name_cons = str(i)+'iteration'+'_cons.npy'
+            file_name_prim = str(i)+'iteration'+'_prim.npy'
+
+            indx = int(i/step)
+
+            training_data_cons[:, :, indx] = np.load(os.path.join(dir_results, file_name_cons))
+            training_data_prim[:, :, indx] = np.load(os.path.join(dir_results, file_name_prim))
+
+
+    if solver_param['solver_mode'] == 'Hybrid ROM':
+
+        step                 = solver_param['fom_results_step'] 
+        num_snapshot         = int((solver_param['fom_results_end']-solver_param['fom_results_start'])
+                                   /step)
+
+        training_data_cons = np.zeros((sample_cons_shape[0],sample_cons_shape[1],num_snapshot))
+        training_data_prim = np.zeros((sample_prim_shape[0],sample_prim_shape[1],num_snapshot))
+
+        print('Assembling Snapshots!')
+
+        file_title_indx = np.linspace(solver_param['fom_results_start'],solver_param['fom_results_end'],num_snapshot,dtype=int)
+
+        # bring all of snapshots into one matrix
+        for i in range(num_snapshot):
+            
+            file_name_cons = str(file_title_indx[i])+'iteration'+'_cons.npy'
+            file_name_prim = str(file_title_indx[i])+'iteration'+'_prim.npy'
+
+            training_data_cons[:, :, i] = np.load(os.path.join(dir_results, file_name_cons))
+            training_data_prim[:, :, i] = np.load(os.path.join(dir_results, file_name_prim))
 
     return training_data_cons , training_data_prim
 
@@ -180,9 +211,10 @@ def red2full_state_calculator(solver_param,rom_param,state):
 
             pcc              = rom_param['hyper_precompute']
             RES_solver       = state['d_flux_dx']  
-            cent_norm        = normalizor[rom_param['S_indx_solver']]*(RES_solver)
+            cent_norm        = normalizor[rom_param['S_indx_solver']]*RES_solver
             RES_cent_norm    = pcc @ cent_norm
             RES              = (RES_cent_norm*denormalizor)
+
 
         dQ_red_dt        = basis.T @ (normalizor * RES)
 
@@ -208,6 +240,35 @@ def red2full_state_calculator(solver_param,rom_param,state):
 
     return state , rom_param
 
+def modern_red2full_state_calculator(solver_param,rom_param,state):
+
+    if solver_param['rom_method'] == 'Galerkin':
+
+        q_ref            = rom_param['q_ref']
+        normalizor       = rom_param['normalizor']
+        denormalizor     = rom_param['denormalizor']
+        basis            = rom_param['basis']
+        pcc              = rom_param['hyper_precompute']
+
+
+        Q_tilda_old            = state['Q_cons']
+        Q_tilda_old_solver_int = solver_functions.solver_eliminate_ghost(solver_param,Q_tilda_old)
+
+        state              = solver_functions.residual_calculator(solver_param,rom_param,state)
+        state['Q_cons']    = Q_tilda_old_solver_int[rom_param['S_indx_solver']]
+        state              = time_integrator_functions.advance_time(solver_param,rom_param,state)
+        Q_tilda_new        = state['Q_cons']
+
+        # Estimate FOM at unsampled points using old basis (DEIM Equation)
+
+        decen_norm_Q_bar_new_sampling           = normalizor[rom_param['S_indx_solver']]*(Q_tilda_new-q_ref[rom_param['S_indx_solver']])
+        C                                       = pcc @ decen_norm_Q_bar_new_sampling
+        Q_bar_new_solver_int                    = q_ref + (denormalizor * C )
+
+        state['Q_cons'] = solver_functions.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_new_solver_int)
+
+        return state , rom_param
+    
 def user2solver_indx_converter(S_indx_user,num_consv_var,num_cell):
 
     num_selected_cell = np.size(S_indx_user)
@@ -437,7 +498,7 @@ def single_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
             state = time_integrator_functions.advance_time(solver_param,rom_param,state)
 
             # Save the results of current state before doing the precomputations
-            dir_results = os.path.join(solver_param['working_dir'], f"{solver_param['solver_mode']}_results", 'cons_prim')
+            dir_results = os.path.join(solver_param['dir_results'], 'cons_prim')
 
             iter = solver_param['iter']
 
@@ -563,7 +624,7 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
             state = time_integrator_functions.advance_time(solver_param,rom_param,state)
 
             # Save the results of current state before doing the precomputations
-            dir_results = os.path.join(solver_param['working_dir'], f"{solver_param['solver_mode']}_results", 'cons_prim')
+            dir_results = os.path.join(solver_param['dir_results'], 'cons_prim')
 
             iter = solver_param['iter']
             
@@ -1001,8 +1062,8 @@ def adapt_sample(solver_param,rom_param,F,state):
 
 def hybrid_rom_progress(solver_param,rom_param,state,iter):
 
-    switch_iter = 30000
-
+    switch_iter = solver_param['fom_results_end']+1
+    
     # initially starting with adaptive ROM
     if iter < switch_iter:
 
@@ -1016,20 +1077,29 @@ def hybrid_rom_progress(solver_param,rom_param,state,iter):
         solver_param['solver_mode'] = 'Hybrid ROM'
 
         rom_param = precomputer(solver_param,state)
+
+        # V_temp             = rom_param['basis']
+        # V_temp_full        = rom_param['basis_full'] 
+        # rom_param['basis'] = V_temp_full[:,0:10]
+
         rom_param = sample_point_finder(solver_param,rom_param)
+
+        # rom_param['basis'] = V_temp
 
         solver_param['solver_mode'] = 'ROM'
 
-        state = solver_functions.residual_calculator(solver_param,rom_param,state)
-        state , rom_param = red2full_state_calculator(solver_param,rom_param,state)
+        # state = solver_functions.residual_calculator(solver_param,rom_param,state)
+        # state , rom_param = red2full_state_calculator(solver_param,rom_param,state)
+        state , rom_param = modern_red2full_state_calculator(solver_param,rom_param,state)
 
     # keep continue with classical ROM
     elif iter > switch_iter:
 
         solver_param['solver_mode'] = 'ROM'
 
-        state = solver_functions.residual_calculator(solver_param,rom_param,state)
-        state , rom_param = red2full_state_calculator(solver_param,rom_param,state)
+        # state = solver_functions.residual_calculator(solver_param,rom_param,state)
+        # state , rom_param = red2full_state_calculator(solver_param,rom_param,state)
+        state , rom_param = modern_red2full_state_calculator(solver_param,rom_param,state)
 
     solver_param['solver_mode'] = 'Hybrid ROM'
 

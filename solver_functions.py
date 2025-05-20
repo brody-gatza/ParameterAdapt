@@ -20,6 +20,10 @@ def solver_parameters_collector(args,input_param):
         solver_param['sampling_method']       = input_param['hyper_method']
         solver_param['fom_results_max_iter']  = int(input_param['fom_results_max_iter'])
 
+        solver_param['fom_results_start']      = int(input_param['fom_results_start'])
+        solver_param['fom_results_end']        = int(input_param['fom_results_end'])
+        solver_param['fom_results_step']       = int(input_param['fom_results_step'])
+
     elif  input_param['solver_mode'] == 'Adaptive ROM':
 
         solver_param['solver_mode']           = 'Adaptive ROM'
@@ -42,6 +46,10 @@ def solver_parameters_collector(args,input_param):
         solver_param['rom_method']            = input_param['rom_method']     
         solver_param['hyper']                 = eval(input_param['hyper'])          
         solver_param['sampling_method']       = input_param['hyper_method']
+
+        solver_param['fom_results_start']      = int(input_param['fom_results_start'])
+        solver_param['fom_results_end']        = int(input_param['fom_results_end'])
+        solver_param['fom_results_step']       = int(input_param['fom_results_step'])
         
 
     ### time discretization ###
@@ -759,7 +767,7 @@ def barth_jespersen(df_dx,Q_user,dx,solver_param):
 def results_recorder(solver_param, rom_param, state):
 
     # Prepare the name for the files to be saved
-    dir_results = os.path.join(solver_param['working_dir'], f"{solver_param['solver_mode']}_results")
+    dir_results = os.path.join(solver_param['dir_results'])
     iter = solver_param['iter']
     save_title = str(iter)+'iteration'
 
@@ -815,6 +823,14 @@ def results_recorder(solver_param, rom_param, state):
         np.save(os.path.join(dir_results, 'samples_user'  , f"{save_title}_samples_user.npy")  , rom_param['S_indx_user']  )
         np.save(os.path.join(dir_results, 'samples_solver', f"{save_title}_samples_solver.npy"), rom_param['S_indx_solver'])  
 
+    elif (solver_param['solver_mode'] == 'Hybrid ROM' and iter > int(solver_param['init_training_win'])):
+        # Save the results and end the simulation
+        np.save(os.path.join(dir_results, 'cons_prim'     , f"{save_title}_cons.npy")          , state['cons_results_save'])
+        np.save(os.path.join(dir_results, 'cons_prim'     , f"{save_title}_prim.npy")          , state['prim_results_save'])
+        np.save(os.path.join(dir_results, 'q_r'           , f"{save_title}_q_r.npy")           , rom_param['q_red0']       )
+        np.save(os.path.join(dir_results, 'basis'         , f"{save_title}_basis.npy")         , rom_param['basis']        )
+        np.save(os.path.join(dir_results, 'samples_user'  , f"{save_title}_samples_user.npy")  , rom_param['S_indx_user']  )
+        np.save(os.path.join(dir_results, 'samples_solver', f"{save_title}_samples_solver.npy"), rom_param['S_indx_solver']) 
 
 def rusanov_flux_calculator(solver_param,state):
 

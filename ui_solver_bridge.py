@@ -25,6 +25,31 @@ def driver(args,solver_param):
     # convert prim to cons
     state = solver_functions.prim2cons_converter(solver_param, state)
 
+    # create folders for storing data
+    dir_results = os.path.join(solver_param['working_dir'], f"{solver_param['solver_mode']}_results")
+    solver_param['dir_results'] = dir_results
+
+    # Check if the directory exists
+    if os.path.exists(dir_results):
+
+        # Remove the entire directory
+        shutil.rmtree(dir_results)
+
+    # Create a new directory
+    os.makedirs(dir_results)
+
+    # create rom related folders if we are running rom
+    if solver_param['solver_mode'] != 'FOM':
+
+        os.makedirs( os.path.join(dir_results, 'cons_prim')     )
+        os.makedirs( os.path.join(dir_results, 'basis')         )
+        os.makedirs( os.path.join(dir_results, 'samples_user')  )
+        os.makedirs( os.path.join(dir_results, 'samples_solver'))
+        os.makedirs( os.path.join(dir_results, 'q_r')           )
+        os.makedirs( os.path.join(dir_results, 'q_ref')         )
+        os.makedirs( os.path.join(dir_results, 'norm')          )
+        os.makedirs( os.path.join(dir_results, 'denorm')        )
+
     # initialize rom if necessary
     if solver_param['solver_mode'] == 'FOM' or solver_param['solver_mode'] == 'Adaptive ROM' or solver_param['solver_mode'] == 'Hybrid ROM':
 
@@ -57,31 +82,6 @@ def driver(args,solver_param):
         fig.set_size_inches(15,6)
         
         visual_param        = visualization_functions.initial_plot(axs,solver_param,visual_param)
-
-    # create folders for storing data
-    dir_results = os.path.join(solver_param['working_dir'], f"{solver_param['solver_mode']}_results")
-
-    # Check if the directory exists
-    if os.path.exists(dir_results):
-
-        # Remove the entire directory
-        shutil.rmtree(dir_results)
-
-    # Create a new directory
-    os.makedirs(dir_results)
-
-    # create rom related folders if we are running rom
-    if solver_param['solver_mode'] != 'FOM':
-
-        os.makedirs( os.path.join(dir_results, 'cons_prim')     )
-        os.makedirs( os.path.join(dir_results, 'basis')         )
-        os.makedirs( os.path.join(dir_results, 'samples_user')  )
-        os.makedirs( os.path.join(dir_results, 'samples_solver'))
-        os.makedirs( os.path.join(dir_results, 'q_r')           )
-        os.makedirs( os.path.join(dir_results, 'q_ref')         )
-        os.makedirs( os.path.join(dir_results, 'norm')          )
-        os.makedirs( os.path.join(dir_results, 'denorm')        )
-
 
     # begin simulation
     start_time = time.time()
