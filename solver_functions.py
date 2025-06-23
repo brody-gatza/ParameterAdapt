@@ -169,6 +169,7 @@ def initialize_state(solver_param):
 
     state['cons_results_save']      = np.zeros(( num_state_var , int(solver_param['cell_number']) ))
     state['prim_results_save']      = np.zeros(( num_prim_var  , int(solver_param['cell_number']) ))
+    state['res_save']               = np.zeros(( num_state_var , int(solver_param['cell_number']) ))
 
     state['Q_cons']                 = np.zeros((num_state_var*int(solver_param['cell_number'])+(num_state_var*4)))
     state['Q_prim']                 = np.zeros((num_prim_var *int(solver_param['cell_number'])+(num_prim_var*4)))
@@ -775,11 +776,13 @@ def results_recorder(solver_param, rom_param, state):
         # Save the results and end the simulation
         np.save(os.path.join(dir_results, f"{save_title}_cons.npy"), state['cons_results_save'])
         np.save(os.path.join(dir_results, f"{save_title}_prim.npy"), state['prim_results_save'])
+        np.save(os.path.join(dir_results, f"{save_title}_res.npy") , state['res_save'])
 
     elif solver_param['solver_mode'] == 'ROM' and iter == 0:
         # Save the results and end the simulation
         np.save(os.path.join(dir_results, 'cons_prim'     , f"{save_title}_cons.npy")           , state['cons_results_save'])
         np.save(os.path.join(dir_results, 'cons_prim'     , f"{save_title}_prim.npy")           , state['prim_results_save'])
+        np.save(os.path.join(dir_results, 'res'           , f"{save_title}_res.npy")            , state['res_save']         )
         np.save(os.path.join(dir_results, 'q_r'           , f"{save_title}_q_r.npy")            , rom_param['q_red0']       )
         np.save(os.path.join(dir_results, 'basis'         , f"{save_title}_basis.npy")          , rom_param['basis']        )
         np.save(os.path.join(dir_results, 'q_ref'         , f"{save_title}_q_ref.npy")          , rom_param['q_ref']        )
@@ -791,17 +794,21 @@ def results_recorder(solver_param, rom_param, state):
     elif solver_param['solver_mode'] == 'ROM':
         np.save(os.path.join(dir_results, 'cons_prim', f"{save_title}_cons.npy"), state['cons_results_save'])
         np.save(os.path.join(dir_results, 'cons_prim', f"{save_title}_prim.npy"), state['prim_results_save'])
+        np.save(os.path.join(dir_results, 'res'           , f"{save_title}_res.npy")            , state['res_save']         )
+        np.save(os.path.join(dir_results, 'res'      , f"{save_title}_res.npy") , state['res_save']         )
         np.save(os.path.join(dir_results, 'q_r'      , f"{save_title}_q_r.npy") , rom_param['q_red0'])
 
     elif (solver_param['solver_mode'] == 'Adaptive ROM' and iter < int(solver_param['init_training_win'])):
         # Save the results and end the simulation
         np.save(os.path.join(dir_results, 'cons_prim', f"{save_title}_cons.npy"), state['cons_results_save'])
         np.save(os.path.join(dir_results, 'cons_prim', f"{save_title}_prim.npy"), state['prim_results_save'])
+        np.save(os.path.join(dir_results, 'res'      , f"{save_title}_res.npy") , state['res_save'])
 
     elif (solver_param['solver_mode'] == 'Adaptive ROM' and iter == int(solver_param['init_training_win'])):
         # Save the results and end the simulation
         np.save(os.path.join(dir_results, 'cons_prim'      , f"{save_title}_cons.npy")           , state['cons_results_save'])
         np.save(os.path.join(dir_results, 'cons_prim'      , f"{save_title}_prim.npy")           , state['prim_results_save'])
+        np.save(os.path.join(dir_results, 'res'            , f"{save_title}_res.npy")            , state['res_save']         )        
         np.save(os.path.join(dir_results, 'basis'          , f"{save_title}_basis.npy")          , rom_param['basis']        )
         np.save(os.path.join(dir_results, 'q_ref'          , f"{save_title}_q_ref.npy")          , rom_param['q_ref']        )
         np.save(os.path.join(dir_results, 'norm'           , f"{save_title}_norm.npy")           , rom_param['normalizor']   )
@@ -818,6 +825,7 @@ def results_recorder(solver_param, rom_param, state):
         # Save the results and end the simulation
         np.save(os.path.join(dir_results, 'cons_prim'     , f"{save_title}_cons.npy")          , state['cons_results_save'])
         np.save(os.path.join(dir_results, 'cons_prim'     , f"{save_title}_prim.npy")          , state['prim_results_save'])
+        np.save(os.path.join(dir_results, 'res'           , f"{save_title}_res.npy")           , state['res_save']         )
         np.save(os.path.join(dir_results, 'q_r'           , f"{save_title}_q_r.npy")           , rom_param['q_red0']       )
         np.save(os.path.join(dir_results, 'basis'         , f"{save_title}_basis.npy")         , rom_param['basis']        )
         np.save(os.path.join(dir_results, 'samples_user'  , f"{save_title}_samples_user.npy")  , rom_param['S_indx_user']  )
@@ -827,6 +835,7 @@ def results_recorder(solver_param, rom_param, state):
         # Save the results and end the simulation
         np.save(os.path.join(dir_results, 'cons_prim'     , f"{save_title}_cons.npy")          , state['cons_results_save'])
         np.save(os.path.join(dir_results, 'cons_prim'     , f"{save_title}_prim.npy")          , state['prim_results_save'])
+        np.save(os.path.join(dir_results, 'res'           , f"{save_title}_res.npy")           , state['res_save']         )
         np.save(os.path.join(dir_results, 'q_r'           , f"{save_title}_q_r.npy")           , rom_param['q_red0']       )
         np.save(os.path.join(dir_results, 'basis'         , f"{save_title}_basis.npy")         , rom_param['basis']        )
         np.save(os.path.join(dir_results, 'samples_user'  , f"{save_title}_samples_user.npy")  , rom_param['S_indx_user']  )
@@ -1540,8 +1549,8 @@ def first_order_rusanov_viscous_flux_calculator(solver_param,rom_param,state):
 
 def first_order_roe_viscous_flux_calculator(solver_param,rom_param,state):
 
-    state            = cons2prim_converter(solver_param,state)
-    state            = update_ghost_cell(solver_param,state)
+    # state            = cons2prim_converter(solver_param,state)
+    # state            = update_ghost_cell(solver_param,state)
 
     Q_cons           = state['Q_cons']
     Q_prim           = state['Q_prim']
@@ -2071,24 +2080,30 @@ def solver_add_ghost(cell_number,num_var,Q_int):
 
     return Q_full_solver
 
+# def find_mass_fraction_full(MF):
+
+#     # this function is just finding the last species mass fraction and adds its value to last row
+
+#     MF_shape = np.shape(MF)
+
+#     # add the 1 last species
+#     MF_last_row = np.zeros(MF_shape[1])
+
+#     for indx in range(0,MF_shape[1]):
+
+#         MF_last_row[indx] = 1.0 - np.sum(MF[:,indx])
+
+#     MF = np.vstack((MF,MF_last_row))
+
+#     MF[MF==0] = 1e-30
+
+#     return MF
+
 def find_mass_fraction_full(MF):
-
-    # this function is just finding the last species mass fraction and adds its value to last row
-
-    MF_shape = np.shape(MF)
-
-    # add the 1 last species
-    MF_last_row = np.zeros(MF_shape[1])
-
-    for indx in range(0,MF_shape[1]):
-
-        MF_last_row[indx] = 1.0 - np.sum(MF[:,indx])
-
-    MF = np.vstack((MF,MF_last_row))
-
-    MF[MF==0] = 1e-30
-
-    return MF
+    MF_last_row = 1.0 - np.sum(MF, axis=0)
+    MF_full = np.vstack((MF, MF_last_row))
+    MF_full[MF_full == 0] = 1e-30
+    return MF_full
 
 def find_mass_fraction_full_cantera(MF):
 

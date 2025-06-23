@@ -11,8 +11,9 @@ from matplotlib.animation import FFMpegWriter
 # np.save(r"C:\GIT_Fork\ROMify\examples\free_flame_with_perturbation\FOM_results\ic_prim_temp.npy",prim_ic)
 
 # dir_name = r"C:\GIT_Fork\ROMify\examples\supersonic_flow\FOM_results"
-dir_name = r"C:\GIT_Fork\ROMify\examples\supersonic_flow\Hybrid ROM_results\cons_prim"
-dir_name_fom = r"C:\GIT_Fork\ROMify\examples\supersonic_flow\FOM_results"
+# dir_name = r"C:\GIT_Fork\ROMify\examples\supersonic_flow\Hybrid ROM_results\cons_prim"
+# dir_name = r"C:\GIT_Fork\ROMify\examples\supersonic_flow\Hybrid ROM_results\cons_prim"
+dir_name_fom = r"C:\GIT_Fork\ROMify\examples\wall_reflected_detonation\FOM_results"
 # dir_name_fom = r"C:\GIT_Fork\ROMify\examples\free_flame_with_perturbation\FOM_results"
 # dir_name = r"C:\GIT_Fork\ROMify\examples\free_flame_with_perturbation\FOM_results"
 
@@ -398,20 +399,20 @@ dir_name_fom = r"C:\GIT_Fork\ROMify\examples\supersonic_flow\FOM_results"
 
 fig,ax = plt.subplots(1,1)
 
-iter_list = np.arange(0,50000,100)
+iter_list = np.arange(0,102000,1000)
 # iter_list = [79999]
 # iter_list = [628,1256,1884,2512,3140,3768,4396,5024,5652,6280,
 #              6908,7536]
 
-x=np.linspace(0,1,500)
+x=np.linspace(0,0.12,100)
 
-prim_data_rom   = np.load(os.path.join(dir_name, str(0)+'iteration_prim.npy'))
+# prim_data_rom   = np.load(os.path.join(dir_name, str(0)+'iteration_prim.npy'))
 prim_data_fom   = np.load(os.path.join(dir_name_fom, str(int(0/10))+'iteration_prim.npy'))
 
-line1,=ax.plot(x,prim_data_rom[0,:],label=str(iter)+'iteration',c='tab:blue',ls='--')
-line2,=ax.plot(x,prim_data_fom[0,:],label=str(iter)+'iteration',c='black',ls='-')
+# line1,=ax.plot(x,prim_data_rom[0,:],label=str(iter)+'iteration',c='tab:blue',ls='--')
+line2,=ax.plot(x,prim_data_fom[2,:],label=str(iter)+'iteration',c='black',ls='-')
 
-ax.set_ylim([0.8,2])
+ax.set_ylim([0,0.8*1e6])
 
 for iter in iter_list:
 
@@ -424,18 +425,18 @@ for iter in iter_list:
 
     # q_rep_user = np.reshape(q_rep_solver,(3,500))
 
-    prim_data_rom   = np.load(os.path.join(dir_name, str(iter)+'iteration_prim.npy'))
-    prim_data_fom   = np.load(os.path.join(dir_name_fom, str(int(iter/10))+'iteration_prim.npy'))
+    # prim_data_rom   = np.load(os.path.join(dir_name, str(iter)+'iteration_prim.npy'))
+    prim_data_fom   = np.load(os.path.join(dir_name_fom, str(int(iter))+'iteration_prim.npy'))
 
 
-    line1.set_data(x,prim_data_rom[0,:])
-    line2.set_data(x,prim_data_fom[0,:])
+    # line1.set_data(x,prim_data_rom[0,:])
+    line2.set_data(x,prim_data_fom[2,:])
 
-    if iter >= 25120:
+    # if iter >= 25120:
             
-        line1.set_color('tab:red')
+        # line1.set_color('tab:red')
 
-    plt.pause(0.01)
+    plt.pause(0.1)
 
 
 ax.legend()

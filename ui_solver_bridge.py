@@ -42,6 +42,7 @@ def driver(args,solver_param):
     if solver_param['solver_mode'] != 'FOM':
 
         os.makedirs( os.path.join(dir_results, 'cons_prim')     )
+        os.makedirs( os.path.join(dir_results, 'res')           )
         os.makedirs( os.path.join(dir_results, 'basis')         )
         os.makedirs( os.path.join(dir_results, 'samples_user')  )
         os.makedirs( os.path.join(dir_results, 'samples_solver'))
@@ -119,7 +120,23 @@ def driver(args,solver_param):
 
         # prepare data to save
         state['cons_results_save'] = solver_functions.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],[state['Q_cons']])[:,2:-2]
-        
+
+        if solver_param['solver_mode'] == 'FOM': 
+
+            state['res_save']          = solver_functions.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],state['d_flux_dx'])[:,2:-2]
+
+        else:
+
+            state['res_save']  = np.zeros(solver_param['num_state_var']*solver_param['cell_number'])
+
+            if len(rom_param['S_indx_solver']) != len(state['d_flux_dx']):
+
+                state['res_save'][rom_param['S_indx_solver']] = solver_functions.solver_eliminate_ghost(solver_param,state['d_flux_dx'])[rom_param['S_indx_solver']]
+
+            else:
+
+                state['res_save'][rom_param['S_indx_solver']] = state['d_flux_dx']
+            
         if solver_param['gas_model'] == 'Non-Reacting Air':
 
             state['prim_results_save'] = solver_functions.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],[state['Q_prim']])[:,2:-2]
@@ -137,6 +154,7 @@ def driver(args,solver_param):
 
         if solver_param['visual'] == True:
 
+
             # visualization
             visualization_functions.in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param)
             
@@ -144,6 +162,11 @@ def driver(args,solver_param):
 
         print('Iteration: ' + str(iter))
 
+    # breakpoint()
+
+    # np.save(r'C:\GIT_Fork\ROMify\examples\supersonic_flow\cumsum.npy'    ,rom_param['cum_sum'])
+    # np.save(r'C:\GIT_Fork\ROMify\examples\supersonic_flow\moving_avg.npy',rom_param['moving_avg'])
+    # np.save(r'C:\GIT_Fork\ROMify\examples\supersonic_flow\sub_angle.npy' ,rom_param['subspace_angle'])
 
     end_time = time.time()
 
