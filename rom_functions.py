@@ -6,6 +6,9 @@ import solver_functions
 import time_integrator_functions
 from matplotlib import pyplot as plt
 import scipy.linalg as sp_al
+import pywt 
+
+import non_intrusive_rom_functions
 
 def precomputer(solver_param,state):
 
@@ -143,8 +146,10 @@ def assemble_snapshots(solver_param):
 
     if solver_param['solver_mode'] in ['Adaptive ROM','ROM']:
 
-        step                 = 1 
-        num_snapshot         = int(solver_param['fom_results_max_iter']/step)
+        # snapshot_iter_list   = np.arange(int(solver_param['iter']-solver_param['basis_window_size']),solver_param['fom_results_max_iter'])
+        snapshot_iter_list   = np.arange(solver_param['fom_results_start'],solver_param['fom_results_end'],solver_param['fom_results_step'])
+
+        num_snapshot         = int(len(snapshot_iter_list))
         
         training_data_cons = np.zeros((sample_cons_shape[0],sample_cons_shape[1],num_snapshot))
         training_data_prim = np.zeros((sample_prim_shape[0],sample_prim_shape[1],num_snapshot))
@@ -152,12 +157,10 @@ def assemble_snapshots(solver_param):
         print('Assembling Snapshots!')
 
         # bring all of snapshots into one matrix
-        for i in range(0,solver_param['fom_results_max_iter'],step):
+        for indx , iter in enumerate(snapshot_iter_list):
 
-            file_name_cons = str(i)+'iteration'+'_cons.npy'
-            file_name_prim = str(i)+'iteration'+'_prim.npy'
-
-            indx = int(i/step)
+            file_name_cons = str(iter)+'iteration'+'_cons.npy'
+            file_name_prim = str(iter)+'iteration'+'_prim.npy'
 
             training_data_cons[:, :, indx] = np.load(os.path.join(dir_results, file_name_cons))
             training_data_prim[:, :, indx] = np.load(os.path.join(dir_results, file_name_prim))
@@ -347,7 +350,7 @@ def sample_point_finder(solver_param,rom_param):
 
     elif solver_param['sampling_method'] == 'Gappy POD + E':
             
-            num_samples = 800
+            num_samples = 250
 
             S_indx_user = GappyPODE_sample_point_finder(basis,num_samples,solver_param['cell_number'])
     
@@ -612,6 +615,161 @@ def single_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
 
     return state, solver_param , rom_param
 
+# def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
+
+#     if iter <= int(solver_param['init_training_win']):
+
+#         if iter != int(solver_param['init_training_win']):
+            
+#             state = solver_functions.residual_calculator(solver_param,rom_param,state)
+#             state = time_integrator_functions.advance_time(solver_param,rom_param,state)
+#             solver_functions.results_recorder(solver_param,rom_param,state)
+
+#         elif iter == int(solver_param['init_training_win']):
+
+#             state = solver_functions.residual_calculator(solver_param,rom_param,state)
+#             state = time_integrator_functions.advance_time(solver_param,rom_param,state)
+
+#             # Save the results of current state before doing the precomputations
+#             dir_results = os.path.join(solver_param['dir_results'], 'cons_prim')
+
+#             iter = solver_param['iter']
+            
+#             save_title = str(iter)+'iteration'
+
+#             np.save(os.path.join(dir_results, f"{save_title}_cons.npy"), state['cons_results_save'])
+#             np.save(os.path.join(dir_results, f"{save_title}_prim.npy"), state['prim_results_save'])
+
+#             rom_param = precomputer(solver_param,state)
+#             rom_param = sample_point_finder(solver_param,rom_param)
+
+#             solver_functions.results_recorder(solver_param,rom_param,state)
+
+
+#             rom_param['cum_sum']                    = np.full(solver_param['num_step'],1.0)
+#             rom_param['moving_avg']                 = np.full(solver_param['num_step'],90.0)
+#             rom_param['subspace_angle']             = np.full(solver_param['num_step'],90.0)
+
+#             solver_param['hyper'] = True
+#             state['Q_bar'] = state['Q_cons']
+
+
+#     else:   
+
+#             # read basic parameters
+#             q_ref            = rom_param['q_ref']
+#             normalizor       = rom_param['normalizor']
+#             denormalizor     = rom_param['denormalizor']
+
+#             # Q tilda (ROM) before any update
+#             Q_tilda_old            = state['Q_cons']
+#             Q_tilda_old_solver_int = solver_functions.solver_eliminate_ghost(solver_param,Q_tilda_old)
+            
+#             # Find FOM at sampled points
+#             sampling_adapt_freq = solver_param['unsampled_update_freq']
+
+#             # Run a FOM at whole domain to update unsampled points at a specific freq
+#             # if (sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0) or (iter == int(solver_param['init_training_win'])+1):
+#             if (sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0):
+
+#                 Q_bar_star_old = state['Q_bar']
+#                 solver_param['hyper'] = False
+#                 solver_param['dt'] = sampling_adapt_freq * solver_param['dt']
+
+#                 state['Q_cons'] = Q_bar_star_old
+
+#                 state = solver_functions.residual_calculator(solver_param,rom_param,state)
+#                 state = time_integrator_functions.advance_time(solver_param,rom_param,state)
+
+#                 if solver_param['injection']: 
+
+#                     state = solver_functions.injection_correction(solver_param,state)
+
+#                 Q_bar_star_new = state['Q_cons']
+#                 Q_bar_star_new_solver_int = solver_functions.solver_eliminate_ghost(solver_param,Q_bar_star_new)
+
+#                 state['Q_bar'] = Q_bar_star_new
+
+#                 Q_bar_new_sampling      = Q_bar_star_new_solver_int[rom_param['S_indx_solver']]
+#                 Q_bar_new_solver_int    = Q_bar_star_new_solver_int
+#                 solver_param['hyper']   = True
+#                 solver_param['dt']      = solver_param['dt'] / sampling_adapt_freq
+
+#                 Q_red_new = rom_param['basis'].T @ Q_bar_star_new_solver_int
+
+#                 rom_param , F = adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_red_new,Q_tilda_predict_solver_int=0)
+            
+#                 # Find Q tilda (ROM) with new basis(correction)
+
+#                 rom_param['q_red0'] = np.linalg.pinv(rom_param['basis']) @ F [:,-1]
+
+#                 corrected_cent_norm = rom_param['basis'] @ rom_param['q_red0']
+
+#                 rom_param['F'][:,-1]   = corrected_cent_norm
+#                 rom_param['Q_R'][:,-1] = rom_param['q_red0']
+
+#                 Q_tilda_correct_solver_int= q_ref + (denormalizor * corrected_cent_norm)
+
+#                 Q_tilda_correct_solver_full= solver_functions.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int)
+
+#                 state['Q_cons'] = Q_tilda_correct_solver_full
+
+
+#             # Run ROM at sampled points
+#             else:
+
+#                 state['Q_cons']    = Q_tilda_old
+#                 state              = solver_functions.residual_calculator(solver_param,rom_param,state)
+#                 state['Q_cons']    = Q_tilda_old_solver_int[rom_param['S_indx_solver']]
+#                 state              = time_integrator_functions.advance_time(solver_param,rom_param,state)
+#                 Q_bar_new_sampling = state['Q_cons']
+
+#                 # Estimate FOM at unsampled points using old basis (DEIM Equation)
+
+#                 decen_norm_Q_bar_new_sampling           = normalizor[rom_param['S_indx_solver']]*(Q_bar_new_sampling-q_ref[rom_param['S_indx_solver']])
+#                 C                                       = np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver']]) @ decen_norm_Q_bar_new_sampling
+#                 Q_bar_new_solver_int                    = q_ref + (denormalizor * (rom_param['basis'] @ C ))
+                
+#                 if solver_param['injection']:
+
+#                     Q_bar_new_solver_full               = solver_functions.solver_add_ghost(solver_param['cell_number'],
+#                                                                                             solver_param['num_state_var'],
+#                                                                                             Q_bar_new_solver_int)
+
+#                     state['Q_cons'] = Q_bar_new_solver_full
+#                     state = solver_functions.injection_correction(solver_param,state)
+#                     Q_bar_new_solver_full = state['Q_cons']
+
+#                     Q_bar_new_solver_int  = solver_functions.solver_eliminate_ghost(solver_param,Q_bar_new_solver_full)
+
+#                 rom_param , F = adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,C,Q_tilda_predict_solver_int=0)
+            
+#                 # Find Q tilda (ROM) with new basis(correction)
+
+#                 rom_param['q_red0'] = np.linalg.pinv(rom_param['basis']) @ F [:,-1]
+
+#                 corrected_cent_norm = rom_param['basis'] @ rom_param['q_red0']
+
+#                 rom_param['F'][:,-1]   = corrected_cent_norm
+#                 rom_param['Q_R'][:,-1] = rom_param['q_red0']
+
+#                 Q_tilda_correct_solver_int= q_ref + (denormalizor * corrected_cent_norm)
+                
+#                 Q_tilda_correct_solver_full= solver_functions.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int)
+
+#                 state['Q_cons'] = Q_tilda_correct_solver_full
+            
+#             # Update Samples
+
+#             if (sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0) or (iter == int(solver_param['init_training_win'])+1):
+
+#                 ### adapt sample ###
+
+#                 rom_param,state = adapt_sample(solver_param,rom_param,rom_param['F'],state)
+
+#     return state, solver_param , rom_param
+
+
 def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
 
     if iter <= int(solver_param['init_training_win']):
@@ -650,16 +808,18 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
             solver_param['hyper'] = True
             state['Q_bar'] = state['Q_cons']
 
+            # rom_param['sampling_flag'] = False
+
 
     else:   
 
             # read basic parameters
-            q_ref            = rom_param['q_ref']
-            normalizor       = rom_param['normalizor']
-            denormalizor     = rom_param['denormalizor']
+            q_ref                  = rom_param['q_ref']
+            normalizor             = rom_param['normalizor']
+            denormalizor           = rom_param['denormalizor']
 
             # Q tilda (ROM) before any update
-            Q_tilda_old = state['Q_cons']
+            Q_tilda_old            = state['Q_cons']
             Q_tilda_old_solver_int = solver_functions.solver_eliminate_ghost(solver_param,Q_tilda_old)
             
             # Find FOM at sampled points
@@ -677,6 +837,10 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
 
                 state = solver_functions.residual_calculator(solver_param,rom_param,state)
                 state = time_integrator_functions.advance_time(solver_param,rom_param,state)
+
+                if solver_param['injection']: 
+
+                    state = solver_functions.injection_correction(solver_param,state)
 
                 Q_bar_star_new = state['Q_cons']
                 Q_bar_star_new_solver_int = solver_functions.solver_eliminate_ghost(solver_param,Q_bar_star_new)
@@ -722,6 +886,18 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
                 decen_norm_Q_bar_new_sampling           = normalizor[rom_param['S_indx_solver']]*(Q_bar_new_sampling-q_ref[rom_param['S_indx_solver']])
                 C                                       = np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver']]) @ decen_norm_Q_bar_new_sampling
                 Q_bar_new_solver_int                    = q_ref + (denormalizor * (rom_param['basis'] @ C ))
+                
+                if solver_param['injection']:
+
+                    Q_bar_new_solver_full               = solver_functions.solver_add_ghost(solver_param['cell_number'],
+                                                                                            solver_param['num_state_var'],
+                                                                                            Q_bar_new_solver_int)
+
+                    state['Q_cons'] = Q_bar_new_solver_full
+                    state = solver_functions.injection_correction(solver_param,state)
+                    Q_bar_new_solver_full = state['Q_cons']
+
+                    Q_bar_new_solver_int  = solver_functions.solver_eliminate_ghost(solver_param,Q_bar_new_solver_full)
 
                 rom_param , F = adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,C,Q_tilda_predict_solver_int=0)
             
@@ -739,14 +915,80 @@ def multi_snapshot_adaptive_rom_progress(solver_param,rom_param,state,iter):
                 Q_tilda_correct_solver_full= solver_functions.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int)
 
                 state['Q_cons'] = Q_tilda_correct_solver_full
+
+                # compute interp error
+
+                Q_tilda_correct_user_int = solver_functions.results_solver2user_converter(solver_param['num_state_var'],
+                                                                                          solver_param['cell_number']-4,
+                                                                                          Q_tilda_correct_solver_int)
+                
+                corrected_cent_norm_interp = rom_param['basis'] @ np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver'],:]) @ corrected_cent_norm[rom_param['S_indx_solver']]
+
+                Q_tilda_correct_solver_int_interp = q_ref + (denormalizor * corrected_cent_norm_interp)
+
+                Q_tilda_correct_user_int_interp = solver_functions.results_solver2user_converter(solver_param['num_state_var'],
+                                                                                          solver_param['cell_number']-4,
+                                                                                          Q_tilda_correct_solver_int_interp)
+                
+                interp_error = np.linalg.norm(Q_tilda_correct_user_int_interp - Q_tilda_correct_user_int,axis=1) / np.linalg.norm(Q_tilda_correct_user_int,axis=1)
+                interp_error = np.mean(interp_error)
+
+                print('Interp Error: ' + str(interp_error))
+
+                if interp_error > 1e-6:
+
+                    rom_param['sampling_flag'] = True
+
+                else:
+
+                    rom_param['sampling_flag'] = False
+                
             
             # Update Samples
 
             if (sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0) or (iter == int(solver_param['init_training_win'])+1):
+            # if rom_param['sampling_flag']:
 
                 ### adapt sample ###
 
                 rom_param,state = adapt_sample(solver_param,rom_param,rom_param['F'],state)
+
+                # Q_bar_new_solver_int  = solver_functions.solver_eliminate_ghost(solver_param,state['Q_bar'])
+                # Q_bar_new_user_int    = solver_functions.results_solver2user_converter(solver_param['num_state_var'],
+                #                                                                         solver_param['cell_number']-4,
+                #                                                                         Q_bar_new_solver_int)
+
+                # level = 1
+
+                # coeffs = pywt.wavedec(Q_bar_new_user_int[2,:], wavelet='haar', level=level)
+
+                # detail_level = 1  # 1 = finest scale
+                # details = coeffs[detail_level]
+
+                # threshold = 5e-2 * np.max(np.abs(details))
+                # high_detail_idx = np.where(np.abs(details) > threshold)[0]
+
+                # L = level - detail_level + 1  # scale relative to the original signal
+                # region_size = 2 ** (L)
+
+                # original_indices = []
+
+                # for idx in high_detail_idx:
+
+                #     start = idx * region_size
+                #     end = start + region_size
+                #     original_indices.extend(range(start, end))
+
+                # original_indices = sorted(set(original_indices))
+            
+                # S_indx_user_qdeim = QDEIM_sample_point_finder(rom_param['basis'],solver_param['cell_number'])
+                # S_indx_user       = np.concatenate((original_indices,S_indx_user_qdeim))
+                # S_indx_user       = np.sort(np.unique(S_indx_user))
+                # S_indx_solver     = user2solver_indx_converter(S_indx_user,solver_param['num_state_var'],solver_param['cell_number'])
+                
+                # rom_param['S_indx_user']   = S_indx_user
+                # rom_param['S_indx_solver'] = S_indx_solver
+
 
     return state, solver_param , rom_param
 
@@ -819,7 +1061,7 @@ def adapt_basis(solver_param,state,rom_param,Q_bar_new_solver_int,iter,Q_red_new
 
         rom_param['basis'] = F @ pinv_Q_R
 
-        # orthogonalize the basis
+        #orthogonalize the basis
         rom_param['basis'] , _ , _ = np.linalg.svd(rom_param['basis'],full_matrices=False)
         # V1 , _ , _ = np.linalg.svd(rom_param['basis'],full_matrices=False)
 
@@ -915,14 +1157,20 @@ def adapt_sample(solver_param,rom_param,F,state):
         state = solver_functions.residual_calculator(solver_param,rom_param,state)
         state = time_integrator_functions.advance_time(solver_param,rom_param,state)
 
+        if solver_param['injection']:
+
+            state = solver_functions.injection_correction(solver_param,state)
+
         Q_bar_shock = state['Q_cons']
         Q_bar_shock_solver_int = solver_functions.solver_eliminate_ghost(solver_param,Q_bar_shock)
         
         ### future shock ###
 
-        rho_bar_shock = Q_bar_shock_solver_int[0:solver_param['cell_number']]
+        rho_bar_shock = Q_bar_shock_solver_int[2:solver_param['cell_number']]
 
         first_derv_density  = np.gradient(rho_bar_shock)
+
+        peak_density = np.argmax(rho_bar_shock)
 
         # second_derv_density = np.gradient(np.gradient(rho_bar_shock))
 
@@ -943,10 +1191,19 @@ def adapt_sample(solver_param,rom_param,F,state):
 
         # shock_range = np.sort(np.unique(np.append(shorck_range1,shorck_range2)))
 
-        num_req_samples = 20
+        num_req_samples = 30
 
         ### QDEIM + FGS ###
         S_indx_user_qdeim = QDEIM_sample_point_finder(basis,solver_param['cell_number'])
+
+
+        ###
+        additional_samples1 = np.arange(0,10)
+        additional_samples2 = np.arange(490,500)
+        # peak_density_indx  = np.argmax(rho_bar_shock)
+        # detonation_samples = np.arange(peak_density_indx-10,peak_density_indx+20)%solver_param['cell_number']
+        S_indx_user_qdeim  = np.concatenate((S_indx_user_qdeim,additional_samples1,additional_samples2))
+        # S_indx_user_qdeim  = np.concatenate((S_indx_user_qdeim,detonation_samples))
 
         num_selected_samples = len(S_indx_user_qdeim)
 
@@ -955,7 +1212,7 @@ def adapt_sample(solver_param,rom_param,F,state):
         while num_selected_samples<num_req_samples:
 
             # add one more point from high gradients
-            complt_sample = high_grad_area[0:counter]
+            complt_sample     = high_grad_area[0:counter]
 
             S_indx_user       = np.sort(np.unique(np.append(S_indx_user_qdeim,complt_sample)))
 
@@ -1004,7 +1261,7 @@ def adapt_sample(solver_param,rom_param,F,state):
         #     counter = counter + 1
 
         # # Take the first 10 points
-        S_indx_user       = S_indx_user[0:20]
+        S_indx_user       = S_indx_user[0:30]
         S_indx_solver     = user2solver_indx_converter(S_indx_user,solver_param['num_state_var'],solver_param['cell_number'])
 
 
@@ -1069,7 +1326,7 @@ def adapt_sample(solver_param,rom_param,F,state):
 
     elif solver_param['sampling_method'] == 'Gappy POD + E':
             
-        num_samples = 100
+        num_samples = 250
 
         S_indx_user = GappyPODE_sample_point_finder(basis,num_samples,solver_param['cell_number'])
         S_indx_solver= user2solver_indx_converter(S_indx_user,solver_param['num_state_var'],solver_param['cell_number'])
@@ -1104,113 +1361,6 @@ def repeat_pattern_finder(solver_param,rom_param,state):
     state['moving_avg'][0:iter] = np.convolve(state['subspace_angle'][0:iter], np.ones(window_size)/window_size, mode='same')
 
     return state
-# def hybrid_rom_progress(solver_param,rom_param,state,iter):
-
-#     if iter <= int(solver_param['init_training_win']):
-
-#         if iter != int(solver_param['init_training_win']):
-
-#             solver_param['solver_mode'] = 'Adaptive ROM'
-
-#             state, solver_param , rom_param  = adaptive_rom_progress(solver_param,rom_param,state,iter)
-
-#             rom_param['rom_status']                    = 'AROM'
-#             rom_param['rom_status_trans_flag']         = False
-#             rom_param['rom_status_trans_check_flag']   = False
-            
-
-#         elif iter == int(solver_param['init_training_win']):
-
-#             solver_param['solver_mode']      = 'Adaptive ROM'
-#             state, solver_param , rom_param  = adaptive_rom_progress(solver_param,rom_param,state,iter)
-
-#             rom_param['cum_sum']                    = np.full(solver_param['num_step'],1.0)
-#             rom_param['moving_avg']                 = np.full(solver_param['num_step'],90.0)
-#             rom_param['subspace_angle']             = np.full(solver_param['num_step'],90.0)
-#             rom_param['rom_status']                 = 'AROM'
-#             rom_param['rom_status_trans_flag']      = False
-#             rom_param['rom_status_trans_check_flag']= True
-
-#     else: 
-        
-#         if rom_param['rom_status_trans_check_flag']:
-
-#             cum_sum_flag    = np.any(rom_param['cum_sum']<=0.01)
-#             moving_avg_flag = np.any(rom_param['moving_avg']<=0.03)
-            
-#             if cum_sum_flag and moving_avg_flag:
-
-#                 rom_param['rom_status']                    = 'AROM'
-#                 rom_param['rom_status_trans_flag']         = False
-#                 rom_param['rom_status_trans_check_flag']   = False
-#                 rom_param['rom_training_init_flag']        = True
-
-
-#                 rom_param['ref_snapshot']                  = state['Q_cons']
-#                 solver_param['fom_results_start']          = iter 
-
-#         else:
-
-#             state, solver_param , rom_param  = adaptive_rom_progress(solver_param,rom_param,state,iter)
-
-#             if rom_param['rom_training_init_flag']:
-
-#                 Q_cons_current_step = state['Q_cons']
-
-#                 similarity_tol = np.linalg.vector_norm(rom_param['ref_snapshot']-Q_cons_current_step)
-
-#                 if similarity_tol < 1e-6:
-
-#                     rom_param['rom_status']                    = 'ROM'
-#                     rom_param['rom_status_trans_flag']         = True
-#                     rom_param['rom_status_trans_check_flag']   = False
-
-#     # transition step - some preprations is needed for switching
-#     if (rom_param['rom_status']     == 'ROM' and rom_param['rom_status_trans_flag']):
-        
-#         solver_param['solver_mode'] = 'Hybrid ROM'
-
-#         solver_param['fom_results_start'] = 0 
-#         solver_param['fom_results_end']   = iter-1
-#         solver_param['fom_results_step']  = 100
-
-#         rom_param = precomputer(solver_param,state)
-
-#         # V_temp             = rom_param['basis']
-#         # V_temp_full        = rom_param['basis_full'] 
-#         # rom_param['basis'] = V_temp_full[:,0:10]
-
-#         rom_param['rom_status']                    = 'ROM'
-#         rom_param['rom_status_trans_flag']         = True
-#         rom_param['rom_status_trans_check_flag']   = False
-
-#         rom_param = sample_point_finder(solver_param,rom_param)
-
-#         # rom_param['hyper_precompute'] = rom_param['basis'] 
-
-#         # rom_param['basis'] = V_temp
-
-#         solver_param['solver_mode'] = 'ROM'
-
-#         # state = solver_functions.residual_calculator(solver_param,rom_param,state)
-#         # state , rom_param = red2full_state_calculator(solver_param,rom_param,state)
-#         state , rom_param = modern_red2full_state_calculator(solver_param,rom_param,state)
-
-#         rom_param['rom_status_trans_flag']         = False
-#         rom_param['rom_status_trans_check_flag']   = False
-
-#     # keep continue with classical ROM
-#     elif (rom_param['rom_status']     == 'ROM' and not rom_param['rom_status_trans_flag']):
-
-#         solver_param['solver_mode'] = 'ROM'
-
-#         # state = solver_functions.residual_calculator(solver_param,rom_param,state)
-#         # state , rom_param = red2full_state_calculator(solver_param,rom_param,state)
-#         state , rom_param = modern_red2full_state_calculator(solver_param,rom_param,state)
-
-#     solver_param['solver_mode'] = 'Hybrid ROM'
-
-#     return state, solver_param , rom_param 
 
 def updateISVD(Q, S, R, u_l, W, tol):
 
@@ -1244,7 +1394,7 @@ def updateISVD(Q, S, R, u_l, W, tol):
 
     return Q, S, R
 
-def hybrid_rom_progress(solver_param,rom_param,state,iter):
+def hybrid_rom_intrusive_progress(solver_param,rom_param,state,iter):
 
     if iter == 0:
 
@@ -1442,57 +1592,37 @@ def hybrid_rom_progress(solver_param,rom_param,state,iter):
             rom_param['S'] = S
             rom_param['R'] = R
 
-
-            # proj_window         = Q@Q.T@rom_param['SROM_training_win']
-            # Q_cons_proj_window  = rom_param['q_ref'].reshape(-1,1) + (rom_param['denormalizor'].reshape(-1,1)*proj_window)
-            # Q_cons_window       = rom_param['q_ref'].reshape(-1,1) + (rom_param['denormalizor'].reshape(-1,1)*rom_param['SROM_training_win'])
-            
-            # Q_cons_proj_user = np.reshape(Q_cons_proj_window,(solver_param['num_state_var'],
-            #                                                 solver_param['cell_number'],
-            #                                                 np.shape(rom_param['SROM_training_win'])[1]))
-            
-            # Q_cons_user = np.reshape(Q_cons_window,(solver_param['num_state_var'],
-            #                                        solver_param['cell_number'],
-            #                                        np.shape(rom_param['SROM_training_win'])[1]))
-            # Q_cons_current_step_proj_user  = solver_functions.results_solver2user_converter(solver_param['num_state_var'],
-            #                                                                            solver_param['cell_number']-4,
-            #                                                                            Q_cons_current_step_proj)
-            
-            # similarity_tol = np.linalg.vector_norm(Q_cons_proj_user-Q_cons_user,axis=1)/np.linalg.vector_norm(Q_cons_user,axis=1)
-            # similarity_tol = np.mean(similarity_tol,axis=0)
-            # similarity_tol = np.mean(similarity_tol)
-
-
-            # print(similarity_tol)
-
             if np.shape(Q)[1]>1 and len(truncation_indx) > 1:
-
-            #     solver_param['fom_results_end']   = iter
-            #     # solver_param['fom_results_step']  = 1
 
                 state['SROM_Training']   = False
                 state['SROM_Transition'] = True
                 rom_param['basis'] = Q
 
-
-        # if iter == (solver_param['fom_results_start']+1):
-
-        #     pass
-
-        #     state['similarity_tol_ref'] = similarity_tol
-
-        # if similarity_tol < state['similarity_tol_ref']:
-
-
     # Generate Static Basis
-
     elif state['SROM_Transition']:
 
         solver_param['solver_mode'] = 'Hybrid ROM'
 
         # rom_param = precomputer(solver_param,state)
 
-        rom_param = sample_point_finder(solver_param,rom_param)
+        # solver_param['sampling_method'] = 'Gappy POD + E'        
+
+        # rom_param = sample_point_finder(solver_param,rom_param)
+
+        basis = rom_param['basis']
+
+        S_indx_user       = QDEIM_sample_point_finder(basis,solver_param['cell_number'])
+        additional_sample = np.arange(0,15)
+        S_indx_user       = np.append(S_indx_user,additional_sample)
+        S_indx_user       = np.sort(np.unique(S_indx_user))
+
+        num_consv_var  = solver_param['num_state_var']
+        S_indx_solver = user2solver_indx_converter(S_indx_user,num_consv_var,solver_param['cell_number'])
+        pcc           = hyper_precomputer(basis,S_indx_solver)
+
+        rom_param['hyper_precompute'] = pcc
+        rom_param['S_indx_user']      = S_indx_user
+        rom_param['S_indx_solver']    = S_indx_solver
         
         solver_param['solver_mode'] = 'ROM'
 
@@ -1510,6 +1640,298 @@ def hybrid_rom_progress(solver_param,rom_param,state,iter):
         solver_param['solver_mode'] = 'ROM'
 
         state , rom_param = modern_red2full_state_calculator(solver_param,rom_param,state)
+
+    solver_param['solver_mode'] = 'Hybrid ROM'
+
+    return state, solver_param , rom_param 
+
+def hybrid_rom_non_intrusive_progress(solver_param,rom_param,state,iter):
+
+    if iter == 0:
+
+        state['AROM_Training']   = True
+        state['AROM_Transition'] = False
+        state['SROM_Search']     = False
+        state['SROM_Training']   = False
+        state['SROM_Transition'] = False
+        state['SROM']            = False
+
+    # Initial Training of Adaptive ROM (FOM)
+    if state['AROM_Training']:
+
+        solver_param['solver_mode']      = 'Adaptive ROM'
+        state, solver_param , rom_param  = adaptive_rom_progress(solver_param,rom_param,state,iter)
+
+        if iter == int(solver_param['init_training_win']) - 1:
+
+            state['AROM_Training']   = False
+            state['AROM_Transition'] = True
+
+    # Transition from FOM to Adaptive ROM
+
+    elif state['AROM_Transition']:
+
+        solver_param['solver_mode']      = 'Adaptive ROM'
+        state, solver_param , rom_param  = adaptive_rom_progress(solver_param,rom_param,state,iter)
+
+        state['cum_sum']                    = np.full(solver_param['num_step'],1.0)
+        state['moving_avg']                 = np.full(solver_param['num_step'],90.0)
+        state['subspace_angle']             = np.full(solver_param['num_step'],90.0)
+
+        state['AROM_Transition'] = False
+        state['SROM_Search']     = True
+
+    # Looking for Pattern in Solutions
+
+    elif state['SROM_Search']:
+
+        print('Looking for Pattern in Solutions')
+
+        solver_param['solver_mode']      = 'Adaptive ROM'
+        state, solver_param , rom_param  = adaptive_rom_progress(solver_param,rom_param,state,iter)
+        state                            = repeat_pattern_finder(solver_param,rom_param,state)
+
+        cum_sum_flag    = np.any(state['cum_sum']<=0.01)
+        # moving_avg_flag = np.any(state['moving_avg']<=0.03)
+        moving_avg_flag = np.any(state['moving_avg']<=0.05)
+            
+        if cum_sum_flag and moving_avg_flag:
+
+            state['ref_snapshot']                  = state['Q_cons']
+            # state['ref_snapshot']                  = solver_functions.solver_eliminate_ghost(solver_param,state['Q_cons'])
+            state['ref_basis']                     = rom_param['basis']
+            solver_param['fom_results_start']      = iter
+            Q_cons_current_step                    = state['Q_cons']
+
+            state['SROM_Search']     = False
+            state['SROM_Training']   = True
+
+
+            "Incremental SVD"
+
+            Q_cons_current_step   = state['Q_cons']
+            Q_cons_current_step   = solver_functions.solver_eliminate_ghost(solver_param,state['Q_cons'])
+            Q_cons_current_step   = rom_param['normalizor']*(Q_cons_current_step-rom_param['q_ref'])
+
+            # initalize the SVD (variables are Y = QSR, u0 is first snapshot, )
+            u0              = Q_cons_current_step
+            m               = np.shape(rom_param['basis'])[0]
+            W               = np.eye(m,m)
+
+            S = np.sqrt(u0.T @ W @ u0)
+            Q = u0 / S
+            R = np.eye(1, 1)
+
+            S *= np.eye(1, 1)
+            Q = Q.reshape((Q.shape[0], 1))
+
+            rom_param['W'] = W
+            rom_param['Q'] = Q
+            rom_param['S'] = S
+            rom_param['R'] = R
+            rom_param['SROM_training_win'] = np.reshape(Q_cons_current_step,(-1,1))
+
+            solver_param['fom_results_start'] = iter
+    # Begin Gathering Data for Static ROM
+
+    elif state['SROM_Training']:
+
+        print('Gathering Data for Static ROM')
+
+        solver_param['solver_mode']      = 'Adaptive ROM'
+        state, solver_param , rom_param  = adaptive_rom_progress(solver_param,rom_param,state,iter)
+
+        "Checking Projection Error"
+
+        Q_cons_current_step = state['Q_cons']
+        Q_cons_current_step   = solver_functions.solver_eliminate_ghost(solver_param,state['Q_cons'])
+        # # similarity_tol = np.linalg.vector_norm(state['ref_snapshot']-Q_cons_current_step)/np.linalg.vector_norm(state['ref_snapshot'])
+        cent_norm                = rom_param['normalizor']*(Q_cons_current_step-rom_param['q_ref'])
+        # proj                     = state['ref_basis']@state['ref_basis'].T@cent_norm
+        # Q_cons_current_step_proj = rom_param['q_ref'] + rom_param['denormalizor']*proj
+        
+        # Q_cons_current_step_user  = solver_functions.results_solver2user_converter(solver_param['num_state_var'],
+        #                                                                            solver_param['cell_number']-4,
+        #                                                                            Q_cons_current_step)
+        
+        # Q_cons_current_step_proj_user  = solver_functions.results_solver2user_converter(solver_param['num_state_var'],
+        #                                                                            solver_param['cell_number']-4,
+        #                                                                            Q_cons_current_step_proj)
+        
+        # similarity_tol = np.linalg.vector_norm(Q_cons_current_step_user[0,:]-Q_cons_current_step_proj_user[0,:])/np.linalg.vector_norm(Q_cons_current_step_user[0,:])
+        # similarity_tol = np.mean(similarity_tol)
+
+        # print(similarity_tol)
+
+        ##### 
+
+        if iter % solver_param['fom_results_step'] == 0:
+        # if True:
+
+            W=rom_param['W'] 
+            Q=rom_param['Q'] 
+            S=rom_param['S']
+            R=rom_param['R'] 
+
+            tol = 1e-15
+
+            m               = np.shape(rom_param['basis'])[0]
+
+            # POD_energy_limit   = 100-solver_param['pod_energy']
+            POD_energy_limit   = 1e-8
+
+            rom_param['SROM_training_win'] = np.hstack((rom_param['SROM_training_win'],cent_norm.reshape(-1,1)))
+
+            u_l = np.reshape(cent_norm,(m,1))
+
+            d = Q.T @ W @ u_l
+            if not np.shape(d):
+                d *= np.eye(1, 1)
+            e = u_l - Q @ d
+            p = np.sqrt(e.T @ W @ e) * np.eye(1, 1)
+
+            if p < tol:
+                p = np.zeros((1, 1))
+            else:
+                e = e / p[0, 0].item()
+
+            k = np.shape(S)[0] if np.shape(S) else 1
+            Y = np.vstack((np.hstack((S, d)), np.hstack((np.zeros((1, k)), p))))
+            Qy, Sy, Ry = np.linalg.svd(Y, full_matrices=True, compute_uv=True)
+            Sy = np.diag(Sy)
+
+            l = np.shape(R)[0]
+            if p < tol:
+                Q = Q @ Qy[:k, :k]
+                S = Sy[:k, :k]
+                R = np.vstack((np.hstack((R, np.zeros((l, 1)))), np.hstack(
+                    (np.zeros((1, k)), np.eye(1))))) @ Ry[:, :k]
+            else:
+                Q = np.hstack((Q, e)) @ Qy
+                S = Sy
+                R = np.vstack((np.hstack((R, np.zeros((l, 1)))),
+                        np.hstack((np.zeros((1, k)), np.eye(1))))) @ Ry
+                
+            if np.abs(Q[:, -1].T @ W @ Q[:, 0]) > tol:
+                k = Q.shape[1]
+                for i in range(k):
+                    a = Q[:, i]
+                    for j in range(i):
+                        Q[:, i] = Q[:, i] - ((a.T @ W @ Q[:, j]) /
+                                            (Q[:, j].T @ W @ Q[:, j])) * Q[:, j]
+                    norm = np.sqrt(Q[:, i].T @ W @ Q[:, i])
+                    Q[:, i] = Q[:, i] / norm
+
+            square_sum_singular_values = np.sum(np.diag(S)**2)
+
+            # Cumulative energy from first k modes
+            cumulative_energy = np.cumsum(np.diag(S)**2)
+
+            # Residual energy percentage
+            POD_res_energy = (1 - (cumulative_energy / square_sum_singular_values)) * 100
+
+            truncation_indx = np.array([0])
+
+            if len(POD_res_energy[0:-1]) > 1:
+
+                POD_res_energy_grad = np.abs(np.gradient(POD_res_energy[0:-1]))
+
+                # Find truncation index where residual energy drops below the limit
+                truncation_indx = np.where(POD_res_energy_grad < 1e-15)[0]
+
+            rom_param['W'] = W
+            rom_param['Q'] = Q
+            rom_param['S'] = S
+            rom_param['R'] = R
+
+            if np.shape(Q)[1]>1 and len(truncation_indx) > 1:
+
+                state['SROM_Training']   = False
+                state['SROM']            = True
+                rom_param['basis']       = Q[:,:-1]
+                solver_param['fom_results_end'] = iter 
+
+    elif state['SROM']:
+
+        print('Running Static ROM')
+
+        # inputs
+        param = {}
+        param['result_dir']           = os.path.join(solver_param['dir_results'])
+
+        param['rom_train_start_iter'] = solver_param['fom_results_start']
+        param['rom_train_step_iter']  = solver_param['fom_results_step']
+        param['rom_train_end_iter']   = solver_param['fom_results_end']
+
+        param['POD_energy_limit']     = solver_param['pod_energy']
+
+        param['reg_fact_value']       = 1
+
+        # prepare the basics of ROM
+        param   = non_intrusive_rom_functions.shpae_data_finder(param)
+        param   = non_intrusive_rom_functions.assemble_data(param)
+        param   = non_intrusive_rom_functions.init_rom_param(param,rom_param)
+        
+
+        # prepare non intrusive ROM optimization problem and solve it
+        param   = non_intrusive_rom_functions.create_snapshots_matrix(param)
+        param   = non_intrusive_rom_functions.create_time_derivative_matrix(param)
+        param   = non_intrusive_rom_functions.create_inputs_matrix(param)
+        param   = non_intrusive_rom_functions.create_known_data_matrix(param)
+        param   = non_intrusive_rom_functions.solve_optimization_problem(param)
+
+        # read 
+        num_mode          = np.shape(param['basis'])[1]
+        num_snapshot      = param['num_snapshot']
+        num_quad_column   = int((num_mode*(num_mode+1)/2))
+
+
+        group_sizes   = [1, num_mode, num_quad_column, 2*param['num_state_var']]
+        split_indices = np.cumsum(group_sizes)[:-1]
+        groups        = np.split(param['ni_operator'], split_indices, axis=1)
+
+        c = groups[0]
+        A = groups[1]
+        H = groups[2]
+        B = groups[3]
+
+        # solve ODE
+        t0                 = param['rom_train_end_iter'] * solver_param['dt']
+        tf                 = solver_param['num_step']    * solver_param['dt']
+        num_remaining_iter = solver_param['num_step'] - param['rom_train_end_iter']
+        t_eval             = np.linspace(t0, tf, num_remaining_iter)
+        q0                 = param['qr_0']
+
+        # Integrate
+        sol = sc.integrate.solve_ivp(non_intrusive_rom_functions.rom_rhs, [t0, tf], q0, t_eval=t_eval,
+                        args=(c, A, H, B, param,solver_param,non_intrusive_rom_functions.u_func))
+        
+
+        state['non_intrusive_counter']          = 0
+
+        sol_solver                              = param['q_ref'][:,np.newaxis]+(param['denorm'][:,np.newaxis]*(param['basis']@sol['y']))
+        state['cons_non_intrusive_result_data'] = sol_solver.reshape(param['num_state_var'],param['num_cell'],-1)
+
+        first_col = state['cons_non_intrusive_result_data'][:, 0:1, :]   
+        last_col  = state['cons_non_intrusive_result_data'][:, -1:, :]     
+
+        first_cols = np.repeat(first_col, 2, axis=1)
+        last_cols  = np.repeat(last_col, 2, axis=1)
+
+        state['cons_non_intrusive_result_data'] = np.hstack((first_cols,state['cons_non_intrusive_result_data'],last_cols))
+        
+        state['Q_cons'] = state['cons_non_intrusive_result_data'][:,:,state['non_intrusive_counter']].ravel()
+
+        state['non_intrusive_counter'] = state['non_intrusive_counter'] + 1
+
+        state['SROM']            = False
+        state['SROM_Post']       = True
+
+    elif state['SROM_Post']:
+
+        state['Q_cons'] = state['cons_non_intrusive_result_data'][:,:,state['non_intrusive_counter']].ravel()
+
+        state['non_intrusive_counter'] = state['non_intrusive_counter'] + 1
 
     solver_param['solver_mode'] = 'Hybrid ROM'
 

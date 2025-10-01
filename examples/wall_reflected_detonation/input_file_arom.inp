@@ -5,7 +5,7 @@ rom_method  		    = Galerkin
 arom_method		        = Direct Adapt
 pod_energy  		    = 99.999
 hyper	    		    = True
-hyper_method		    = QDEIM
+hyper_method		    = Gappy POD + Shock
 init_training_win 	    = 10
 unsampled_update_freq 	= 10
 fom_results_max_iter    = ""
@@ -14,9 +14,9 @@ fom_results_max_iter    = ""
 #t = 250 micro-sec
 
 # time discretization
-dt            = 4e-10
+dt            = 2e-10
 num_steps     = 625000
-time_scheme   = Explicit - SSPRK3
+time_scheme   = Explicit - FD Euler
 
 # space discretization
 x_initial   = 0
@@ -41,7 +41,7 @@ mass_frac_outlet  = extrapolate
 
 # Initial Condition
 
-#x_interval_ic = [[0,0.005],[0.005,0.12]]
+#x_interval_ic = [[0,0.0001],[0.0001,0.12]]
 #press_ic      = [6687.45,36679.65]
 #temp_ic       = [298,621]
 #vel_ic        = [0.01,-476]
@@ -49,7 +49,7 @@ mass_frac_outlet  = extrapolate
 #mass_frac_ic  = [[0.012772428, 0.0, 0.0, 0.101362139, 0.0, 0.0, 0.0, 0.0, 0.885865433],[0.012772428, 0.0, 0.0,     0.101362139, 0.0, 0.0, 0.0, 0.0, 0.885865433]]
 
 
-ic_path = C:\Users\mohag\Desktop\after_reflection_ic.npy
+ic_path = C:\Users\mohag\OneDrive\Desktop\after_reflection_ic.npy
 
 # gas model
 gas_model       = H2/Air Combustion
@@ -65,7 +65,7 @@ variable1 	    = Density
 variable2 	    = Pressure
 variable3 	    = Velocity
 variable4 	    = Heat Release
-update_interval = 100
+update_interval = 1000
 plot_fom	    = False
 
 

@@ -1,6 +1,6 @@
 # solver setup
 
-solver_mode 		    = Adaptive ROM
+solver_mode 		    = FOM
 rom_method  		    = Galerkin
 arom_method		        = Direct Adapt
 pod_energy  		    = 99.999
@@ -12,13 +12,13 @@ fom_results_max_iter    = ""
 
 # time discretization
 dt            = 5e-5
-num_steps     = 1500
+num_steps     = 7000
 time_scheme   = Explicit - FD Euler
 
 # space discretization
 x_initial   = 0
 x_final     = 1
-cell_number = 500 
+cell_number = 500
 
 # inlet BC
 rho_inlet        = extrapolate
@@ -60,15 +60,17 @@ variable1 	    = Density
 variable2 	    = Pressure
 variable3 	    = Velocity
 variable4 	    = Temprature
-update_interval = 100
+update_interval = 1000
 plot_fom	    = False
 
 # Saving
-save_interval   = 100
+save_interval   = 1
 
 # Profiling
 profiling	    = False
 
+# Injection
+injection       = False
 
 
 

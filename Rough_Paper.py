@@ -6,14 +6,52 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FFMpegWriter
 
-# prim_ic = np.load(r"C:\GIT_Fork\ROMify\examples\free_flame_with_perturbation\FOM_results\37680iteration_prim.npy")
+
+# import numpy as np
+
+# prim   = np.load(r"C:\Users\mohag\OneDrive\Desktop\RDE_ROMify_AROM\examples\1D_RDE\Adaptive ROM_results\cons_prim\609000iteration_prim.npy")
+# sample = np.load(r"C:\Users\mohag\OneDrive\Desktop\RDE_ROMify_AROM\examples\1D_RDE\Adaptive ROM_results\samples_user\609000iteration_samples_user.npy")
+
+
+# x = np.linspace(0,0.0288,500)
+
+# import matplotlib.pyplot as plt
+# plt.figure()
+# plt.plot(x,prim[2,:],color='tab:blue')
+# plt.scatter(x[sample],prim[2,sample],color='black')
+# # plt.plot(implicit_new[2,:],color='black')
+
+
+# plt.show()
+
+
+# prim_ic = np.load(r'C:\Users\mohag\OneDrive\Desktop\RDE_ROMify_FOM_AROM2\RDE_ROMify_FOM_AROM2\examples\1D_RDE\Adaptive ROM_results\cons_prim\2500000iteration_prim.npy')
 # prim_ic = prim_ic[:-1,:]
-# np.save(r"C:\GIT_Fork\ROMify\examples\free_flame_with_perturbation\FOM_results\ic_prim_temp.npy",prim_ic)
+# np.save(r"C:\GIT_Fork\ROMify\examples\1D_RDE\ROM_IC.npy",prim_ic)
 
 # dir_name = r"C:\GIT_Fork\ROMify\examples\supersonic_flow\FOM_results"
 # dir_name = r"C:\GIT_Fork\ROMify\examples\supersonic_flow\Hybrid ROM_results\cons_prim"
 # dir_name = r"C:\GIT_Fork\ROMify\examples\supersonic_flow\Hybrid ROM_results\cons_prim"
-dir_name_fom = r"C:\GIT_Fork\ROMify\examples\wall_reflected_detonation\FOM_results"
+# dir_name_fom = r'C:\GIT_Fork\ROMify\examples\1D_RDE\FOM_results'
+# dir_name_fom = r'C:\GIT_Fork\ROMify\examples\wall_reflected_detonation\FOM_results'
+# dir_name_fom = r'C:\GIT_Fork\ROMify\examples\1D_RDE\Adaptive ROM_results\cons_prim'
+# dir_name_fom = r"C:\Users\mohag\OneDrive\Desktop\RDE_ROMify_clean\examples\1D_RDE\FOM_results"
+# dir_name_ali = r"C:\Users\mohag\OneDrive\Desktop\RDE_ROMify_clean\examples\1D_RDE\FOM_results"
+# dir_name_ali = r'C:\GIT_Fork\ROMify\examples\1D_RDE\Adaptive ROM_results\cons_prim'
+# dir_name_ku  = r"C:\Users\mohag\OneDrive\Desktop\cons_prim"
+# dir_name_ku_sample  = r"C:\Users\mohag\OneDrive\Desktop\samples_user"
+# dir_name_fom = r"C:\Users\mohag\OneDrive\Desktop\1D_RDE_Simulation_5\examples\1D_RDE\FOM_results"
+# dir_name_fom = r"C:\Users\mohag\OneDrive\Desktop\1D_RDE_5Inject\examples\1D_RDE\FOM_results"
+# dir_name_fom = r"C:\Users\mohag\OneDrive\Desktop\RDE_ROMify_Cantera_Inj_250_Final\examples\1D_RDE\FOM_results"
+# dir_name_fom = r"C:\Users\mohag\OneDrive\Desktop\RDE_ROMify_Final_Test_Larger_Domain\examples\1D_RDE\FOM_results"
+# dir_name_fom = r"C:\Users\mohag\OneDrive\Desktop\non_intrusive_rde\1D_RDE_results\FOM_results"
+# dir_name_fom = r"C:\Users\mohag\OneDrive\Desktop\cons_prim"
+dir_name_fom = r"C:\Users\mohag\OneDrive\Desktop\RDE_ROMify_FOM_AROM2\RDE_ROMify_FOM_AROM2\examples\1D_RDE\Adaptive ROM_results\cons_prim"
+# dir_name_fom = r'C:\Users\mohag\OneDrive\Desktop\RDE_ROMify_Adaptive_ROM_Inj\examples\1D_RDE\Adaptive ROM_results\cons_prim'
+# dir_name_fom = r"C:\Users\mohag\OneDrive\Desktop\cons_prim"
+# dir_name_fom = r'C:\Users\mohag\OneDrive\Desktop\FGS_Journal_Paper_Graphs\detonation_data\FOM_results_4en9'
+# dir_name_fom = r"C:\Users\mohag\OneDrive\Desktop\Detonation_Reflected\examples\wall_reflected_detonation\Adaptive ROM_results\cons_prim"
+# dir_name_fom = r"C:\Users\mohag\OneDrive\Desktop\Detonation_Reflected\examples\wall_reflected_detonation\Adaptive ROM_results\cons_prim"
 # dir_name_fom = r"C:\GIT_Fork\ROMify\examples\free_flame_with_perturbation\FOM_results"
 # dir_name = r"C:\GIT_Fork\ROMify\examples\free_flame_with_perturbation\FOM_results"
 
@@ -399,23 +437,35 @@ dir_name_fom = r"C:\GIT_Fork\ROMify\examples\wall_reflected_detonation\FOM_resul
 
 fig,ax = plt.subplots(1,1)
 
-iter_list = np.arange(0,102000,1000)
+ax2 = ax.twinx()
+
+iter_list = np.arange(1000,9600000,10000)
 # iter_list = [79999]
 # iter_list = [628,1256,1884,2512,3140,3768,4396,5024,5652,6280,
 #              6908,7536]
 
-x=np.linspace(0,0.12,100)
+x=np.linspace(0,0.288,500)
 
 # prim_data_rom   = np.load(os.path.join(dir_name, str(0)+'iteration_prim.npy'))
-prim_data_fom   = np.load(os.path.join(dir_name_fom, str(int(0/10))+'iteration_prim.npy'))
+prim_data_ali     = np.load(os.path.join(dir_name_fom, str(int(iter_list[0]))+'iteration_prim.npy'))
+prim_data_ali2    = np.load(os.path.join(dir_name_fom, str(int(iter_list[0]))+'iteration_prim.npy'))
+# prim_data_ku     = np.load(os.path.join(dir_name_ku, str(int(10))+'iteration_prim.npy'))
+# sample_data_ku   = np.load(os.path.join(dir_name_ku_sample, str(int(10))+'iteration_samples_user.npy'))
+# cons_data_fom   = np.load(os.path.join(dir_name_fom, str(int(0))+'iteration_prim.npy'))
 
-# line1,=ax.plot(x,prim_data_rom[0,:],label=str(iter)+'iteration',c='tab:blue',ls='--')
-line2,=ax.plot(x,prim_data_fom[2,:],label=str(iter)+'iteration',c='black',ls='-')
+# ax.axhline(97000,0,0.288)
+line1,=ax.plot(x,prim_data_ali[2,:],label=str(iter)+'iteration',c='blue',ls='-')
+# line2,=ax2.plot(x,prim_data_ali2[-1,:],label=str(iter)+'iteration',c='black',ls='--')
+line2,=ax.plot(x,prim_data_ali[2,:],label=str(iter)+'iteration',c='black',ls='--')
+# line3,=ax.plot(x[sample_data_ku],prim_data_ku[-1,sample_data_ku],label=str(iter)+'iteration',c='tab:red',ls='',marker='o')
 
-ax.set_ylim([0,0.8*1e6])
-
+ax.set_ylim([0,5e6])
+# ax.set_ylabel('Pressure [Pa]')
+# ax.set_ylim([-1500,1500])
+# ax2.set_ylim([0,5e6])
+# ax.set_ylim([0,3500])
+# ax.set_ylim([0,0.02])
 for iter in iter_list:
-
 
     # q_solver = q_user.ravel()
 
@@ -426,18 +476,48 @@ for iter in iter_list:
     # q_rep_user = np.reshape(q_rep_solver,(3,500))
 
     # prim_data_rom   = np.load(os.path.join(dir_name, str(iter)+'iteration_prim.npy'))
-    prim_data_fom   = np.load(os.path.join(dir_name_fom, str(int(iter))+'iteration_prim.npy'))
+    prim_data_ali   = np.load(os.path.join(dir_name_fom, str(int(iter))+'iteration_prim.npy'))
+    # prim_data_ali2   = np.load(os.path.join(dir_name_fom, str(int(iter))+'iteration_prim.npy'))
+    # prim_data_ku    = np.load(os.path.join(dir_name_ku, str(int(iter))+'iteration_prim.npy'))
+    # sample_data_ku  = np.load(os.path.join(dir_name_ku_sample, str(int(iter))+'iteration_samples_user.npy'))
 
 
-    # line1.set_data(x,prim_data_rom[0,:])
-    line2.set_data(x,prim_data_fom[2,:])
+    line1.set_data(x,prim_data_ali[2,:])
+    # line2.set_data(x,prim_data_ku[2,:])
+    # line3.set_data(x[sample_data_ku],prim_data_ku[2,sample_data_ku])
 
-    # if iter >= 25120:
-            
-        # line1.set_color('tab:red')
+    # if iter == 204000:
+    #     breakpoint()
+    #     # line1.set_color('tab:red')
+
+    print(iter)
 
     plt.pause(0.1)
 
 
 ax.legend()
 plt.show()
+
+
+
+
+
+# import numpy as np
+
+# rho_in      = 1.2823549145222093*2
+# # u_in        = Q_prim_user[1,:] * 0 + 0.01
+# v_in        = 100
+# T_in        = 300
+# P_in        = 101325*2
+# Y_in        = np.array([0.01277243, 0.        , 0.        , 0.10136214, 0.        ,
+#                         0.        , 0.        , 0.        , 0.88586543, 0.            ]).reshape(-1,1)
+
+# prim_state_inject = np.zeros((14,1))
+
+# prim_state_inject[0] =rho_in
+# prim_state_inject[1] =v_in
+# prim_state_inject[2] =P_in
+# prim_state_inject[3] =T_in
+# prim_state_inject[4:]=Y_in
+
+# np.save(r'C:\GIT_Fork\ROMify\examples\1D_RDE\inject_prim_state.npy',prim_state_inject)

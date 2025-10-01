@@ -3,8 +3,8 @@ import solver_functions
 
 def visual_var_collector(solver_param):
 
-    visual_options            = ['Density','Pressure','Temprature','Velocity','Heat Release']
-    visual_options_indx_stack = [   0     ,     2    ,      3     ,     1    ,      -1    ]
+    visual_options            = ['Density','Pressure','Temprature','Velocity','Heat Release','MF']
+    visual_options_indx_stack = [   0     ,     2    ,      3     ,     1    ,      -1      , 4  ]
     
     for item in visual_options:
 

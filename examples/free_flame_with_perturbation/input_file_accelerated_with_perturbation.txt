@@ -1,6 +1,6 @@
 # solver setup
 
-solver_mode 		 = Hybrid ROM
+solver_mode 		 = Adaptive ROM
 rom_method  		 = Galerkin
 arom_method		     = Direct Adapt
 pod_energy  		 = 99.999
@@ -23,9 +23,9 @@ time_scheme   = Explicit - FD Euler
 # space discretization
 x_initial   = 0
 x_final     = 0.01
-cell_number = 500 
+cell_number = 1000 
 
-ic_path = C:\GIT_Fork\ROMify\examples\free_flame_with_perturbation\steady_IC_accelerated.npy
+ic_path = C:\GIT_Fork\ROMify\examples\1D_RDE\IC_ramp_PR_40_1000.npy
 
 # inlet BC
 rho_inlet        = extrapolate
@@ -50,16 +50,16 @@ viscous     = True
 
 # Visualization
 
-visual          = False
+visual          = True
 variable1 	    = Density
 variable2 	    = Pressure
 variable3 	    = Velocity
 variable4 	    = Temprature
-update_interval = 300
+update_interval = 50
 plot_fom	    = False
 
 # Saving
-save_interval   = 1
+save_interval   = 1000
 
 # Profiling
 profiling	= False

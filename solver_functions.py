@@ -1,6 +1,14 @@
 import os
 import numpy as np
 import cantera as ct
+from scipy.signal import savgol_filter
+from scipy.interpolate import interp1d
+import matplotlib.pyplot as plt
+
+import time_integrator_functions
+import rom_functions
+import visualization_functions
+
 
 def solver_parameters_collector(args,input_param):
 
@@ -35,11 +43,11 @@ def solver_parameters_collector(args,input_param):
         solver_param['hyper']                 = eval(input_param['hyper'])          
         solver_param['sampling_method']       = input_param['hyper_method']
 
-
     elif input_param['solver_mode'] == 'Hybrid ROM':
 
         solver_param['solver_mode']           = 'Hybrid ROM'
         solver_param['adaptive_rom_method']   = input_param['arom_method']
+        solver_param['rom_type']              = input_param['rom_type']
         solver_param['pod_energy']            = float(input_param['pod_energy'])
         solver_param['init_training_win']     = float(input_param['init_training_win'])
         solver_param['unsampled_update_freq'] = int(input_param['unsampled_update_freq'])
@@ -117,6 +125,14 @@ def solver_parameters_collector(args,input_param):
     solver_param['limiter']       =  eval(input_param['limiter'])
     solver_param['limiter_method']=  input_param['limiter_method']
     solver_param['viscous_flag']  =  eval(input_param['viscous'])
+    solver_param['injection']     =  eval(input_param['injection'])
+
+    if solver_param['injection']:
+
+        solver_param['injcetion_prim_state']       = np.load(input_param['injection_state_dir'])
+        solver_param['injector_face_area']         = float(input_param['injector_face_area'])
+        solver_param['non_inj_portion']            = float(input_param['non_injection_portion'])
+        solver_param['non_inj_tail_portion']       = float(input_param['non_injection_tail_portion'])
 
     ### visualization ###
     solver_param['visual']              = eval(input_param['visual'])
@@ -174,14 +190,16 @@ def initialize_state(solver_param):
     state['Q_cons']                 = np.zeros((num_state_var*int(solver_param['cell_number'])+(num_state_var*4)))
     state['Q_prim']                 = np.zeros((num_prim_var *int(solver_param['cell_number'])+(num_prim_var*4)))
 
+    state['Q_cons_old']             = state['Q_cons']
+
     if solver_param['gas_model'] != 'Non-Reacting Air':
 
         mech_file_dir = solver_param['working_dir']+'/chem.yaml'
 
         # state['gas']       = ct.Solution(mech_file_dir)
-        state['gas']       = ct.Solution('h2o2.yaml')
-        state['gas'].basis = 'mass'
-        state['gas_array'] = ct.SolutionArray(state['gas'],(1,int(solver_param['cell_number'])+4))
+        state['gas']         = ct.Solution('h2o2.yaml')
+        state['gas'].basis   = 'mass'
+        state['gas_array']   = ct.SolutionArray(state['gas'],(1,int(solver_param['cell_number'])+4))
 
         if solver_param['flux_scheme'] == '2nd Order Roe':
             
@@ -195,7 +213,14 @@ def initialize_state(solver_param):
         # heat release is also plotted part of prim when there is a combustion case
         state['prim_results_save']      = np.zeros(( num_prim_var+1  , int(solver_param['cell_number'])))
 
+    return state
 
+def injection_init(solver_param,state):
+
+    # prepare the number of cells that will be influenced by injection
+    state['injection_add_final'] = int(solver_param['non_inj_portion'] * solver_param['cell_number'])
+    state['injection_sub_init']  = int(solver_param['non_inj_tail_portion'] * solver_param['cell_number'])
+    
     return state
 
 def ic_generator(solver_param,state):
@@ -280,8 +305,9 @@ def update_ghost_cell(solver_param,state):
 
         if inlet_bc == 'periodic':
 
-            Q_prim_user[eqn,0:2] = Q_prim_user[eqn,-2:].reshape(-1,1)
+                Q_prim_user[eqn,0:2] = Q_prim_user[eqn,-3].reshape(-1,1)
 
+                
         ##### wall ##### 
 
         elif inlet_bc == 'wall':
@@ -353,7 +379,7 @@ def update_ghost_cell(solver_param,state):
 
         if outlet_bc == 'periodic':
 
-            Q_prim_user[eqn,-2:] = Q_prim_user[eqn,0:2].reshape(-1,1)
+            Q_prim_user[eqn,-2:] = Q_prim_user[eqn,2].reshape(-1,1)
 
         ##### wall ##### 
 
@@ -591,7 +617,7 @@ def prim2cons_converter(solver_param, state):
         state['gas_array'].TPY = T,P,Y_cantera
 
         internal_energy = np.squeeze(state['gas_array'].int_energy_mass)
-    
+
         internal_energy_tot = internal_energy + (0.5 * (vx **2))
 
         # import matplotlib.pyplot as plt
@@ -654,26 +680,82 @@ def cons2prim_converter(solver_param, state):
 
         internal_energy = (energy/vol/rho)-(0.5*vx**2)
 
-        state['gas_array'].UVY = internal_energy,sp_vol,MF_ct
+        try:
 
-        T = np.squeeze(state['gas_array'].T)
-        P = np.squeeze(state['gas_array'].P)
+            state['gas_array'].UVY = internal_energy,sp_vol,MF_ct
+
+            T = np.squeeze(state['gas_array'].T)
+            P = np.squeeze(state['gas_array'].P)
+
+        except:
+
+            print('Cantera Got Fucked!')
+
+            Q_prim   = state['Q_prim']
+
+            Q_prim_user = results_solver2user_converter(solver_param['num_prim_var'],
+                                                        solver_param['cell_number'],
+                                                        Q_prim)
+            
+            rho_spare = Q_prim_user[0,:]
+            vx_spare  = Q_prim_user[1,:]
+            P_spare   = Q_prim_user[2,:]
+            T_spare   = Q_prim_user[3,:]
+            Y_spare   = Q_prim_user[4:,:]
+            Y_spare_ct= find_mass_fraction_full_cantera(Y_spare)
+
+            state['gas_array'].TPY = T_spare, P_spare, Y_spare_ct
+
+            coef_temp  = np.squeeze(state['gas_array'].int_energy_mass)/T_spare
+            coef_press = np.squeeze(state['gas_array'].int_energy_mass)/P_spare
+
+            T = np.abs(internal_energy / coef_temp)
+            P = np.abs(internal_energy / coef_press)
+
+            # T = np.clip(T,np.min(T_spare),np.max(T_spare))
+            # P = np.clip(P,np.min(P_spare),np.max(P_spare))
+
+            # rho = np.clip(rho,np.min(rho_spare),np.max(rho_spare))
+            # vx  = np.clip(vx,np.min(vx_spare),np.max(vx_spare))
+            # Y   = np.clip(MF,np.min(Y_spare,axis=1)[:,None],np.max(Y_spare,axis=1)[:,None])
+
+            Q_prim = np.vstack((rho,vx,P,T,MF))
+
+            P_max = np.max(P_spare)
+            P_min = np.min(P_spare)
+
+            P_max_indx = np.argmax(P_spare)
+            P_min_indx = np.argmin(P_spare)
+
+            indx_pass_max = np.where(Q_prim[2,:]>P_max)[0]
+            indx_pass_min = np.where(Q_prim[2,:]<P_min)[0]
+
+            Q_prim[:,indx_pass_max] = Q_prim_user[:,P_max_indx].reshape(-1,1)
+            Q_prim[:,indx_pass_min] = Q_prim_user[:,P_min_indx].reshape(-1,1)
+
+            rho = Q_prim_user[0,:]
+            vx  = Q_prim_user[1,:]
+            P   = Q_prim_user[2,:]
+            T   = Q_prim_user[3,:]
+            Y   = Q_prim_user[4:,:]
+
+            Y_ct= find_mass_fraction_full_cantera(Y)
+
+            state['gas_array'].TPY = T, P, Y_ct
+
+            internal_energy = np.squeeze(state['gas_array'].int_energy_mass)
+
+            internal_energy_tot = internal_energy + (0.5 * (vx **2))
+
+            mass   = rho * vol
+            momx   = rho * vx * vol
+            energy = (rho * internal_energy_tot) * vol
+            mass_species = rho * Y * vol
+
+            state['Q_cons'] = np.vstack((mass,momx,energy,mass_species)).ravel()
 
         state['Q_prim'] = np.vstack((rho,vx,P,T,MF)).ravel()
 
-        # import matplotlib.pyplot as plt
-        # fig, ax1 = plt.subplots()
-
-        # color = 'tab:red'
-        # ax1.plot(internal_energy, color=color)
-
-        # ax2 = ax1.twinx()  # instantiate a second Axes that shares the same x-axis
-
-        # color = 'tab:blue'
-        # ax2.plot(internal_energy, color=color)
-
-
-        # state = update_ghost_cell(solver_param,state)
 
     return  state
 
@@ -841,321 +923,7 @@ def results_recorder(solver_param, rom_param, state):
         np.save(os.path.join(dir_results, 'samples_user'  , f"{save_title}_samples_user.npy")  , rom_param['S_indx_user']  )
         np.save(os.path.join(dir_results, 'samples_solver', f"{save_title}_samples_solver.npy"), rom_param['S_indx_solver']) 
 
-def rusanov_flux_calculator(solver_param,state):
-
-    Q_cons           = state['Q_cons']
-    # state            = cons2prim_converter(solver_param,state)
-    Q_prim           = state['Q_prim']
-    Q_cons_user      = results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
-    Q_prim_user      = results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
-
-    rho    = Q_prim_user[0,:]
-    vx     = Q_prim_user[1,:]
-    press  = Q_prim_user[2,:]
-    temp   = Q_prim_user[3,:]
-
-    Y      = Q_prim_user[4:,:]
-    Y_ct   = find_mass_fraction_full_cantera(Y)
-
-    vol           = solver_param['vol']
-    dx            = vol
-
-    rho_face_right = rho[1:]
-    rho_face_left  = rho[0:-1]
-
-    p_face_right   = press[1:]
-    p_face_left    = press[0:-1]
-
-    vx_face_right  = vx[1:]
-    vx_face_left   = vx[0:-1]
-
-    Y_face_right   = Y[:,1:]
-    Y_face_left    = Y[:,0:-1]
-
-    # rho_grad    = gradient_calculator(rho,dx)
-    # P_grad      = gradient_calculator(press,dx)
-    # vx_grad     = gradient_calculator(vx,dx)
-    # Y_grad      = gradient_calculator(Y,dx)
-
-    # rho_grad    = slope_limit(rho,dx,rho_grad)
-    # P_grad      = slope_limit(press,dx,P_grad)
-    # vx_grad     = slope_limit(vx,dx,vx_grad)
-    # Y_grad      = slope_limit(Y,dx,Y_grad)
-
-    # rho_face_left,rho_face_right    = extrapolate_center2face(rho,rho_grad,dx)
-    # p_face_left,p_face_right        = extrapolate_center2face(press,P_grad,dx)
-    # vx_face_left,vx_face_right      = extrapolate_center2face(vx,vx_grad,dx)
-
-    # Y_face_left  = np.zeros((len(Y[:,0]),len(Y[0,:])+1))
-    # Y_face_right = np.zeros((len(Y[:,0]),len(Y[0,:])+1))
-
-    # for indx in range(1,len(Y[0,:])):
-
-    #     Y_face_left[:,indx]  = Y[:,indx-1] + Y_grad[:,indx-1] * (dx/2)
-    #     Y_face_right[:,indx] = Y[:,indx]   - Y_grad[:,indx] * (dx/2)
-    
-
-
-    state['gas_array'].TPY = temp,press,Y_ct
-
-    # int_en_ct         = np.squeeze(state['gas_array'].int_energy_mass)
-
-    # int_en_right   = int_en[1:]   
-    # int_en_left    = int_en[0:-1] 
-
-    tot_energy     = Q_cons_user[2,:] / vol / rho
-
-    int_en          = tot_energy - 0.5*(vx**2)
-
-    int_en_right   = int_en[1:]   
-    int_en_left    = int_en[0:-1] 
-
-    # e_grad    = gradient_calculator(int_en,dx)
-
-    # e_grad    = slope_limit(int_en,dx,e_grad)
-
-    # int_en_left,int_en_right    = extrapolate_center2face(int_en,e_grad,dx)
-
-    en_L           = rho_face_left  * (int_en_left + 0.5 * (vx_face_left**2))
-    en_R           = rho_face_right * (int_en_right + 0.5 * (vx_face_right**2))
-
-    C              = np.squeeze(state['gas_array'].sound_speed)
-
-    C_R            = C[1:]
-    C_L            = C[0:-1]
-
-
-    diffusion_L = np.max( np.abs(vx_face_left+C_L) )
-    diffusion_R = np.max( np.abs(vx_face_right+C_R) )
-
-    diffusion = 0.5 * np.max([diffusion_L,diffusion_R])
-
-    flux_mass   = 0.5*(rho_face_left*vx_face_left + rho_face_right*vx_face_right)                               - diffusion*(rho_face_right-rho_face_left)
-    flux_momx   = 0.5*(rho_face_left*vx_face_left**2+p_face_left + rho_face_right*vx_face_right**2+p_face_right)- diffusion*(rho_face_right*vx_face_right-rho_face_left*vx_face_left)
-    flux_energy = 0.5*(vx_face_left*(en_L+p_face_left) + vx_face_right*(en_R+p_face_right))                     - diffusion*(en_R-en_L)
-
-    flux_spec   = 0.5*(rho_face_left*vx_face_left*Y_face_left + rho_face_right*vx_face_right*Y_face_right)       - diffusion*(rho_face_right*Y_face_right - rho_face_left * Y_face_left)
-
-    flux = np.vstack((flux_mass,flux_momx,flux_energy,flux_spec))
-
-    # Create arrays of zeros
-    left_zeros = np.zeros((flux.shape[0], 1))
-    right_zeros = np.zeros((flux.shape[0], 1))
-
-    flux_final = np.hstack((left_zeros, flux, right_zeros))
-
-    state['flux_cons'] = flux_final
-
-    return state
-
-def backup_first_order_roe_inviscid_flux_calculator(solver_param,rom_param,state):
-
-    if solver_param['gas_model'] == 'Non-Reacting Air':
-    
-        Q_cons           = state['Q_cons']
-        # state            = cons2prim_converter(solver_param,state)
-        Q_prim           = state['Q_prim']
-        Q_cons_user      = results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
-        Q_prim_user      = results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
-
-        rho    = Q_prim_user[0,:]
-        vx     = Q_prim_user[1,:]
-        press  = Q_prim_user[2,:]
-
-        
-        gamma  = solver_param['gamma']
-        vol    = solver_param['vol']
-        num_state_var = solver_param['num_state_var']
-
-        # breakpoint()
-
-        # c_max = np.max(np.abs(np.sqrt(gamma*press/rho)))
-
-        # cfl = c_max*solver_param['dt']/vol
-
-        # dt = 0.08*vol/c_max
-
-        S_indx_user = rom_param['S_indx_user']
-
-        en               = press  / (gamma-1) + 0.5 * rho  * (vx**2)
-        # number of cell
-        cell_num = len(rho)
-
-        # total enthalpy
-        htot = gamma/(gamma-1)*press/rho+0.5*vx**2
-
-        flux = np.zeros((num_state_var,cell_num+1))
-        diffusion = np.zeros((num_state_var,cell_num+1))
-
-        if solver_param['hyper'] == True:
-
-            range_flux = S_indx_user + 2 
-            range_flux_neighbor_left  = range_flux - 1
-            range_flux = np.concatenate((range_flux,range_flux_neighbor_left))
-            range_flux = np.sort(np.unique(range_flux))
-
-
-        else : 
-            
-            range_flux = range(0,cell_num-1)
-
-        for j in range_flux:
-        
-            # Compute Roe averages
-            R=np.sqrt(rho[j+1]/rho[j])                      # R_{j+1/2}
-            rmoy=R*rho[j]                                   # {hat rho}_{j+1/2}
-            umoy=(R*vx[j+1]+vx[j])/(R+1)                    # {hat U}_{j+1/2}
-            hmoy=(R*htot[j+1]+htot[j])/(R+1);               # {hat H}_{j+1/2}
-            amoy=np.sqrt((gamma-1.0)*(hmoy-0.5*umoy*umoy))  # {hat a}_{j+1/2}
-            
-            # Auxiliary variables used to compute P_{j+1/2}^{-1}
-            alph1=(gamma-1)*umoy*umoy/(2*amoy*amoy)
-            alph2=(gamma-1)/(amoy*amoy)
-
-            # Compute matrix P^{-1}_{j+1/2}
-            Pinv = np.array([[0.5*(alph1+umoy/amoy), -0.5*(alph2*umoy+1/amoy),  alph2/2],
-                            [1-alph1,                alph2*umoy,                -alph2 ],
-                            [0.5*(alph1-umoy/amoy),  -0.5*(alph2*umoy-1/amoy),  alph2/2]])
-                    
-            # Compute matrix P_{j+1/2}
-            P    = np.array([[ 1,              1,              1              ],
-                            [umoy-amoy,        umoy,           umoy+amoy      ],
-                            [hmoy-amoy*umoy,   0.5*umoy*umoy,  hmoy+amoy*umoy ]])
-            
-            # Compute matrix Lambda_{j+1/2}
-            lamb = np.array([[ abs(umoy-amoy),  0,              0                 ],
-                            [0,                 abs(umoy),      0                 ],
-                            [0,                 0,              abs(umoy+amoy)    ]])
-                        
-            # Compute Roe matrix |A_{j+1/2}|
-            A = P @ lamb @ Pinv
-
-            diffusion[:,j+1] = 0.5 * A @ (Q_cons_user[:,j+1]-Q_cons_user[:,j]) / vol
-
-            flux[0,j+1] = 0.5*(rho[j]*vx[j]               + rho[j+1]*vx[j+1])                         - diffusion[0,j+1] 
-            flux[1,j+1] = 0.5*(rho[j]*vx[j]**2 + press[j] + rho[j+1]*vx[j+1]**2+press[j+1])           - diffusion[1,j+1] 
-            flux[2,j+1] = 0.5*(vx[j]*(en[j]+press[j])     + vx[j+1]*(en[j+1]+press[j+1]))             - diffusion[2,j+1] 
-
-    ### If It is a Multi-Species Case ###
-
-    else :
-            
-        Q_cons           = state['Q_cons']
-        # state            = cons2prim_converter(solver_param,state)
-        Q_prim           = state['Q_prim']
-        Q_cons_user      = results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
-        Q_prim_user      = results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
-
-        rho    = Q_prim_user[0,:]
-        vx     = Q_prim_user[1,:]
-        press  = Q_prim_user[2,:]
-        temp   = Q_prim_user[3,:]
-
-
-        Y      = Q_prim_user[4:,:]
-        Y_ct   = find_mass_fraction_full_cantera(Y)
-
-
-        vol    = solver_param['vol']
-        num_state_var = solver_param['num_state_var']
-        num_species   = solver_param['num_species']
-
-        # breakpoint()
-
-        # c_max = np.max(c)
-
-        # cfl = c_max*1e-12/vol
-
-        # dt = 0.08*vol/c_max
-
-        S_indx_user = rom_param['S_indx_user']
-
-        # total energy (rho * e_t)
-        en               = Q_cons_user[2,:] / vol
-
-        state['gas_array'].TPY = temp,press,Y_ct
-
-        c       = np.squeeze(state['gas_array'].sound_speed)
-        int_en  = np.squeeze(state['gas_array'].int_energy_mass)
-        h       = np.squeeze(state['gas_array'].enthalpy_mass)
-
-        # total enthalpy
-        htot = h + (0.5*vx**2)
-
-        # number of cell
-        cell_num = len(rho)
-
-        flux = np.zeros((num_state_var,cell_num+1))
-        diffusion = np.zeros((3,cell_num+1))
-
-        if solver_param['hyper'] == True:
-
-            range_flux = S_indx_user + 2 
-            range_flux_neighbor_left  = range_flux - 1
-            range_flux = np.concatenate((range_flux,range_flux_neighbor_left))
-            range_flux = np.sort(np.unique(range_flux))
-
-        else : 
-            
-            range_flux = range(0,cell_num-1)
-
-        for j in range_flux:
-        
-            # Compute Roe averages
-            R=np.sqrt(rho[j+1]/rho[j])                      # R_{j+1/2}
-            rmoy=R*rho[j]                                   # {hat rho}_{j+1/2}
-            umoy=(R*vx[j+1]+vx[j])/(R+1)                    # {hat U}_{j+1/2}
-            Hmoy=(R*htot[j+1]+htot[j])/(R+1);               # {hat H}_{j+1/2} 
-            cmoy = (R*c[j+1]+c[j])/(R+1);                   # {hat c}_{j+1/2} 
-
-            del_p  = press[j+1]- press[j]
-            del_vx = vx[j+1]   - vx[j]
-            del_rho= rho[j+1]  - rho[j]
-
-            diffusion[0,j+1] = rmoy*del_vx + del_rho*umoy
-            diffusion[1,j+1] = del_p + (2*rmoy*umoy*del_vx) + (umoy**2*del_rho)
-
-            l1 = umoy+cmoy
-            l2 = umoy-cmoy
-            l3 = umoy
-
-            e1 = np.array([1,umoy+cmoy,Hmoy+umoy*cmoy])
-            e2 = np.array([1,umoy-cmoy,Hmoy-umoy*cmoy])
-
-            a1 = (del_p+rmoy*cmoy*del_vx)/(2*cmoy*cmoy)
-            a2 = (del_p-rmoy*cmoy*del_vx)/(2*cmoy*cmoy)
-
-            dF3 = (vx[j+1]*(en[j+1]+press[j+1])) - (vx[j]*(en[j]+press[j]))
-
-            X = dF3 - e1[2]*l1*a1 - e2[2]*l2*a2
-
-            X = X * np.sign(X)
-
-            diffusion[2,j+1] = e1[2]*np.abs(l1)*a1 + e2[2]*np.abs(l2)*a2 + X
-                            
-            flux[0,j+1] = 0.5*(rho[j]*vx[j]               + rho[j+1]*vx[j+1])                         - 0.5*np.abs(diffusion[0,j+1])
-            flux[1,j+1] = 0.5*(rho[j]*vx[j]**2 + press[j] + rho[j+1]*vx[j+1]**2+press[j+1])           - 0.5*np.abs(diffusion[1,j+1])
-            flux[2,j+1] = 0.5*(vx[j]*(en[j]+press[j])     + vx[j+1]*(en[j+1]+press[j+1]))             - 0.5*diffusion[2,j+1]
-            
-            # calculating mass species fluxes in a semi-decoupled approach
-
-            for sp in range(num_species):
-
-                if flux[0,j+1] > 0:
-
-                    flux[sp+3,j+1] =  flux[0,j+1] * Y[sp,j]
-
-                else:
-
-                    flux[sp+3,j+1] = flux[0,j+1] * Y[sp,j+1]
-
-
-    # breakpoint()
-    state['flux_cons'] = flux
-
-    return state
-
-def first_order_roe_inviscid_flux_calculator(solver_param,rom_param,state):
+def first_order_roe_inviscid_flux_calculator_for(solver_param,rom_param,state):
 
     if solver_param['gas_model'] == 'Non-Reacting Air':
 
@@ -1435,14 +1203,170 @@ def first_order_roe_inviscid_flux_calculator(solver_param,rom_param,state):
 
     return state
 
-def first_order_rusanov_viscous_flux_calculator(solver_param,rom_param,state):
+def first_order_roe_inviscid_flux_calculator(solver_param,rom_param,state):
 
-    if solver_param['gas_model'] != 'Non-Reacting Air':
+    if solver_param['gas_model'] == 'Non-Reacting Air':
+
+        state            = cons2prim_converter(solver_param,state)
+        state            = update_ghost_cell(solver_param,state)
     
-        # load the basic information
         Q_cons           = state['Q_cons']
-        # state            = cons2prim_converter(solver_param,state)
         Q_prim           = state['Q_prim']
+
+        Q_cons_user      = results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
+        Q_prim_user      = results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
+
+        rho    = Q_prim_user[0,:]
+        vx     = Q_prim_user[1,:]
+        press  = Q_prim_user[2,:]
+
+        
+        gamma         = solver_param['gamma']
+        vol           = solver_param['vol']
+        num_state_var = solver_param['num_state_var']
+
+        S_indx_user   = rom_param['S_indx_user']
+
+        en               = press  / (gamma-1) + 0.5 * rho  * (vx**2)
+
+        cell_num = len(rho)
+
+        # total enthalpy
+        htot = gamma/(gamma-1)*press/rho+0.5*vx**2
+
+        # flux = np.zeros((num_state_var,cell_num+1))
+        # diffusion = np.zeros((num_state_var,cell_num+1))
+
+        if solver_param['hyper'] == True:
+
+            S_indx_user      = S_indx_user + 2
+            range_flux_right = np.sort(np.concatenate((S_indx_user,S_indx_user+1)))
+            range_flux_left  = range_flux_right - 1
+
+            rho_left  = rho[range_flux_left]
+            rho_right = rho[range_flux_right]
+
+            vx_left  = vx[range_flux_left]
+            vx_right = vx[range_flux_right]
+
+            htot_left  = htot[range_flux_left]
+            htot_right = htot[range_flux_right]
+
+            press_left  = press[range_flux_left]
+            press_right = press[range_flux_right]
+
+            en_left    = en[range_flux_left]
+            en_right   = en[range_flux_right]
+
+            left_state = Q_cons_user[:,range_flux_left]
+            right_state= Q_cons_user[:,range_flux_right]
+
+            Pinv =  np.zeros((2*len(S_indx_user),3,3))
+            P    =  np.zeros((2*len(S_indx_user),3,3))
+            lamb =  np.zeros((2*len(S_indx_user),3,3))
+
+        else : 
+            
+            rho_left  = rho[:-1]
+            rho_right = rho[1:]
+
+            vx_left  = vx[:-1]
+            vx_right = vx[1:]
+
+            htot_left  = htot[:-1]
+            htot_right = htot[1:]
+
+            press_left  = press[:-1]
+            press_right = press[1:]
+
+            en_left    = en[:-1]
+            en_right   = en[1:]
+
+            left_state = Q_cons_user[:,:-1]
+            right_state= Q_cons_user[:,1:]
+
+            Pinv =  np.zeros((cell_num-1,3,3))
+            P    =  np.zeros((cell_num-1,3,3))
+            lamb =  np.zeros((cell_num-1,3,3))
+
+        R = np.sqrt(rho_right/rho_left)
+
+        rmoy=R*rho_left                                  # {hat rho}_{j+1/2}
+        umoy=(R*vx_right+vx_left)/(R+1)                    # {hat U}_{j+1/2}
+        hmoy=(R*htot_right+htot_left)/(R+1)               # {hat H}_{j+1/2}
+        amoy=np.sqrt((gamma-1.0)*(hmoy-0.5*umoy*umoy))   # {hat a}_{j+1/2}
+    
+        alph1=(gamma-1)*umoy*umoy/(2*amoy*amoy)
+        alph2=(gamma-1)/(amoy*amoy)
+
+        Pinv[:,0,0] = 0.5*(alph1+umoy/amoy)
+        Pinv[:,0,1] = -0.5*(alph2*umoy+1/amoy)
+        Pinv[:,0,2] = alph2/2
+
+        Pinv[:,1,0] = 1-alph1
+        Pinv[:,1,1] = alph2*umoy
+        Pinv[:,1,2] = -alph2
+
+        Pinv[:,2,0] = 0.5*(alph1-umoy/amoy)
+        Pinv[:,2,1] = -0.5*(alph2*umoy-1/amoy)
+        Pinv[:,2,2] = alph2/2
+        
+        P[:,0,0] = 1
+        P[:,0,1] = 1
+        P[:,0,2] = 1
+
+        P[:,1,0] = umoy-amoy
+        P[:,1,1] = umoy
+        P[:,1,2] = umoy+amoy
+
+        P[:,2,0] = hmoy-amoy*umoy
+        P[:,2,1] = 0.5*umoy*umoy
+        P[:,2,2] = hmoy+amoy*umoy
+
+        lamb[:,0,0] = abs(umoy-amoy)
+        lamb[:,0,1] = 0
+        lamb[:,0,2] = 0
+
+        lamb[:,1,0] = 0
+        lamb[:,1,1] = abs(umoy)
+        lamb[:,1,2] = 0
+
+        lamb[:,2,0] = 0
+        lamb[:,2,1] = 0
+        lamb[:,2,2] = abs(umoy+amoy)
+
+        A = np.matmul(np.matmul(P,lamb),Pinv)
+
+        dq = ((right_state-left_state).T)
+
+        dq = dq[:,:,np.newaxis]
+
+        diffusion = 0.5 * np.matmul(A,dq) / vol
+
+        flux = np.zeros((num_state_var,cell_num+1))
+        
+        if solver_param['hyper'] == True:
+
+            flux[0,range_flux_right] = 0.5*(rho_left*vx_left                 + rho_right*vx_right)                   - np.squeeze(diffusion[:,0,:])
+            flux[1,range_flux_right] = 0.5*(rho_left*vx_left**2 + press_left + rho_right*vx_right**2+press_right)    - np.squeeze(diffusion[:,1,:])
+            flux[2,range_flux_right] = 0.5*(vx_left*(en_left+press_left)     + vx_right*(en_right+press_right))      - np.squeeze(diffusion[:,2,:])
+
+        else:
+
+            flux[0,1:-1] = 0.5*(rho_left*vx_left                 + rho_right*vx_right)                   - np.squeeze(diffusion[:,0,:])
+            flux[1,1:-1] = 0.5*(rho_left*vx_left**2 + press_left + rho_right*vx_right**2+press_right)    - np.squeeze(diffusion[:,1,:])
+            flux[2,1:-1] = 0.5*(vx_left*(en_left+press_left)     + vx_right*(en_right+press_right))      - np.squeeze(diffusion[:,2,:])
+
+    ### If It is a Multi-Species Case ###
+
+    else :
+        
+        state            = cons2prim_converter(solver_param,state)
+        state            = update_ghost_cell(solver_param,state)
+
+        Q_cons           = state['Q_cons']
+        Q_prim           = state['Q_prim']
+
         Q_cons_user      = results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
         Q_prim_user      = results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
 
@@ -1450,104 +1374,256 @@ def first_order_rusanov_viscous_flux_calculator(solver_param,rom_param,state):
         vx     = Q_prim_user[1,:]
         press  = Q_prim_user[2,:]
         temp   = Q_prim_user[3,:]
-        Y      = Q_prim_user[4:,:]
 
-        Y_full = find_mass_fraction_full(Y)
+
+        Y      = Q_prim_user[4:,:]
         Y_ct   = find_mass_fraction_full_cantera(Y)
+
 
         vol           = solver_param['vol']
         num_state_var = solver_param['num_state_var']
-        dx            = vol
+        num_species   = solver_param['num_species']
 
-        state['gas_array'].TPY      = temp,press,Y_ct
+        S_indx_user = rom_param['S_indx_user']
 
-        dyn_vsc_mix                 = np.squeeze(state['gas_array'].viscosity)
-        mass_diff_mix               = np.transpose(state['gas_array'].mix_diff_coeffs_mass[0,:,:])
-        therm_cond_mix              = np.squeeze(state['gas_array'].thermal_conductivity)
+        # total energy (rho * e_t)
+        en               = Q_cons_user[2,:] / vol
 
-        MW                          = state['gas_array'].molecular_weights
-        MW_mix                      = np.squeeze(state['gas_array'].mean_molecular_weight)
-        enthalpies                  = state['gas_array'].partial_molar_enthalpies / MW
+        state['gas_array'].TPY = temp,press,Y_ct
 
-        h                           = np.transpose(enthalpies[0,:,:])
+        c       = np.squeeze(state['gas_array'].sound_speed)
+        int_en  = np.squeeze(state['gas_array'].int_energy_mass)
+        h       = np.squeeze(state['gas_array'].enthalpy_mass)
 
-        X                           = np.transpose(state['gas_array'].X[0,:,:])
+        # total enthalpy
+        htot = h + (0.5*(vx**2))
 
-        X[X==0] = 1e-100
+        # number of cell
+        cell_num = len(rho)
 
-        du_dx = (np.roll(vx,-1)            - np.roll(vx,1)               )/ 2 / dx
-        dT_dx = (np.roll(temp,-1)          - np.roll(temp,1)             )/ 2 / dx
-        dY_dx = (np.roll(Y_full,-1,axis=1) - np.roll(Y_full,1,axis=1)    )/ 2 / dx
-        dX_dx = (np.roll(X,-1,axis=1)      - np.roll(X,1,axis=1)    )     / 2 / dx
-
-        du_dx = slope_limit(vx  , dx , du_dx)
-        dT_dx = slope_limit(temp, dx , dT_dx)
-        dY_dx = slope_limit(Y_full , dx , dY_dx)
-        dX_dx = slope_limit(X , dx , dX_dx)
-
-        Wk_W = np.zeros_like(X)
-
-        for i in range(Wk_W.shape[0]):
-
-            Wk_W[i,:] = MW[i] / MW_mix
-
-        corr_vel                    = np.sum(mass_diff_mix*Wk_W*dX_dx)
-
-        diff_vel                    = -mass_diff_mix*dX_dx/X + corr_vel
-
-        tau = 4/3 * dyn_vsc_mix * du_dx
-
-        q   = -therm_cond_mix * dT_dx + rho*np.sum(h*diff_vel*Y_full,axis=0)
-
-
-        tau_right = tau[1:]
-        tau_left  = tau[0:-1]
-
-        vx_right  = vx[1:]
-        vx_left   = vx[0:-1]
+        flux = np.zeros((num_state_var,cell_num+1))
         
-        q_right   = q[1:]
-        q_left    = q[0:-1]
 
-        rho_right = rho[1:]
-        rho_left  = rho[0:-1]
+        if solver_param['hyper'] == True:
 
-        Y_right = Y[:,1:]
-        Y_left  = Y[:,0:-1]
+            S_indx_user      = S_indx_user + 2
+            range_flux_right = np.sort(np.concatenate((S_indx_user,S_indx_user+1)))
+            range_flux_left  = range_flux_right - 1
 
+            rho_left  = rho[range_flux_left]
+            rho_right = rho[range_flux_right]
 
-        D_right = mass_diff_mix[:-1,1:]
-        D_left  = mass_diff_mix[:-1,0:-1]
+            vx_left  = vx[range_flux_left]
+            vx_right = vx[range_flux_right]
 
-        dY_dx_right = dY_dx[:-1,1:]
-        dY_dx_left  = dY_dx[:-1,0:-1]
+            htot_left  = htot[range_flux_left]
+            htot_right = htot[range_flux_right]
 
-        dX_dx_right = dX_dx[:-1,1:]
-        dX_dx_left  = dX_dx[:-1,0:-1]
+            press_left  = press[range_flux_left]
+            press_right = press[range_flux_right]
 
-        Wk_W_right = Wk_W[:-1,1:]
-        Wk_W_left  = Wk_W[:-1,0:-1]
+            temp_left  = temp[range_flux_left]
+            temp_right = temp[range_flux_right]
+
+            en_left    = en[range_flux_left]
+            en_right   = en[range_flux_right]
+
+            int_en_left    = int_en[range_flux_left]
+            int_en_right   = int_en[range_flux_right]
+
+            Y_left         = Y[:,range_flux_left]
+            Y_right        = Y[:,range_flux_right]
+
+            left_state = Q_cons_user[:,range_flux_left]
+            right_state= Q_cons_user[:,range_flux_right]
+
+            del_q_prim = np.zeros((2*len(S_indx_user),num_state_var,1))
+
+            Pinv =  np.zeros((2*len(S_indx_user),3,3))
+            P    =  np.zeros((2*len(S_indx_user),3,3))
+            lamb =  np.zeros((2*len(S_indx_user),3,3))
+
+            diss_matrix = np.zeros((2*len(S_indx_user),num_state_var,num_state_var))
+
+            gas_array = ct.SolutionArray(state['gas'],2*len(S_indx_user))
+
+        else : 
+            
+            rho_left  = rho[:-1]
+            rho_right = rho[1:]
+
+            vx_left  = vx[:-1]
+            vx_right = vx[1:]
+
+            htot_left  = htot[:-1]
+            htot_right = htot[1:]
+
+            press_left  = press[:-1]
+            press_right = press[1:]
+
+            temp_left  = temp[:-1]
+            temp_right = temp[1:]
+
+            en_left    = en[:-1]
+            en_right   = en[1:]
+
+            int_en_left  = int_en[:-1]
+            int_en_right = int_en[1:]
+
+            Y_left         = Y[:,:-1]
+            Y_right        = Y[:,1:]
+
+            left_state = Q_cons_user[:,:-1]
+            right_state= Q_cons_user[:,1:]
+
+            del_q_prim = np.zeros((cell_num-1,num_state_var,1))
+
+            Pinv =  np.zeros((cell_num-1,3,3))
+            P    =  np.zeros((cell_num-1,3,3))
+            lamb =  np.zeros((cell_num-1,3,3))
+
+            diss_matrix = np.zeros((cell_num-1,num_state_var,num_state_var))
+
+            gas_array = ct.SolutionArray(state['gas'],cell_num-1)
         
+        R   = np.sqrt(rho_right/rho_left)
+
+        rmoy=R*rho_left                                   # {hat rho}_{j+1/2}
+        umoy=(R*vx_right+vx_left)/(R+1)                   # {hat U}_{j+1/2}
+        Hmoy=(R*htot_right+htot_left)/(R+1)               # {hat H}_{j+1/2}
+        emoy=(R*int_en_right+int_en_left)/(R+1)              
+        hmoy=Hmoy - (0.5*umoy*umoy)
+        Ymoy=(R*Y_right+Y_left)/(R+1)                  
+
+        Ymoy_ct = find_mass_fraction_full_cantera(Ymoy)
+
+        gas_array.UVY = emoy,1/rmoy,Ymoy_ct
+
+        Pmoy         = gas_array.P
+        Tmoy         = gas_array.T
+        cpmoy        = gas_array.cp
+        cmoy         = gas_array.sound_speed
+        meanMWmoy    = gas_array.mean_molecular_weight
+        MWmoy        = gas_array.molecular_weights
+        partial_hmoy = gas_array.partial_molar_enthalpies / MWmoy
+            
+        d_rho_d_press = rmoy / Pmoy
+        d_rho_d_temp = -rmoy/Tmoy
+
+        # d_rho_d_mass_frac = np.zeros_like(Ymoy)
+
+        #     for sp in range(len(Ymoy)):
+
+        #         d_rho_d_mass_frac[sp] = rmoy*meanMWmoy*(1/MWmoy[-1] - 1/MWmoy[sp])
+        d_rho_d_mass_frac_const_term =  (1/MWmoy[-1] - 1/MWmoy[:-1])
+        d_rho_d_mass_frac = rmoy * meanMWmoy * d_rho_d_mass_frac_const_term[:,np.newaxis]
+
+        d_enth_d_press = 0
+        d_enth_d_temp  = cpmoy
+
+        # d_enth_d_mass_frac = np.zeros_like(Ymoy)
+
+        # for sp in range(len(Ymoy)):
         
-        flux_momx   = 0.5*(tau_left+tau_right)
-        flux_energy = 0.5*((vx_left*tau_left-q_left)+(vx_right*tau_right-q_right))
+        d_enth_d_mass_frac = partial_hmoy[:,:-1] - partial_hmoy[:,-1,np.newaxis]
 
-        flux_spec   = 0.5*( (rho_left*D_left*Wk_W_left*dX_dx_left-rho_left*corr_vel*Y_left) + (rho_right*D_right*Wk_W_right*dX_dx_right-rho_right*corr_vel*Y_right) )
+        #     # Gamma terms for energy equation
+        g_press     = rmoy * d_enth_d_press + d_rho_d_press * Hmoy - 1.0
+        g_temp      = rmoy * d_enth_d_temp + d_rho_d_temp * Hmoy
+        g_mass_frac = rmoy[:,np.newaxis] * d_enth_d_mass_frac + Hmoy[:,np.newaxis] * d_rho_d_mass_frac.T
 
-        flux_mass   = np.zeros_like(flux_momx)
+        #     # Characteristic speeds
+        lambda1 = umoy + cmoy
+        lambda2 = umoy - cmoy
+        lambda1_abs = np.absolute(lambda1)
+        lambda2_abs = np.absolute(lambda2)
 
-        flux = np.vstack((flux_mass,flux_momx,flux_energy,flux_spec))
+        r_roe = (lambda2_abs - lambda1_abs) / (lambda2 - lambda1)
+        alpha = cmoy * (lambda1_abs + lambda2_abs) / (lambda1 - lambda2)
+        beta  = np.power(cmoy, 2.0) * (lambda1_abs - lambda2_abs) / (lambda1 - lambda2)
+        phi   = cmoy * (lambda1_abs + lambda2_abs) / (lambda1 - lambda2)
 
-        right_zeros = np.zeros((flux.shape[0], 1))
-        left_zeros = np.zeros((flux.shape[0], 1))
+        eta = (1.0 - rmoy * d_enth_d_press) / d_enth_d_temp
+        psi = eta * d_rho_d_temp + rmoy * d_rho_d_press
 
-        flux_final = np.hstack((left_zeros,flux, right_zeros))
+        vel_abs = np.absolute(umoy)
 
-        state['flux_visc_cons'] = flux_final
+        beta_star = beta * psi
+        beta_e = beta * (rmoy * g_press + g_temp * eta)
+        phi_star = d_rho_d_press * phi + d_rho_d_temp * eta * (phi - vel_abs) / rmoy
+        phi_e = g_press * phi + g_temp * eta * (phi - vel_abs) / rmoy
+        m = rmoy * alpha
+        e = rmoy * umoy * alpha
+
+        delta_p = press_left-press_right
+        delta_u = vx_left-vx_right
+        delta_T = temp_left-temp_right
+        delta_Y = (Y_left-Y_right)
+
+        # del_q_prim = np.zeros((cell_num-1,num_state_var,1))
+
+        del_q_prim[:,0,:]  = delta_p.reshape(-1,1)
+        del_q_prim[:,1,:]  = delta_u.reshape(-1,1)
+        del_q_prim[:,2,:]  = delta_T.reshape(-1,1)
+        del_q_prim[:,3:,:] = delta_Y.T[:,:,np.newaxis]
+
+
+        diss_matrix[: , 0 , 0 ] = phi_star
+        diss_matrix[: , 0 , 1 ] = beta_star
+        diss_matrix[: , 0 , 2 ] = vel_abs * d_rho_d_temp
+        diss_matrix[: , 0 , 3:] = vel_abs[:,np.newaxis] * d_rho_d_mass_frac.T
+
+        diss_matrix[: , 1 , 0 ] = umoy * phi_star + r_roe
+        diss_matrix[: , 1 , 1 ] = umoy * beta_star + m
+        diss_matrix[: , 1 , 2 ] = umoy * vel_abs * d_rho_d_temp
+        diss_matrix[: , 1 , 3:] = (umoy * vel_abs)[:,np.newaxis] * d_rho_d_mass_frac.T
+
+        diss_matrix[: , 2 , 0 ] = phi_e + r_roe * umoy
+        diss_matrix[: , 2 , 1 ] = beta_e + e
+        diss_matrix[: , 2 , 2 ] = g_temp * vel_abs
+        diss_matrix[: , 2 , 3:] = g_mass_frac * vel_abs[:,np.newaxis]
+
+        diss_matrix[: , 3:, 0] = Ymoy.T * phi_star[:,np.newaxis]
+        diss_matrix[: , 3:, 1] = Ymoy.T * beta_star[:,np.newaxis]
+        diss_matrix[: , 3:, 2] = Ymoy.T * (vel_abs * d_rho_d_temp)[:,np.newaxis]
+
+
+        idx_out, idx_in = np.meshgrid(np.arange(num_state_var-3), 
+                                    np.arange(num_state_var-3), indexing='ij')
+        
+        diag_mask = idx_out == idx_in
+
+        off_diag = vel_abs[:,np.newaxis] * Ymoy.T * d_rho_d_mass_frac.T
+        off_diag = np.repeat(off_diag[:,:,np.newaxis],np.shape(off_diag)[1],axis=2)
+
+        diag = vel_abs[:,np.newaxis] * (rmoy[:,np.newaxis] + Ymoy.T * d_rho_d_mass_frac.T)
+
+        diss_matrix[:,3:,3:] = off_diag
+        diss_matrix[:,3:,3:][:,diag_mask] = diag
+
+        dissipation = np.matmul(diss_matrix , del_q_prim)
+
+        if solver_param['hyper'] == True:
+
+            flux[0 ,range_flux_right] = 0.5*(rho_left*vx_left                 + rho_right*vx_right)                 + 0.5 * dissipation[:,0 ,0]
+            flux[1 ,range_flux_right] = 0.5*(rho_left*vx_left**2 + press_left + rho_right*vx_right**2+press_right)  + 0.5 * dissipation[:,1 ,0]
+            flux[2 ,range_flux_right] = 0.5*(vx_left*(en_left+press_left)     + vx_right*(en_right+press_right))    + 0.5 * dissipation[:,2 ,0]
+            flux[3:,range_flux_right] = 0.5*(rho_left*vx_left*Y_left          + rho_right*vx_right*Y_right )        + 0.5 * dissipation[:,3:,0].T
+
+
+        else:
+
+            flux[0,1:-1] = 0.5*(rho_left*vx_left                 + rho_right*vx_right)                 + 0.5 * dissipation[:,0 ,0]
+            flux[1,1:-1] = 0.5*(rho_left*vx_left**2 + press_left + rho_right*vx_right**2+press_right)  + 0.5 * dissipation[:,1 ,0]
+            flux[2,1:-1] = 0.5*(vx_left*(en_left+press_left)     + vx_right*(en_right+press_right))    + 0.5 * dissipation[:,2 ,0]
+            flux[3:,1:-1]= 0.5*(rho_left*vx_left*Y_left          + rho_right*vx_right*Y_right )        + 0.5 * dissipation[:,3:,0].T
+            
+
+    state['flux_cons'] = flux
 
     return state
 
-def first_order_roe_viscous_flux_calculator(solver_param,rom_param,state):
+def first_order_roe_viscous_flux_calculator_for(solver_param,rom_param,state):
 
     # state            = cons2prim_converter(solver_param,state)
     # state            = update_ghost_cell(solver_param,state)
@@ -1646,6 +1722,177 @@ def first_order_roe_viscous_flux_calculator(solver_param,rom_param,state):
         flux[2,j+1] = (umoy * tau) - q
         flux[3:,j+1]= (rmoy*mass_diff_mix[:-1]*dY_dx[:-1])-(rmoy*corr_vel*Ymoy)
 
+    state['flux_visc_cons'] = flux
+
+    return state
+
+def first_order_roe_viscous_flux_calculator(solver_param,rom_param,state):
+
+    # state            = cons2prim_converter(solver_param,state)
+    # state            = update_ghost_cell(solver_param,state)
+
+    Q_cons           = state['Q_cons']
+    Q_prim           = state['Q_prim']
+
+    Q_cons_user      = results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
+    Q_prim_user      = results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
+
+    rho    = Q_prim_user[0,:]
+    vx     = Q_prim_user[1,:]
+    press  = Q_prim_user[2,:]
+    temp   = Q_prim_user[3,:]
+
+    Y      = Q_prim_user[4:,:]
+    Y_full = find_mass_fraction_full(Y)
+    Y_ct   = find_mass_fraction_full_cantera(Y)
+
+
+    vol           = solver_param['vol']
+    dx            = vol
+    num_state_var = solver_param['num_state_var']
+    num_species   = solver_param['num_species']
+
+    S_indx_user = rom_param['S_indx_user']
+
+    # total energy (rho * e_t)
+    en               = Q_cons_user[2,:] / vol
+
+    state['gas_array'].TPY = temp,press,Y_ct
+
+    c       = np.squeeze(state['gas_array'].sound_speed)
+    int_en  = np.squeeze(state['gas_array'].int_energy_mass)
+    h       = np.squeeze(state['gas_array'].enthalpy_mass)
+
+    # total enthalpy
+    htot = h + (0.5*(vx**2))
+
+    # number of cell
+    cell_num = len(rho)
+
+    flux = np.zeros((num_state_var,cell_num+1))
+
+    if solver_param['hyper'] == True:
+
+        S_indx_user      = S_indx_user + 2
+        range_flux_right = np.sort(np.concatenate((S_indx_user,S_indx_user+1)))
+        range_flux_left  = range_flux_right - 1
+
+        rho_left  = rho[range_flux_left]
+        rho_right = rho[range_flux_right]
+
+        vx_left  = vx[range_flux_left]
+        vx_right = vx[range_flux_right]
+
+        htot_left  = htot[range_flux_left]
+        htot_right = htot[range_flux_right]
+
+        press_left  = press[range_flux_left]
+        press_right = press[range_flux_right]
+
+        temp_left  = temp[range_flux_left]
+        temp_right = temp[range_flux_right]
+
+        en_left    = en[range_flux_left]
+        en_right   = en[range_flux_right]
+
+        int_en_left    = int_en[range_flux_left]
+        int_en_right   = int_en[range_flux_right]
+
+        Y_left         = Y[:,range_flux_left]
+        Y_right        = Y[:,range_flux_right]
+
+        Y_full_left         = Y_full[:,range_flux_left]
+        Y_full_right        = Y_full[:,range_flux_right]
+
+        left_state = Q_cons_user[:,range_flux_left]
+        right_state= Q_cons_user[:,range_flux_right]  
+   
+        gas_array = ct.SolutionArray(state['gas'],2*len(S_indx_user))   
+
+    else : 
+        
+        rho_left  = rho[:-1]
+        rho_right = rho[1:]
+
+        vx_left  = vx[:-1]
+        vx_right = vx[1:]
+
+        htot_left  = htot[:-1]
+        htot_right = htot[1:]
+
+        press_left  = press[:-1]
+        press_right = press[1:]
+
+        temp_left  = temp[:-1]
+        temp_right = temp[1:]
+
+        en_left    = en[:-1]
+        en_right   = en[1:]
+
+        int_en_left  = int_en[:-1]
+        int_en_right = int_en[1:]
+
+        Y_left         = Y[:,:-1]
+        Y_right        = Y[:,1:]
+
+        Y_full_left         = Y_full[:,:-1]
+        Y_full_right        = Y_full[:,1:]
+
+        left_state = Q_cons_user[:,:-1]
+        right_state= Q_cons_user[:,1:]
+
+        gas_array = ct.SolutionArray(state['gas'],cell_num-1)
+
+
+    R = np.sqrt(rho_right/rho_left)
+
+    rmoy=R*rho_left                                   # {hat rho}_{j+1/2}
+    umoy=(R*vx_right+vx_left)/(R+1)                   # {hat U}_{j+1/2}
+    Hmoy=(R*htot_right+htot_left)/(R+1)               # {hat H}_{j+1/2}
+    emoy=(R*int_en_right+int_en_left)/(R+1)              
+    hmoy=Hmoy - (0.5*umoy*umoy)
+    Ymoy=(R*Y_right+Y_left)/(R+1)                  
+
+    Ymoy_ct = find_mass_fraction_full_cantera(Ymoy)
+
+    gas_array.UVY = emoy,1/rmoy,Ymoy_ct
+
+    dyn_vsc_mix                 = gas_array.viscosity
+    mass_diff_mix               = gas_array.mix_diff_coeffs_mass
+    therm_cond_mix              = gas_array.thermal_conductivity
+
+    MW                          = gas_array.molecular_weights
+    MW_mix                      = gas_array.mean_molecular_weight
+    enthalpies                  = gas_array.partial_molar_enthalpies / MW
+
+
+    du_dx = (vx_right - vx_left) /dx
+    dT_dx = (temp_right - temp_left) /dx
+    dY_dx = (Y_full_right - Y_full_left) / dx
+
+    corr_vel  = np.sum(mass_diff_mix*dY_dx.T,axis=1)
+
+    diff_vel  = -mass_diff_mix*dY_dx.T/Ymoy_ct[0,:,:] + corr_vel[:,np.newaxis]
+
+    tau       = 4/3 * dyn_vsc_mix * du_dx
+
+    q         = -therm_cond_mix * dT_dx + rmoy*np.sum(enthalpies*diff_vel*Ymoy_ct[0,:,:],axis=1)
+
+    if solver_param['hyper'] == True:
+
+        flux[0 ,range_flux_right] = 0 
+        flux[1 ,range_flux_right] = tau
+        flux[2 ,range_flux_right] = (umoy * tau) - q
+        flux[3:,range_flux_right] = (rmoy[:,np.newaxis]*mass_diff_mix[:,:-1]*dY_dx[:-1].T).T-(rmoy*corr_vel*Ymoy)
+
+    else: 
+
+        flux[0 ,1:-1] = 0 
+        flux[1 ,1:-1] = tau
+        flux[2 ,1:-1] = (umoy * tau) - q
+        flux[3:,1:-1] = (rmoy[:,np.newaxis]*mass_diff_mix[:,:-1]*dY_dx[:-1].T).T-(rmoy*corr_vel*Ymoy)
+
+        
     state['flux_visc_cons'] = flux
 
     return state
@@ -1978,7 +2225,7 @@ def second_order_roe_flux_calculator(solver_param,rom_param,state):
 
     return state
 
-def d_flux_dx_calculator(solver_param,rom_param,state):
+def d_flux_dx_calculator_for(solver_param,rom_param,state):
 
     S_indx_user = rom_param['S_indx_user']
 
@@ -2015,39 +2262,30 @@ def d_flux_dx_calculator(solver_param,rom_param,state):
     
     return state
 
-def viscous_d_flux_dx_calculator(solver_param,rom_param,state):
+def d_flux_dx_calculator(solver_param,rom_param,state):
 
-    S_indx_user = rom_param['S_indx_user']
-
-    flux = state['flux_visc_cons']
-
-    if solver_param['hyper'] == True:
-
-        d_flux_dx = np.zeros((solver_param['num_state_var'] , len(S_indx_user)))
-
-        S_indx_user = S_indx_user + 2
-
-        counter = 0
-
-        for indx in S_indx_user:
-
-            d_flux_dx[:,counter] = (flux[:,indx+1] - flux[:,indx])
-            counter = counter + 1
+    if solver_param['viscous_flag']:
+        
+        flux = state['flux_cons']-state['flux_visc_cons']
 
     else:
 
-        d_flux_dx = np.zeros((solver_param['num_state_var'] , solver_param['cell_number'] + 4))
+        flux = state['flux_cons']
+    
+    if solver_param['hyper'] == True:
 
-        for indx in range(0,len(d_flux_dx[0,:])):
+        S_indx_user      = rom_param['S_indx_user']
+        S_indx_user      = S_indx_user + 2
+        range_flux_right = S_indx_user + 1
+        range_flux_left  = S_indx_user
 
-            d_flux_dx[:,indx] = (flux[:,indx+1] - flux[:,indx])
+        d_flux_dx = -(flux[:, range_flux_right] - flux[:, range_flux_left])
 
+    else:
 
-    visc_flux     = d_flux_dx.ravel()
-    inviscid_flux = state['d_flux_dx']
-
-    # add viscous flux into inviscid flux
-    state['d_flux_dx'] = inviscid_flux - visc_flux
+        d_flux_dx = -(flux[:, 1:] - flux[:, :-1])
+    
+    state['d_flux_dx'] = d_flux_dx.ravel()
     
     return state
 
@@ -2080,24 +2318,254 @@ def solver_add_ghost(cell_number,num_var,Q_int):
 
     return Q_full_solver
 
-# def find_mass_fraction_full(MF):
+def periodic_injection(solver_param,state):
 
-#     # this function is just finding the last species mass fraction and adds its value to last row
+    # read current states
+    Q_prim      = state['Q_prim']
+    Q_prim_user = results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
 
-#     MF_shape = np.shape(MF)
+    Q_cons      = state['Q_cons']
+    Q_cons_user = results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
 
-#     # add the 1 last species
-#     MF_last_row = np.zeros(MF_shape[1])
+    rho         = Q_prim_user[0,:]
+    u           = Q_prim_user[1,:]    
+    P           = Q_prim_user[2,:]
+    T           = Q_prim_user[3,:]
+    Y           = Q_prim_user[4:,:]
+    Y_ct        = find_mass_fraction_full_cantera(Y)
 
-#     for indx in range(0,MF_shape[1]):
+    vol         = solver_param['vol']
 
-#         MF_last_row[indx] = 1.0 - np.sum(MF[:,indx])
+    rho_in      = solver_param['injcetion_prim_state'][0]/2
+    v_in        = solver_param['injcetion_prim_state'][1]
+    P_in        = solver_param['injcetion_prim_state'][2]/2
+    T_in        = solver_param['injcetion_prim_state'][3]
+    Y_in        = solver_param['injcetion_prim_state'][4:]
 
-#     MF = np.vstack((MF,MF_last_row))
+    area_in     = solver_param['injector_face_area']
 
-#     MF[MF==0] = 1e-30
+    state['gas'].TPY = T_in,P_in,Y_in 
 
-#     return MF
+    int_energy_in = state['gas'].int_energy_mass
+
+    # read injection regions index
+    add_indx    = state['injection_add_final']
+    sub_indx    = state['injection_sub_init'] 
+
+    indx_init   = np.argmax(P) - sub_indx
+    indx_final  = indx_init + add_indx
+    detonation  = np.arange(indx_init,indx_final)%(solver_param['cell_number']+4)
+    inj_indx    = np.arange(0,solver_param['cell_number']+4,1)
+    inj_indx    = inj_indx[~np.isin(inj_indx,detonation)]
+
+
+
+    'Injection Method'
+    inj_terms                       = np.zeros((solver_param['num_state_var'] , solver_param['cell_number'] + 4))
+
+    m_dot_in                        = rho_in * v_in * area_in / vol
+    e_in_tot                        = int_energy_in + 0.5*u[inj_indx]**2
+
+    inj_terms[0,inj_indx]           = m_dot_in
+    # inj_terms[1,inj_indx]           = m_dot_in * u[inj_indx]
+    # inj_terms[1,inj_indx]           = m_dot_in * 0.01
+    inj_terms[1,inj_indx]           = -m_dot_in * v_in
+    inj_terms[2,inj_indx]           = m_dot_in * e_in_tot
+    inj_terms[3:,inj_indx]          = m_dot_in * Y_in[:-1]
+
+    inj_terms = inj_terms * vol
+
+    state['d_flux_dx'] = state['d_flux_dx'] + inj_terms.ravel()
+
+    return state
+
+def injection_correction(solver_param,state):
+
+    # read current states
+    Q_prim      = state['Q_prim']
+    Q_prim_user = results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
+
+    Q_cons      = state['Q_cons']
+    Q_cons_user = results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
+
+    rho         = Q_prim_user[0,:]
+    u           = Q_prim_user[1,:]    
+    P           = Q_prim_user[2,:]
+    T           = Q_prim_user[3,:]
+    Y           = Q_prim_user[4:,:]
+    Y_ct        = find_mass_fraction_full_cantera(Y)
+
+    vol         = solver_param['vol']
+
+    # read injection regions index
+    add_indx    = state['injection_add_final']
+    sub_indx    = state['injection_sub_init'] 
+
+    indx_init   = np.argmax(P) - sub_indx
+    indx_final  = indx_init + add_indx
+    detonation  = np.arange(indx_init,indx_final)%(solver_param['cell_number']+4)
+    inj_indx    = np.arange(0,solver_param['cell_number']+4,1)
+    inj_indx    = inj_indx[~np.isin(inj_indx,detonation)]
+
+    # create mixed gas state
+    gas_array_current  = ct.SolutionArray(state['gas'],(1,len(inj_indx)))
+    gas_array_inject   = ct.SolutionArray(state['gas'],(1,len(inj_indx)))
+    gas_array_mix      = ct.SolutionArray(state['gas'],(1,len(inj_indx)))
+
+    # compute injection rate 
+    rho_in      = solver_param['injcetion_prim_state'][0]
+    v_in        = solver_param['injcetion_prim_state'][1]
+    P_in        = solver_param['injcetion_prim_state'][2]
+    T_in        = solver_param['injcetion_prim_state'][3]
+    Y_in        = solver_param['injcetion_prim_state'][4:]
+
+    area_in     = solver_param['injector_face_area']
+
+    mass_current= rho * vol
+    mass_in     = rho_in * v_in * area_in * solver_param['dt']
+
+    total_mass  = mass_current+mass_in
+
+    # species mass conservation
+    partial_mass_current = mass_current    * Y_ct[0,:,:].T
+    partial_mass_inject  = mass_in * Y_in
+    Y_mix                = (partial_mass_current + partial_mass_inject) / total_mass
+
+    # moment conservation
+    # vx_mix       = (rho_in * 0.01 + rho * u)/(rho_in + rho)
+
+
+    # energy conservation
+    gas_array_current.TPY = T[inj_indx], P[inj_indx], Y_ct[0,inj_indx]
+    gas_array_inject.TPY  = T_in,P_in,Y_in.T
+
+    int_energy_current    = np.squeeze(gas_array_current.int_energy_mass)
+    int_energy_in         = np.squeeze(gas_array_inject.int_energy_mass)
+
+    int_energy_mix        = (mass_current[inj_indx] * int_energy_current + mass_in * int_energy_in)/total_mass[inj_indx]
+    vol_inj               = mass_in / gas_array_inject.density
+    total_volume          = vol + vol_inj
+    sp_volume_mix         = total_volume / total_mass[inj_indx]
+
+    gas_array_mix.UVY     = int_energy_mix,sp_volume_mix,Y_mix[:,inj_indx].T
+
+    internal_energy       = np.squeeze(gas_array_mix.int_energy_mass)
+
+    internal_energy_tot   = internal_energy + (0.5 * (u[inj_indx] **2))
+
+    # mass conservation 
+    rho_mix = np.squeeze(gas_array_mix.density)
+    Y_mix   = gas_array_mix.Y[0,:,:-1].T
+
+    # momentum conservation using isentropic
+    gamma_current                    = np.squeeze(gas_array_current.cp/gas_array_current.cv)
+    speed_sound_current              = np.squeeze(gas_array_current.sound_speed)
+    mach_current                     = u[inj_indx]/speed_sound_current
+    P_tot_current                    = P[inj_indx] * (1+(gamma_current-1)/2*mach_current**2)**((gamma_current-1)/gamma_current)
+    P_tot_mix                        = P_tot_current
+
+    P_mix                            = np.squeeze(gas_array_mix.P)
+    speed_sound_mix                  = np.squeeze(gas_array_mix.sound_speed)
+    gamma_mix                        = np.squeeze(gas_array_mix.cp/gas_array_mix.cv)
+    pressure_ratio                   = P_tot_mix/P_mix
+    pressure_ratio[pressure_ratio<1] = 1
+
+    mach_mix                         = np.sqrt(2/(gamma_current-1)*((pressure_ratio)**((gamma_mix-1)/gamma_mix)-1))
+
+
+    u_mix                            = mach_mix * speed_sound_mix
+
+    # replace the influenced cells states
+    mass         = rho_mix * vol
+    momx         = rho_mix * u_mix * vol
+    energy       = (rho_mix * internal_energy_tot) * vol
+    mass_species = rho_mix * Y_mix * vol
+
+    Q_cons_inject= np.vstack((mass,momx,energy,mass_species))
+
+    Q_cons_user[:,inj_indx] = Q_cons_inject
+
+
+    # Q_cons_user[:,detonation[0]-2:detonation[0]] = Q_cons_user[:,detonation[0]+1].reshape(-1,1)
+    # # Create a simple averaging kernel (window size 11 in this case)
+    # window_size = 5
+    # kernel = np.ones(window_size)/window_size
+
+    # # # Apply convolution along the time axis (axis=0 in this example)
+    # smoothed_section = np.apply_along_axis(
+    #     lambda m: np.convolve(m, kernel, mode='same'),
+    #     axis=1,  # change this to 1 if you want to smooth along columns
+    #     arr=Q_cons_user[:, detonation[0]-5:detonation[0]+5]
+    # )
+
+    # # Assign back to original array
+    # Q_cons_user[:, detonation[0]-5:detonation[0]+5] = smoothed_section
+
+    # smoothed_2d = np.zeros_like(Q_cons_user[:, detonation[0]-10:detonation[0]+10])
+
+    # for i in range(12):
+
+    #     smoothed_2d[i,:] = savgol_filter(Q_cons_user[i, detonation[0]-10:detonation[0]+10], window_length=20, polyorder=2)
+    
+    # Q_cons_user[:, detonation[0]-10:detonation[0]+10] = smoothed_2d
+
+    smoothing_start_indx = (detonation[0]-10)%(solver_param['cell_number']+4)
+    smoothing_end_indx   = (detonation[0]+10)%(solver_param['cell_number']+4)
+
+    q_left  = Q_cons_user[:,smoothing_start_indx]
+    q_right = Q_cons_user[:,smoothing_end_indx]
+
+    x_knwon = np.array([0,20])
+    y_known = np.array([q_left,q_right]).T
+
+    f_interp = interp1d(x_knwon,y_known,kind='linear')
+
+    x        = np.arange(0,20)
+
+    q_ramp   = f_interp(x)
+
+    if smoothing_start_indx < smoothing_end_indx:
+        Q_cons_user[:, smoothing_start_indx:smoothing_end_indx] = q_ramp
+    else:
+        wrap_len = (solver_param['cell_number']+4) - smoothing_start_indx
+        Q_cons_user[:, smoothing_start_indx:] = q_ramp[:, :wrap_len]
+        Q_cons_user[:, :smoothing_end_indx]   = q_ramp[:, wrap_len:]
+
+    state['Q_cons'] = Q_cons_user.ravel()
+
+    # N = solver_param['cell_number'] + 4
+    # smoothing_start_indx = (detonation[0]-10) % N
+    # smoothing_end_indx   = (detonation[0]+10) % N
+
+    # q_left  = Q_cons_user[:, smoothing_start_indx]
+    # q_right = Q_cons_user[:, smoothing_end_indx]
+
+    # x_knwon = np.array([0, 1])
+    # y_known = np.array([q_left, q_right]).T
+    # f_interp = interp1d(x_knwon, y_known, kind='linear')
+
+    # x = np.linspace(0, 1, 20)
+    # q_ramp = f_interp(x)
+
+    # # Assign with wrap-around handling
+    # if smoothing_start_indx < smoothing_end_indx:
+    #     Q_cons_user[:, smoothing_start_indx:smoothing_end_indx] = q_ramp
+    # else:
+    #     wrap_len = N - smoothing_start_indx
+    #     Q_cons_user[:, smoothing_start_indx:] = q_ramp[:, :wrap_len]
+    #     Q_cons_user[:, :smoothing_end_indx]   = q_ramp[:, wrap_len:]
+
+    #The original code for context
+    # x = np.arange(detonation[0]-10,detonation[0]+10)%(solver_param['cell_number']+4)
+    # q_left = Q_cons_user[:,x[0]]
+    # q_right = Q_cons_user[:,x[-1]]
+    # x_knwon = np.array([x[0],x[-1]])
+    # y_known = np.array([q_left,q_right]).T
+    # f_interp = interp1d(x_knwon,y_known,kind='linear')
+    # q_ramp = f_interp(x)
+    # Q_cons_user[:, detonation[0]-10:detonation[0]+10] = q_ramp
+
+    return state
 
 def find_mass_fraction_full(MF):
     MF_last_row = 1.0 - np.sum(MF, axis=0)
@@ -2112,15 +2580,17 @@ def find_mass_fraction_full_cantera(MF):
 
     MF = find_mass_fraction_full(MF)
 
-    MF_shape = np.shape(MF)
+    # MF_shape = np.shape(MF)
 
-    # reshape the MF array suitable for cantera
+    # # reshape the MF array suitable for cantera
 
-    MF_reshaped = np.zeros( (1,MF_shape[1],MF_shape[0]) )
+    # MF_reshaped = np.zeros( (1,MF_shape[1],MF_shape[0]) )
 
-    for indx in range(0,MF_shape[0]):
+    # for indx in range(0,MF_shape[0]):
 
-        MF_reshaped[:,:,indx] = MF[indx,:]
+    #     MF_reshaped[:,:,indx] = MF[indx,:]
+
+    MF_reshaped = MF.T[np.newaxis, :, :]  # shape: (1, N_points, N_species)
 
     return MF_reshaped
 
@@ -2133,16 +2603,16 @@ def source_calculator(solver_param,rom_param,state):
     Q_cons_user      = results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
     Q_prim_user      = results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
 
-    rho    = Q_prim_user[0,:]
-    vx     = Q_prim_user[1,:]
-    press  = Q_prim_user[2,:]
-    temp   = Q_prim_user[3,:]
-    Y      = Q_prim_user[4:,:]
+    rho              = Q_prim_user[0,:]
+    vx               = Q_prim_user[1,:]
+    press            = Q_prim_user[2,:]
+    temp             = Q_prim_user[3,:]
+    Y                = Q_prim_user[4:,:]
 
-    Y_ct = find_mass_fraction_full_cantera(Y)
+    Y_ct             = find_mass_fraction_full_cantera(Y)
 
-    vol           = solver_param['vol']
-    num_state_var = solver_param['num_state_var']
+    vol              = solver_param['vol']
+    num_state_var    = solver_param['num_state_var']
 
     state['gas_array'].TPY = temp,press,Y_ct
 
@@ -2151,20 +2621,9 @@ def source_calculator(solver_param,rom_param,state):
     state['heat_release']  = np.squeeze(state['gas_array'].heat_release_rate)
     state['int_energy']    = np.squeeze(state['gas_array'].int_energy_mass)
 
-    # import matplotlib.pyplot as plt
-
-    # plt.figure()
-    # plt.plot(state['gas_array'].u[0,:])
-    # plt.plot(e,linestyle='--')
-
-    n_species = solver_param['num_species'] 
-
     source_terms   = np.zeros((solver_param['num_state_var'] , solver_param['cell_number'] + 4))
 
-    for indx in range(n_species):
-
-        source_terms[indx+3,:] = net_production_rate_ct[0,:,indx] * MW_species[indx] * vol
-
+    source_terms[3:,:]   = (net_production_rate_ct[0,:,:-1] * MW_species[:-1] * vol).T
 
     state['source_terms'] = source_terms.ravel()
 
@@ -2178,18 +2637,105 @@ def source_calculator(solver_param,rom_param,state):
 
     return state
 
+def advance_one_time_step(solver_param,rom_param,state,fig,axs,visual_param):
+
+    iter = solver_param['iter']
+
+    if solver_param['solver_mode'] == 'FOM':
+
+        state = residual_calculator(solver_param,rom_param,state)
+        state = time_integrator_functions.advance_time(solver_param,rom_param,state)
+
+    elif solver_param['solver_mode'] == 'ROM':
+        
+        state = residual_calculator(solver_param,rom_param,state)
+        state , rom_param = rom_functions.modern_red2full_state_calculator(solver_param,rom_param,state)
+
+    elif solver_param['solver_mode'] == 'Adaptive ROM':
+
+        state, solver_param , rom_param  = rom_functions.adaptive_rom_progress(solver_param,rom_param,state,iter)
+
+    elif solver_param['solver_mode'] == 'Hybrid ROM':
+
+        if solver_param['rom_type'] == 'intrusive':
+
+            state, solver_param , rom_param  = rom_functions.hybrid_rom_intrusive_progress(solver_param,rom_param,state,iter)
+
+        elif solver_param['rom_type'] == 'non-intrusive':
+
+            state, solver_param , rom_param  = rom_functions.hybrid_rom_non_intrusive_progress(solver_param,rom_param,state,iter)
+
+    if solver_param['injection']:
+
+        state = injection_correction(solver_param,state)
+
+    # Q_cons_user = solver_functions.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],[state['Q_cons']])
+    # Q_cons_user[:,0:3] = Q_cons_user[:,4].reshape(-1,1)
+    # Q_cons_user[:,-3:] = Q_cons_user[:,-4].reshape(-1,1)
+
+    # convert cons to prim
+    state = cons2prim_converter(solver_param,state)
+
+    # update the ghost cells
+    state = update_ghost_cell(solver_param,state)
+
+    state['time'] = state['time'] + solver_param['dt']
+
+    if iter < 1:
+
+        state['Q_cons_old'] = solver_add_ghost(solver_param['cell_number'],
+                                                                solver_param['num_state_var'],
+                                                                state['cons_results_save'])
+
+    # prepare data to save
+    state['cons_results_save'] = results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],[state['Q_cons']])[:,2:-2]
+
+    if solver_param['solver_mode'] == 'FOM': 
+
+        state['res_save']          = results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],state['d_flux_dx'])[:,2:-2]
+
+    else:
+
+        state['res_save']          = np.zeros(solver_param['num_state_var']*solver_param['cell_number'])
+
+        if len(rom_param['S_indx_solver']) != len(state['d_flux_dx']):
+
+            state['res_save'][rom_param['S_indx_solver']] = solver_eliminate_ghost(solver_param,state['d_flux_dx'])[rom_param['S_indx_solver']]
+        else:
+
+            state['res_save'][rom_param['S_indx_solver']] = state['d_flux_dx']
+        
+    if solver_param['gas_model'] == 'Non-Reacting Air':
+
+        state['prim_results_save'] = results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],[state['Q_prim']])[:,2:-2]
+
+    else :
+        
+        state['prim_results_save'][:-1,:] = results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],[state['Q_prim']])[:,2:-2]
+        state['prim_results_save'][-1,:]  = state['heat_release'][2:-2]
+
+    # save the data 
+
+    if iter % solver_param['save_interval'] == 0:
+
+        results_recorder(solver_param,rom_param,state)
+
+    if solver_param['visual'] == True:
+
+
+        # visualization
+        visualization_functions.in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param)
+        
+        plt.show(block=False)
+
+
+    print('Iteration: ' + str(iter))
+
+    return solver_param,rom_param,state,fig,axs,visual_param
+
 def residual_calculator(solver_param,rom_param,state):
     
-    # compute flux
-    if solver_param['flux_scheme'] == 'Rusanov':
-
-        state = rusanov_flux_calculator(solver_param,state)
-
-        if solver_param['viscous_flag']:
-
-            state = first_order_rusanov_viscous_flux_calculator(solver_param,rom_param,state)
-
-    elif solver_param['flux_scheme'] == '1st Order Roe':
+    if solver_param['flux_scheme'] == '1st Order Roe':
 
         state = first_order_roe_inviscid_flux_calculator(solver_param,rom_param,state)
 
@@ -2212,12 +2758,11 @@ def residual_calculator(solver_param,rom_param,state):
 
         state = source_calculator(solver_param,rom_param,state)
 
+        # if solver_param['injection']:
+
+        #     state = periodic_injection(solver_param,state)
+
     return state
-
-
-
-
-
 
 
 

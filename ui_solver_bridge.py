@@ -18,6 +18,10 @@ def driver(args,solver_param):
     # initialize main states 
     state = solver_functions.initialize_state(solver_param)
 
+    if solver_param['injection']:
+
+        state = solver_functions.injection_init(solver_param,state)
+
     # get the initial condition
 
     state = solver_functions.ic_generator(solver_param,state)
@@ -65,6 +69,7 @@ def driver(args,solver_param):
         rom_param['S_indx_solver']    = S_indx_solver
         rom_param['hyper_precompute'] = pcc
 
+
     elif solver_param['solver_mode'] == 'ROM':
 
         rom_param = rom_functions.precomputer(solver_param,state)
@@ -88,80 +93,51 @@ def driver(args,solver_param):
     start_time = time.time()
     state['time'] = 0
 
-    for iter in range(solver_param['num_step']):
+    solver_param['arom_restart']     = False
+    # solver_param['basis_window_size']= solver_param['init_training_win']
+
+    iter_list = np.arange(solver_param['num_step'])
+
+    iter = 0
+
+    while iter < iter_list[-1]:
 
         solver_param['iter'] = iter
 
-        if solver_param['solver_mode'] == 'FOM':
+        if solver_param['arom_restart']:
 
-            state = solver_functions.residual_calculator(solver_param,rom_param,state)
-            state = time_integrator_functions.advance_time(solver_param,rom_param,state)
+            try:
 
-        elif solver_param['solver_mode'] == 'ROM':
-            
-            state = solver_functions.residual_calculator(solver_param,rom_param,state)
-            state , rom_param = rom_functions.red2full_state_calculator(solver_param,rom_param,state)
+                if iter % solver_param['save_interval'] == 0:
 
-        elif solver_param['solver_mode'] == 'Adaptive ROM':
+                    checkpoint = (
+                                solver_param.copy(), rom_param.copy(), state.copy(),
+                                fig, axs, visual_param.copy()
+                            )
+                    
+                    checkpoint_iter = iter
 
-            state, solver_param , rom_param  = rom_functions.adaptive_rom_progress(solver_param,rom_param,state,iter)
+                solver_param,rom_param,state,fig,axs,visual_param = solver_functions.advance_one_time_step(solver_param,rom_param,state,fig,axs,visual_param)
 
-        elif solver_param['solver_mode'] == 'Hybrid ROM':
+            except:
 
-            state, solver_param , rom_param  = rom_functions.hybrid_rom_progress(solver_param,rom_param,state,iter)
+                print('simulation failed, rolling back and restarting!')
 
-        # convert cons to prim
-        state = solver_functions.cons2prim_converter(solver_param,state)
+                solver_param, rom_param, state, fig, axs, visual_param = checkpoint
 
-        # update the ghost cells
-        state = solver_functions.update_ghost_cell(solver_param,state)
-    
-        state['time'] = state['time'] + solver_param['dt']
+                iter = checkpoint_iter
+                solver_param['init_training_win'] = iter + 10
 
-        # prepare data to save
-        state['cons_results_save'] = solver_functions.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],[state['Q_cons']])[:,2:-2]
+                state['Q_cons']           = checkpoint[2]['Q_cons']
+                state['Q_prim']           = checkpoint[2]['Q_prim']
+                solver_param['hyper']     = False
 
-        if solver_param['solver_mode'] == 'FOM': 
-
-            state['res_save']          = solver_functions.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],state['d_flux_dx'])[:,2:-2]
 
         else:
 
-            state['res_save']  = np.zeros(solver_param['num_state_var']*solver_param['cell_number'])
+            solver_param,rom_param,state,fig,axs,visual_param = solver_functions.advance_one_time_step(solver_param,rom_param,state,fig,axs,visual_param)
 
-            if len(rom_param['S_indx_solver']) != len(state['d_flux_dx']):
-
-                state['res_save'][rom_param['S_indx_solver']] = solver_functions.solver_eliminate_ghost(solver_param,state['d_flux_dx'])[rom_param['S_indx_solver']]
-
-            else:
-
-                state['res_save'][rom_param['S_indx_solver']] = state['d_flux_dx']
-            
-        if solver_param['gas_model'] == 'Non-Reacting Air':
-
-            state['prim_results_save'] = solver_functions.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],[state['Q_prim']])[:,2:-2]
-
-        else :
-            
-            state['prim_results_save'][:-1,:] = solver_functions.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],[state['Q_prim']])[:,2:-2]
-            state['prim_results_save'][-1,:]  = state['heat_release'][2:-2]
-
-        # save the data 
-
-        if iter % solver_param['save_interval'] == 0:
-
-            solver_functions.results_recorder(solver_param,rom_param,state)
-
-        if solver_param['visual'] == True:
-
-
-            # visualization
-            visualization_functions.in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param)
-            
-            plt.show(block=False)
-
-        print('Iteration: ' + str(iter))
-
+        iter = iter + 1
     # breakpoint()
 
     # np.save(r'C:\GIT_Fork\ROMify\examples\supersonic_flow\cumsum.npy'    ,rom_param['cum_sum'])

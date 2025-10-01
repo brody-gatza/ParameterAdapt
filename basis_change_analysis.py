@@ -13,7 +13,7 @@ def compute_dv(args):
     iter,dir = args
 
     basis_n   = np.load(os.path.join(dir,'basis',str(iter)+'iteration_basis.npy'))
-    basis_nm1 = np.load(os.path.join(dir,'basis',str(iter-1)+'iteration_basis.npy'))
+    basis_nm1 = np.load(os.path.join(dir,'basis',str(iter-1000)+'iteration_basis.npy'))
     dv        = np.linalg.norm(basis_n - basis_nm1) / np.linalg.norm(basis_nm1)
 
     # print(iter)
@@ -25,11 +25,11 @@ def subspace_angles_calc(args):
     iter,dir  = args        
 
     basis_n   = np.load(os.path.join(dir,'basis',str(iter)+'iteration_basis.npy'))
-    basis_nm1 = np.load(os.path.join(dir,'basis',str(iter-1)+'iteration_basis.npy'))
+    basis_nm1 = np.load(os.path.join(dir,'basis',str(iter-1000)+'iteration_basis.npy'))
 
     sub_angle = np.linalg.norm(
             np.rad2deg(
-            sp_al.subspace_angles(basis_n[:,0:2],basis_nm1[:,0:2])
+            sp_al.subspace_angles(basis_n[:,:],basis_nm1[:,:])
             )
             )
 
@@ -97,20 +97,20 @@ if __name__ == '__main__':
     # mode = 'write'
     mode = 'read'
 
-    dir = r"C:\GIT_Fork\ROMify\examples\classic_shock_tube\Adaptive ROM_results"
+    dir = r"C:\Users\mohag\OneDrive\Desktop\1D_RDE_Basis_Results"
     # dir = r"C:\GIT_Fork\ROMify\examples\free_flame_with_perturbation\Adaptive ROM_results"
     # dir = r"C:\GIT_Fork\ROMify\examples\supersonic_flow\FOM_results"
     # dir = r"C:\GIT_Fork\ROMify\examples\supersonic_flow\Hybrid ROM_results"
 
     if mode =='write':
 
-        iterations = range(11,43960,1)
+        iterations = range(2000,4770000,1000)
 
         args_list = [(iter, dir) for iter in iterations]
 
         with Pool(processes=24) as pool:
 
-            results = list( tqdm(pool.imap(compute_dv,args_list) ,total = len(args_list) ))
+            results = list( tqdm(pool.imap(subspace_angles_calc,args_list) ,total = len(args_list) ))
 
         dBasis = np.array(results)
 
@@ -338,19 +338,21 @@ if __name__ == '__main__':
 
     "Subspace Angle"
 
-    # iterations = range(11,2400,1)
+    # iterations = iterations = range(2000,4770000,1000)
 
     # args_list = [(iter, dir) for iter in iterations]
 
-    # with Pool(processes=4) as pool:
+    # with Pool(processes=16) as pool:
 
     #     results = list( tqdm(pool.imap(subspace_angles_calc,args_list) ,total = len(args_list) ))
 
     # subspace_angels = np.array(results)
 
-    # np.save(os.path.join(dir,'subspace_angles_deg_first_two_modes_only_norm.npy'),subspace_angels)
+    # np.save(os.path.join(dir,'subspace_angles_deg_first_five_modes_only_norm.npy'),subspace_angels)
 
     sub_angle = np.load(os.path.join(dir,'subspace_angles_deg_first_two_modes_only_norm.npy'))
+    sub_angle[250:] = sub_angle[250:] - 80
+    sub_angle = np.abs(sub_angle)
 
     ######################################## CUMSUM ########################################
     mean = np.mean(sub_angle)
@@ -361,7 +363,7 @@ if __name__ == '__main__':
 
     ######################################## Moving Average ########################################
 
-    window_size = 100
+    window_size = 10
 
     moving_avg = np.convolve(sub_angle, np.ones(window_size)/window_size, mode='same')
 
@@ -373,32 +375,32 @@ if __name__ == '__main__':
 
     ######################################## Dynamic Threshold ########################################
 
-    dyc_moving_avg = np.zeros_like(sub_angle)+1e32
-    dyc_cumsum     = np.zeros_like(sub_angle)+1e32
+    # dyc_moving_avg = np.zeros_like(sub_angle)+1e32
+    # dyc_cumsum     = np.zeros_like(sub_angle)+1e32
 
-    for iter in range(100,len(sub_angle),100):
+    # for iter in range(1,len(sub_angle),1):
 
-        # compute cumsum on the fly
+    #     # compute cumsum on the fly
 
-        mean_d = np.mean(sub_angle[0:iter])
+    #     mean_d = np.mean(sub_angle[0:iter])
 
-        cusum_d = np.cumsum(sub_angle[0:iter]-mean_d)
+    #     cusum_d = np.cumsum(sub_angle[0:iter]-mean_d)
 
-        dyc_cumsum[0:iter] = (cusum_d - np.min(cusum_d)) / (np.max(cusum_d) - np.min(cusum_d))
+    #     dyc_cumsum[0:iter] = (cusum_d - np.min(cusum_d)) / (np.max(cusum_d) - np.min(cusum_d))
 
-        # compute moving average on the fly
+    #     # compute moving average on the fly
 
-        dyc_moving_avg[0:iter] = np.convolve(sub_angle[0:iter], np.ones(window_size)/window_size, mode='same')
+    #     dyc_moving_avg[0:iter] = np.convolve(sub_angle[0:iter], np.ones(window_size)/window_size, mode='same')
 
-        if np.any(dyc_cumsum<=0.01) and np.any(dyc_moving_avg<=0.05):
+    #     if np.any(dyc_cumsum<=0.01) and np.any(dyc_moving_avg<=0.05):
 
-            print('The basis good enough! Time to Take Off!')
+    #         print('The basis good enough! Time to Take Off!')
 
-            indx = np.where((dyc_cumsum<=0.01) & (dyc_moving_avg<=0.05))[0][0]
+    #         indx = np.where((dyc_cumsum<=0.01) & (dyc_moving_avg<=0.05))[0][0]
 
-            print('index: ' + str(indx) + ' is found as the transition points')
+    #         print('index: ' + str(indx) + ' is found as the transition points')
 
-            break
+    #         break
 
     
     ######################################## Plot ########################################
@@ -407,11 +409,11 @@ if __name__ == '__main__':
 
     axx = ax.twinx()
 
-    x = np.arange(10,2400)
+    x = np.linspace(0,0.15,len(sub_angle))
 
-    line0, = ax.plot(sub_angle ,color='tab:blue'    , label='Subspace Angles')
-    line1, = ax.plot(moving_avg,color='black' , ls='-'  ,label='Moving Average (w=10)')
-    line2, =axx.plot(cusum,color='tab:red',ls='--', label='CUSUM')
+    line0, = ax.plot(x,sub_angle ,color='tab:blue'    , label='Subspace Angles')
+    line1, = ax.plot(x,moving_avg,color='black' , ls='-'  ,label='Moving Average (w=10)')
+    line2, =axx.plot(x,cusum,color='tab:red',ls='--', label='CUSUM')
     # ax.scatter(x[change_points],sub_angle[change_points]*0+45)
 
     # identical_iter = np.array([int(n*6280) for n in range(0,8)])
@@ -419,9 +421,9 @@ if __name__ == '__main__':
 
     ax.set_ylabel('Subspace Angles')
     axx.set_ylabel('Cum. Sum Values')
-    ax.set_xlabel('Time Step [ms]')
+    ax.set_xlabel('Time [ms]')
 
-    # ax.set_xlim([0,20000])
+    ax.set_xlim([0,0.15])
 
     # Merge legends
     lines = [line0, line1, line2]

@@ -1,5 +1,7 @@
 import numpy as np
+from scipy.optimize import newton_krylov
 import solver_functions
+
 
 def advance_time(solver_param,rom_param,state):
     # time integration
@@ -14,6 +16,14 @@ def advance_time(solver_param,rom_param,state):
     elif solver_param['time_scheme'] == 'Explicit - SSPRK3':
 
         state   = explicit_ssp_rk3(solver_param,rom_param,state)
+
+    elif solver_param['time_scheme'] == 'Implicit - BDF':
+
+        state   = implicit_bdf(solver_param,rom_param,state)
+
+    elif solver_param['time_scheme'] == 'Implicit - BDF2':
+
+        state   = implicit_bdf2(solver_param,rom_param,state)
 
     # elif solver_param['time_scheme'] == 'Explicit - SSPRK3':
 
@@ -87,7 +97,6 @@ def explicit_rk4( solver_param,rom_param,state ):
     state['Q_cons'] = Q_new
 
     return state
-
 
 def explicit_ssp_rk2( solver_param,rom_param,state ):
 
@@ -221,5 +230,73 @@ def explicit_ssp_rk3( solver_param,rom_param,state ):
         q_new = q3 + 0.5 * dt * res3
 
         state['Q_cons'] = q_new
+
+    return state
+
+def implicit_bdf_residual_calculator(q,q_old,solver_param,rom_param,state):
+
+    state['Q_cons'] = q
+
+    # if solver_param['injection']:
+
+    #     state = solver_functions.injection_correction(solver_param,state)
+
+    state = solver_functions.residual_calculator(solver_param,rom_param,state)
+    flux_res = state['d_flux_dx']
+    dt = solver_param['dt']
+
+    res = q - q_old - dt * flux_res
+
+    return res
+
+def implicit_bdf(solver_param,rom_param,state):
+
+    q_n       = state['Q_cons']
+    q_n_min_1 = state['Q_cons_old']
+
+    # q_guess   = q_n + (q_n - q_n_min_1) 
+    # q_guess   = 2*q_n - q_n_min_1 
+    q_guess   = q_n 
+
+    sol   = newton_krylov(lambda q: implicit_bdf_residual_calculator(q,q_guess,solver_param,rom_param,state),
+                                q_guess,method='gmres')
+
+    state['Q_cons'] = sol
+
+    return state
+
+
+def implicit_bdf2_residual_calculator(q,q_old,solver_param,rom_param,state):
+
+    state['Q_cons'] = q
+
+    # if solver_param['injection']:
+
+    #     state = solver_functions.injection_correction(solver_param,state)
+
+    state = solver_functions.residual_calculator(solver_param,rom_param,state)
+    flux_res = state['d_flux_dx']
+    dt = solver_param['dt']
+
+    q_old_old = state['Q_cons_old']
+
+    res = q - 4/3*q_old +1/3*q_old_old - 2/3* dt * flux_res
+
+    return res
+
+
+def implicit_bdf2(solver_param,rom_param,state):
+
+    q_n       = state['Q_cons']
+    q_n_min_1 = state['Q_cons_old']
+
+    # q_guess   = q_n + (q_n - q_n_min_1) 
+    # q_guess   = 2*q_n - q_n_min_1 
+    q_guess   = q_n 
+
+    sol   = newton_krylov(lambda q: implicit_bdf2_residual_calculator(q,q_guess,solver_param,rom_param,state),
+                                q_guess,method='gmres')
+
+    state['Q_cons'] = sol
 
     return state

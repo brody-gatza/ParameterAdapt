@@ -1,0 +1,94 @@
+# solver setup
+
+solver_mode 		    = ROM
+rom_method  		    = Galerkin
+arom_method		        = Direct Adapt
+pod_energy  		    = 99.999
+hyper	    		    = True
+hyper_method		    = QDEIM
+init_training_win 	    = 10
+unsampled_update_freq 	= 10
+fom_results_max_iter    = ""
+
+fom_results_dir		    = "C:\Users\mohag\OneDrive\Desktop\RDE_ROMify_FOM_AROM2\RDE_ROMify_FOM_AROM2\examples\1D_RDE\Adaptive ROM_results\cons_prim"
+fom_results_max_iter    = 9600000
+
+
+fom_results_start     = 2500000
+fom_results_end       = 9600000
+fom_results_step      = 50000
+
+#cfl = 0.0025
+#t = 250 micro-sec
+
+# time discretization
+dt            = 1.25e-11
+num_steps     = 3600000
+time_scheme   = Explicit - FD Euler
+
+# space discretization
+x_initial   = 0
+x_final     = 0.0288
+cell_number = 500
+
+# inlet BC
+rho_inlet        = periodic
+vel_inlet        = periodic
+press_inlet      = periodic
+temp_inlet       = periodic
+mass_frac_inlet  = periodic
+
+# outlet BC
+rho_outlet        = periodic
+vel_outlet        = periodic
+press_outlet      = periodic
+temp_outlet       = periodic
+mass_frac_outlet  = periodic
+
+
+# Initial Condition
+
+#x_interval_ic = [[0,0.01444],[0.0144,0.0288]]
+#press_ic      = [4053000,202650]
+#temp_ic       = [3500,300]
+#vel_ic        = [0.01,0.01]
+#rho_ic        = [5.13,2.58]
+#mass_frac_ic  = [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],[0.01277243, 0.0, 0.0, 0.10136214, 0.0 , 0.0, 0.0, 0.0, 0.88586543]]
+
+ic_path        = C:\GIT_Fork\ROMify\examples\1D_RDE\ROM_IC.npy
+
+# gas model
+gas_model       = H2/Air Combustion
+flux_scheme     = 1st Order Roe
+limiter	        = False
+limiter_method  = barth
+viscous	        = True
+
+# Visualization
+
+visual          = True
+variable1 	    = Temprature
+variable2 	    = Pressure
+variable3 	    = MF
+variable4 	    = Velocity
+update_interval = 1000
+plot_fom	    = False
+
+
+# Saving
+save_interval = 1000
+
+
+# Profiling
+profiling	= False
+
+# Injcetion
+
+injection                 = True
+injection_state_dir       = C:\GIT_Fork\ROMify\examples\1D_RDE\inject_prim_state.npy
+injector_face_area        = 0.25
+non_injection_portion     = 0.5
+non_injection_tail_portion= 0.3
+
+
+
