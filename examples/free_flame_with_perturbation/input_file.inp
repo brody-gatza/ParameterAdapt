@@ -1,62 +1,73 @@
-# solver setup
-
-solver_mode 		    = Adaptive ROM
-rom_method  		    = Galerkin
-arom_method		        = Direct Adapt
-pod_energy  		    = 99.999
-hyper	    		    = True
-hyper_method		    = QDEIM
-init_training_win 	    = 10
-unsampled_update_freq 	= 10
-fom_results_max_iter    = ""
+# solver mode
+solver_mode   = AROM
 
 # time discretization
-dt            = 1e-9
-num_steps     = 35000
-time_scheme   = Explicit - FD Euler
-
+dt            = 1e-8
+num_steps     = 3500
+time_scheme   = FDF
 
 # space discretization
 x_initial   = 0
-x_final     = 0.03
-cell_number = 1000 
-
-ic_path = C:/GIT_Fork/ROMify/examples/free_flame_with_perturbation/steady_IC_pert.npy
+x_final     = 0.01
+cell_number = 500 
 
 # inlet BC
 rho_inlet        = extrapolate
-vel_inlet        = 0.823675805776555
+vel_inlet        = 0.582289
 press_inlet      = extrapolate
 temp_inlet       = 300
-mass_frac_inlet  = [9.48E-03,5.54E-20,-1.13E-17,1.37E-01,-5.26E-18,-2.00E-18,2.40E-18,2.34E-17,8.54E-01]
+mass_frac_inlet  = [8.62408241e-03, -4.50418926e-19, -8.05978549e-17,1.36881641e-01,-1.83648598e-16, -1.10827066e-15, -1.63931542e-16, -7.94181448e-16 ,8.54494276e-01]
 
 # outlet BC
 rho_outlet        = extrapolate
 vel_outlet        = extrapolate
-press_outlet      = 101325/1000/20000
+press_outlet      = 101325/1000/500000
 temp_outlet       = extrapolate
 mass_frac_outlet  = extrapolate
 
+# Initial Condition
+ic_path = C:/GIT_Fork/ROMify2/examples/free_flame/steady_IC.npy
+
 # gas model
-gas_model       = H2/Air Combustion
+gas_model       = h2o2.yaml
 flux_scheme     = 1st Order Roe
 limiter	        = False
 limiter_method  = minmod
 viscous	        = True
 
 # Visualization
-
 visual          = True
+save_visual     = False
 variable1 	    = Density
 variable2 	    = Pressure
 variable3 	    = Velocity
 variable4 	    = Temprature
 update_interval = 100
-plot_fom	    = False
-
 
 # Saving
-save_interval = 100
+save_interval   = 100
 
 # Profiling
 profiling	    = False
+
+# Injection
+injection       = False
+
+# ROM Setup
+rom_method  		    = Galerkin
+nl_rom_model            = rbf
+arom_method		        = direct
+pod_energy  		    = 99.999
+hyper	    		    = True
+hyper_method		    = QDEIM
+sampling_rate           = 12
+init_training_win 	    = 10
+unsampled_update_freq 	= 10
+
+training_data_dir       = ''
+training_start_iter     = 0
+training_step_iter      = 10
+training_end_iter       = 5000
+
+# Restart 
+arom_restart            = False

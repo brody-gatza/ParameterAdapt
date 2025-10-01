@@ -11,7 +11,7 @@ import os
 import shutil
 
 
-def driver(args,solver_param):
+def driver(solver_param):
 
     # breakpoint()
     

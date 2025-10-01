@@ -4,22 +4,17 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-        
-        
-
-
-        
-
+    
     
         {
             "name": "ROMify Debugger VScode",
             "type": "debugpy",
             "request": "launch",
-            "program": "c:\\GIT_Fork\\ROMify\\main.py",
+            "program": "c:\\GIT_Fork\\ROMify2\\romify.py",
             "console": "integratedTerminal",
             "args": [
-                "c:\\GIT_Fork\\ROMify\\examples\\1D_RDE",
-                "c:\\GIT_Fork\\ROMify\\examples\\1D_RDE\\input_file.inp"
+                "c:\\GIT_Fork\\ROMify2\\examples\\sod_shock_tube",
+                "c:\\GIT_Fork\\ROMify2\\examples\\sod_shock_tube\\input_file.inp"
             ]
         }
     ]

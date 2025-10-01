@@ -160,18 +160,7 @@ def solver_parameters_collector(args,input_param):
     solver_param['vol']           = solver_param['dx']
     solver_param['x']             = np.linspace( solver_param['x_initial'] , solver_param['x_final'] , int(solver_param['cell_number']) )
 
-    if solver_param['gas_model']  == 'Non-Reacting Air':
 
-        solver_param['num_species']   = 0
-        solver_param['num_prim_var']  = 4
-        solver_param['num_state_var'] = 3 
-
-    else:
-
-        
-        solver_param['num_prim_var']  = 4 + solver_param['num_species']
-        solver_param['num_state_var'] = solver_param['num_prim_var'] - 1 # no temp
-    
     return solver_param
 
 def initialize_state(solver_param):
@@ -210,8 +199,6 @@ def initialize_state(solver_param):
 
             state['gas_array_2nd_order'] = ct.SolutionArray(  state['gas'],(1,int(num_subfaces))   )
 
-        # heat release is also plotted part of prim when there is a combustion case
-        state['prim_results_save']      = np.zeros(( num_prim_var+1  , int(solver_param['cell_number'])))
 
     return state
 
@@ -2715,7 +2702,6 @@ def advance_one_time_step(solver_param,rom_param,state,fig,axs,visual_param):
         state['prim_results_save'][-1,:]  = state['heat_release'][2:-2]
 
     # save the data 
-
     if iter % solver_param['save_interval'] == 0:
 
         results_recorder(solver_param,rom_param,state)
@@ -2743,24 +2729,12 @@ def residual_calculator(solver_param,rom_param,state):
 
             state = first_order_roe_viscous_flux_calculator(solver_param,rom_param,state)
 
-    elif solver_param['flux_scheme'] == '2nd Order Roe':
-
-        state = second_order_roe_flux_calculator(solver_param,rom_param,state)
-
-        if solver_param['viscous_flag']:
-
-            state = first_order_roe_viscous_flux_calculator(solver_param,rom_param,state)
-
     # inviscid flux vector
     state   = d_flux_dx_calculator(solver_param,rom_param,state)
 
-    if solver_param['gas_model'] != 'Non-Reacting Air':
+    if solver_param['gas_model'] != 'Air':
 
         state = source_calculator(solver_param,rom_param,state)
-
-        # if solver_param['injection']:
-
-        #     state = periodic_injection(solver_param,state)
 
     return state
 
