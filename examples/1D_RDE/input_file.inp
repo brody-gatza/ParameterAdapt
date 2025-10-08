@@ -2,14 +2,14 @@
 solver_mode   = FOM
 
 # time discretization
-dt            = 1.25e-11
-num_steps     = 36000
+dt            = 2e-9
+num_steps     = 80000
 time_scheme   = FDF
 
 # space discretization
 x_initial   = 0
 x_final     = 0.0288
-cell_number = 500
+cell_number = 200
 
 # inlet BC
 rho_inlet         = periodic
@@ -27,7 +27,7 @@ mass_frac_outlet  = periodic
 
 
 # Initial Condition
-ic_path        = C:\GIT_Fork\ROMify\examples\1D_RDE\IC_ramp_PR_40_500_new.npy
+ic_path        = C:\GIT_Fork\ROMify\examples\1D_RDE\IC_ramp_PR_2_200.npy
 
 
 # gas model
@@ -54,8 +54,9 @@ profiling	    = False
 
 # Injection
 injection                 = True
-injection_state_dir       = C:\GIT_Fork\ROMify\examples\1D_RDE\inject_prim_state.npy
-injector_face_area        = 0.25
+injection_state_dir       = C:\GIT_Fork\ROMify\examples\1D_RDE\Injection_Files\100ms_4atm_inject_prim_state.npy
+injector_face_area        = 1
+injector_area_ratio       = 0.8
 non_injection_portion     = 0.5
 non_injection_tail_portion= 0.3
 
@@ -65,8 +66,8 @@ nl_rom_model            = rbf
 arom_method		        = direct
 pod_energy  		    = 99.999
 hyper	    		    = True
-hyper_method		    = QDEIM
-sampling_rate           = 2
+hyper_method		    = FGS
+sampling_rate           = 10
 init_training_win 	    = 10
 unsampled_update_freq 	= 10
 

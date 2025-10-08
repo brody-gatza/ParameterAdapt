@@ -100,6 +100,7 @@ def init_solver_param(args,input_param):
 
         solver_param['injcetion_prim_state']       = np.load(input_param['injection_state_dir'])
         solver_param['injector_face_area']         = float(input_param['injector_face_area'])
+        solver_param['injector_area_ratio']        = float(input_param['injector_area_ratio'])
         solver_param['non_inj_portion']            = float(input_param['non_injection_portion'])
         solver_param['non_inj_tail_portion']       = float(input_param['non_injection_tail_portion'])
 

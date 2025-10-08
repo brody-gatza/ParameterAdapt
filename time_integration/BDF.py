@@ -53,8 +53,8 @@ def advance_time(solver_param,rom_param,state,physics):
         sol = newton_krylov(
             lambda q: implicit_bdf_residual_calculator(q, q_guess, solver_param, rom_param, state, physics),
             q_guess,
-            maxiter=20,
-            f_tol  = 1e-3,
+            maxiter=30,
+            f_tol  = 1e-4,
             method ='gmres'
         )
 

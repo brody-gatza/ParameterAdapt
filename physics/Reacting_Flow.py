@@ -1,6 +1,7 @@
 import numpy as np
 import cantera as ct
 from scipy.interpolate import interp1d
+from scipy.optimize import fsolve
 
 
 from utils import reshape_func
@@ -583,6 +584,18 @@ def d_flux_dx_calculator(solver_param,rom_param,state):
     
     return state
 
+def area_mach_relation(M, gamma=1.4):
+    """Returns A/A* for given Mach number."""
+    term = (2/(gamma+1)) * (1 + (gamma-1)/2 * M**2)
+    return (1/M) * term ** ((gamma+1)/(2*(gamma-1)))
+
+def mach_from_area_ratio(A_ratio, gamma=1.4, supersonic=False):
+    """Inverts A/A* to get Mach number."""
+    func = lambda M: area_mach_relation(M, gamma) - A_ratio
+    M_guess = 2.0 if supersonic else 0.2
+    M_solution, = fsolve(func, M_guess)
+    return M_solution
+
 def injection_correction(solver_param,state):
 
     # read current states
@@ -605,7 +618,7 @@ def injection_correction(solver_param,state):
     add_indx    = state['injection_add_final']
     sub_indx    = state['injection_sub_init'] 
 
-    indx_init   = np.argmax(P) - sub_indx
+    indx_init   = np.argmax(np.abs(u)) - sub_indx
     indx_final  = indx_init + add_indx
     detonation  = np.arange(indx_init,indx_final)%(solver_param['cell_number']+4)
     inj_indx    = np.arange(0,solver_param['cell_number']+4,1)
@@ -616,13 +629,18 @@ def injection_correction(solver_param,state):
     gas_array_inject   = ct.SolutionArray(state['gas'],(1,len(inj_indx)))
     gas_array_mix      = ct.SolutionArray(state['gas'],(1,len(inj_indx)))
 
-    # compute injection rate 
-    rho_in      = solver_param['injcetion_prim_state'][0]
-    v_in        = solver_param['injcetion_prim_state'][1]
-    P_in        = solver_param['injcetion_prim_state'][2]
-    T_in        = solver_param['injcetion_prim_state'][3]
-    Y_in        = solver_param['injcetion_prim_state'][4:]
+    # compute injected fluid properties 
+    # ref: properties before entering to injector
+    # inj: properties after entering to injector
 
+    rho_in          = solver_param['injcetion_prim_state'][0]
+    v_in            = solver_param['injcetion_prim_state'][1]
+    P_in            = solver_param['injcetion_prim_state'][2]
+    T_in            = solver_param['injcetion_prim_state'][3]
+    Y_in            = solver_param['injcetion_prim_state'][4:] 
+
+
+    # compute injection rate 
     area_in     = solver_param['injector_face_area']
 
     mass_current= rho * vol
