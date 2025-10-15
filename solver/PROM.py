@@ -110,12 +110,17 @@ def results_recorder(solver_param,state,rom_param=None):
     if solver_param['iter'] == 0:
 
         np.save(os.path.join(dir_results,'basis'         ,f"{save_title}_basis.npy")          , rom_param['basis'])
-        np.save(os.path.join(dir_results,'samples_user'  ,f"{save_title}_samples_user.npy")   , rom_param['S_indx_user'])
-        np.save(os.path.join(dir_results,'samples_solver',f"{save_title}_samples_solver.npy") , rom_param['S_indx_solver'])
         np.save(os.path.join(dir_results,'q_r'           ,f"{save_title}_q_r.npy")            , state['qr'])
         np.save(os.path.join(dir_results,'q_ref'         ,f"{save_title}_q_ref.npy")          , rom_param['q_ref'])
         np.save(os.path.join(dir_results,'norm'          ,f"{save_title}_norm.npy")           , rom_param['norm'])
         np.save(os.path.join(dir_results,'denorm'        ,f"{save_title}_denorm.npy")         , rom_param['denorm'])
+
+        if solver_param['hyper']:
+
+            np.save(os.path.join(dir_results,'samples_user'  ,f"{save_title}_samples_user.npy")   , rom_param['S_indx_user'])
+            np.save(os.path.join(dir_results,'samples_solver',f"{save_title}_samples_solver.npy") , rom_param['S_indx_solver'])
+
+
 
 def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=None):
 
@@ -130,13 +135,22 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
     norm             = rom_param['norm']
     denorm           = rom_param['denorm']
     basis            = rom_param['basis']
-    pcc              = rom_param['hyper_precompute']
+    
 
     # find the residual only at sampled points
     state              = physics.residual_calculator(solver_param,rom_param,state)
 
-    # apply hyper-reduction precomputed term with V^T term already applied (taking advantage of orthonormality to reduce cost)
-    rhs     = pcc @ (norm[rom_param['S_indx_solver']]*(state['d_flux_dx']-q_ref[rom_param['S_indx_solver']]))
+    if solver_param['hyper']:
+        # precomputed term of hyper-reduction V(S^TV)^+
+        pcc              = rom_param['hyper_precompute']
+
+        # apply hyper-reduction precomputed term with V^T term already applied (taking advantage of orthonormality to reduce cost)
+        rhs     = pcc @ (norm[rom_param['S_indx_solver']]*(state['d_flux_dx']-q_ref[rom_param['S_indx_solver']]))
+
+    else:
+
+        full_res    = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],state['d_flux_dx'])
+        rhs         = rom_param['basis'].T @ (norm*(full_res-q_ref))
 
     # prepare variable for time integration
     state['d_flux_dx'] = rhs
