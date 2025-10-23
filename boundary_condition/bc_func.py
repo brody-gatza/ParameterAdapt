@@ -30,7 +30,7 @@ def update_ghost_cell(solver_param,state):
 
         if inlet_bc == 'periodic':
 
-                Q_prim_user[eqn,0:2] = Q_prim_user[eqn,-3].reshape(-1,1)
+                Q_prim_user[eqn,0:2] = Q_prim_user[eqn,-4:-2]
 
                 
         ##### wall ##### 
@@ -104,7 +104,7 @@ def update_ghost_cell(solver_param,state):
 
         if outlet_bc == 'periodic':
 
-            Q_prim_user[eqn,-2:] = Q_prim_user[eqn,2].reshape(-1,1)
+            Q_prim_user[eqn,-2:] = Q_prim_user[eqn,2:4]
 
         ##### wall ##### 
 

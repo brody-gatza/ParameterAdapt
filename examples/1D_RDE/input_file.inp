@@ -3,7 +3,7 @@ solver_mode   = FOM
 
 # time discretization
 dt            = 2e-9
-num_steps     = 80000
+num_steps     = 500000
 time_scheme   = FDF
 
 # space discretization
@@ -54,7 +54,7 @@ profiling	    = False
 
 # Injection
 injection                 = True
-injection_state_dir       = C:\GIT_Fork\ROMify\examples\1D_RDE\Injection_Files\100ms_4atm_inject_prim_state.npy
+injection_state_dir       = C:\GIT_Fork\ROMify\examples\1D_RDE\Injection_Files\h2o2ar_phi_1_200ms_025atm_inject_prim_state.npy
 injector_face_area        = 1
 injector_area_ratio       = 0.8
 non_injection_portion     = 0.5
@@ -64,17 +64,20 @@ non_injection_tail_portion= 0.3
 rom_method  		    = Galerkin
 nl_rom_model            = rbf
 arom_method		        = direct
-pod_energy  		    = 99.999
+pod_energy  		    = 99
 hyper	    		    = True
-hyper_method		    = FGS
+hyper_method		    = QDEIM
 sampling_rate           = 10
 init_training_win 	    = 10
 unsampled_update_freq 	= 10
 
-training_data_dir       = C:\GIT_Fork\ROMify2\examples\sod_shock_tube\FOM_results
-training_start_iter     = 0
+training_data_dir       = C:\GIT_Fork\ROMify\examples\1D_RDE\FOM_results_11cycles
+training_start_iter     = 50000
 training_step_iter      = 10
-training_end_iter       = 5000
+training_end_iter       = 100000
+
+rom_basis_generate       = False
+rom_basis_dir            = C:\GIT_Fork\ROMify\examples\sod_shock_tube\precomputed_basis
 
 sarom_training_step      = 100
 sarom_srom_solver        = PROM

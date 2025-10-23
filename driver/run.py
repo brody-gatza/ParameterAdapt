@@ -21,14 +21,17 @@ def run(solver_param):
     # initialize time integration module
     time_integration = init_func.init_time_integration(solver_param)
 
-    # initialize solver module
-    solver , rom_param   =  init_func.init_solver(solver_param,state)
-
     # get the initial condition
     state     = init_func.ic_generator(solver_param,state)
 
     # convert prim to cons (initial condition in cons vars)
     state     = physics.prim2cons_converter(solver_param, state)
+
+    # initialize solver module
+    solver , rom_param, state   =  init_func.init_solver(solver_param,state)
+
+    # update prims (in ROM cases cons can be replaced so prim update is needed)
+    state                       = physics.cons2prim_converter(solver_param, state)
 
     # create folders for storing data
     init_func.init_dir(solver_param)

@@ -24,7 +24,7 @@ def prim2cons_converter(solver_param, state):
     Y   = Q_prim_user[4:,:]
 
     Y_cantera = reshape_func.find_mass_fraction_full_cantera(Y)
-    
+
     state['gas_array'].TPY = T,P,Y_cantera
 
     internal_energy = np.squeeze(state['gas_array'].int_energy_mass)
@@ -62,76 +62,118 @@ def cons2prim_converter(solver_param, state):
 
     internal_energy = (energy/vol/rho)-(0.5*vx**2)
 
-    try:
+    # try:
 
-        state['gas_array'].UVY = internal_energy,sp_vol,MF_ct
+    state['gas_array'].UVY = internal_energy,sp_vol,MF_ct
 
-        T = np.squeeze(state['gas_array'].T)
-        P = np.squeeze(state['gas_array'].P)
+    T = np.squeeze(state['gas_array'].T)
+    P = np.squeeze(state['gas_array'].P)
 
-    except:
+    # except:
 
-        # sometimes rom can give shitty results but it might recover in the later time steps
-        # but when cantera gets invalid states directly raises an error and stops the whole simulation
-        # to avoid this issue I implemented this sloppy way of finding prim vars 
-        # I am just finding a coefficient (psudo Cp, Cv) that converts energy term to pressure and temperature 
-        # by looking at the previous time step solution and finally I trim the invalid results by max and min pressure
+    #     # vol              = solver_param['vol']
 
-        Q_prim   = state['Q_prim']
+    #     # Q_cons           = state['Q_cons']
+    #     Q_prim           = state['Q_prim']
 
-        Q_prim_user = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],
-                                                                solver_param['cell_number'],
-                                                                Q_prim)
+    #     # Q_cons_user      = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
+    #     Q_prim_user      = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
+
+    #     rho               = Q_prim_user[0,:]
+    #     vx                = Q_prim_user[1,:]
+    #     P                 = Q_prim_user[2,:]
+    #     T                 = Q_prim_user[3,:]
+    #     MF                = Q_prim_user[4:,:]
+
+    #     P_min = solver_param['rom_limiter_P'][0]
+    #     P_max = solver_param['rom_limiter_P'][1]
+
+    #     T_min = solver_param['rom_limiter_T'][0]
+    #     T_max = solver_param['rom_limiter_T'][1]
+
+    #     if np.any(P>P_max):
+
+    #         P[P>P_max] = P_max
+
+    #     if np.any(P<P_min):
+
+    #         P[P<P_min] = P_min
+
+    #     if np.any(T>T_max):
+
+    #         T[T>T_max] = T_max
+
+    #     if np.any(T<T_min):
+
+    #         T[T<T_min] = T_min
+
+        # state['Q_prim'] = np.vstack((rho,vx,P,T,MF)).ravel()
+
+        # return state
+
+
+
+    #     # sometimes rom can give shitty results but it might recover in the later time steps
+    #     # but when cantera gets invalid states directly raises an error and stops the whole simulation
+    #     # to avoid this issue I implemented this sloppy way of finding prim vars 
+    #     # I am just finding a coefficient (psudo Cp, Cv) that converts energy term to pressure and temperature 
+    #     # by looking at the previous time step solution and finally I trim the invalid results by max and min pressure
+
+    #     Q_prim   = state['Q_prim']
+
+    #     Q_prim_user = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],
+    #                                                             solver_param['cell_number'],
+    #                                                             Q_prim)
         
-        rho_spare = Q_prim_user[0,:]
-        vx_spare  = Q_prim_user[1,:]
-        P_spare   = Q_prim_user[2,:]
-        T_spare   = Q_prim_user[3,:]
-        Y_spare   = Q_prim_user[4:,:]
-        Y_spare_ct= reshape_func.find_mass_fraction_full_cantera(Y_spare)
+    #     rho_spare = Q_prim_user[0,:]
+    #     vx_spare  = Q_prim_user[1,:]
+    #     P_spare   = Q_prim_user[2,:]
+    #     T_spare   = Q_prim_user[3,:]
+    #     Y_spare   = Q_prim_user[4:,:]
+    #     Y_spare_ct= reshape_func.find_mass_fraction_full_cantera(Y_spare)
 
-        state['gas_array'].TPY = T_spare, P_spare, Y_spare_ct
+    #     state['gas_array'].TPY = T_spare, P_spare, Y_spare_ct
 
-        coef_temp  = np.squeeze(state['gas_array'].int_energy_mass)/T_spare
-        coef_press = np.squeeze(state['gas_array'].int_energy_mass)/P_spare
+    #     coef_temp  = np.squeeze(state['gas_array'].int_energy_mass)/T_spare
+    #     coef_press = np.squeeze(state['gas_array'].int_energy_mass)/P_spare
 
-        T = np.abs(internal_energy / coef_temp)
-        P = np.abs(internal_energy / coef_press)
+    #     T = np.abs(internal_energy / coef_temp)
+    #     P = np.abs(internal_energy / coef_press)
 
-        Q_prim = np.vstack((rho,vx,P,T,MF))
+    #     Q_prim = np.vstack((rho,vx,P,T,MF))
 
-        P_max = np.max(P_spare)
-        P_min = np.min(P_spare)
+    #     P_max = np.max(P_spare)
+    #     P_min = np.min(P_spare)
 
-        P_max_indx = np.argmax(P_spare)
-        P_min_indx = np.argmin(P_spare)
+    #     P_max_indx = np.argmax(P_spare)
+    #     P_min_indx = np.argmin(P_spare)
 
-        indx_pass_max = np.where(Q_prim[2,:]>P_max)[0]
-        indx_pass_min = np.where(Q_prim[2,:]<P_min)[0]
+    #     indx_pass_max = np.where(Q_prim[2,:]>P_max)[0]
+    #     indx_pass_min = np.where(Q_prim[2,:]<P_min)[0]
 
-        Q_prim[:,indx_pass_max] = Q_prim_user[:,P_max_indx].reshape(-1,1)
-        Q_prim[:,indx_pass_min] = Q_prim_user[:,P_min_indx].reshape(-1,1)
+    #     Q_prim[:,indx_pass_max] = Q_prim_user[:,P_max_indx].reshape(-1,1)
+    #     Q_prim[:,indx_pass_min] = Q_prim_user[:,P_min_indx].reshape(-1,1)
 
-        rho = Q_prim_user[0,:]
-        vx  = Q_prim_user[1,:]
-        P   = Q_prim_user[2,:]
-        T   = Q_prim_user[3,:]
-        Y   = Q_prim_user[4:,:]
+    #     rho = Q_prim_user[0,:]
+    #     vx  = Q_prim_user[1,:]
+    #     P   = Q_prim_user[2,:]
+    #     T   = Q_prim_user[3,:]
+    #     Y   = Q_prim_user[4:,:]
 
-        Y_ct= reshape_func.find_mass_fraction_full_cantera(Y)
+    #     Y_ct= reshape_func.find_mass_fraction_full_cantera(Y)
 
-        state['gas_array'].TPY = T, P, Y_ct
+    #     state['gas_array'].TPY = T, P, Y_ct
 
-        internal_energy = np.squeeze(state['gas_array'].int_energy_mass)
+    #     internal_energy = np.squeeze(state['gas_array'].int_energy_mass)
 
-        internal_energy_tot = internal_energy + (0.5 * (vx **2))
+    #     internal_energy_tot = internal_energy + (0.5 * (vx **2))
 
-        mass   = rho * vol
-        momx   = rho * vx * vol
-        energy = (rho * internal_energy_tot) * vol
-        mass_species = rho * Y * vol
+    #     mass   = rho * vol
+    #     momx   = rho * vx * vol
+    #     energy = (rho * internal_energy_tot) * vol
+    #     mass_species = rho * Y * vol
 
-        state['Q_cons'] = np.vstack((mass,momx,energy,mass_species)).ravel()
+    #     state['Q_cons'] = np.vstack((mass,momx,energy,mass_species)).ravel()
 
     state['Q_prim'] = np.vstack((rho,vx,P,T,MF)).ravel()
 
@@ -584,18 +626,6 @@ def d_flux_dx_calculator(solver_param,rom_param,state):
     
     return state
 
-def area_mach_relation(M, gamma=1.4):
-    """Returns A/A* for given Mach number."""
-    term = (2/(gamma+1)) * (1 + (gamma-1)/2 * M**2)
-    return (1/M) * term ** ((gamma+1)/(2*(gamma-1)))
-
-def mach_from_area_ratio(A_ratio, gamma=1.4, supersonic=False):
-    """Inverts A/A* to get Mach number."""
-    func = lambda M: area_mach_relation(M, gamma) - A_ratio
-    M_guess = 2.0 if supersonic else 0.2
-    M_solution, = fsolve(func, M_guess)
-    return M_solution
-
 def injection_correction(solver_param,state):
 
     # read current states
@@ -707,30 +737,92 @@ def injection_correction(solver_param,state):
 
     Q_cons_user[:,inj_indx] = Q_cons_inject
 
-    smoothing_start_indx = (detonation[0]-10)%(solver_param['cell_number']+4)
-    smoothing_end_indx   = (detonation[0]+10)%(solver_param['cell_number']+4)
+    # smoothing_start_indx = (detonation[0]-10)%(solver_param['cell_number']+4) 
+    # smoothing_end_indx   = (detonation[0]+10)%(solver_param['cell_number']+4) 
 
-    q_left  = Q_cons_user[:,smoothing_start_indx]
-    q_right = Q_cons_user[:,smoothing_end_indx]
+    # q_left  = Q_cons_user[:,smoothing_start_indx] 
+    # q_right = Q_cons_user[:,smoothing_end_indx]
 
-    x_knwon = np.array([0,20])
-    y_known = np.array([q_left,q_right]).T
+    # x_knwon = np.array([0,20]) 
+    # y_known = np.array([q_left,q_right]).T 
+    # f_interp = interp1d(x_knwon,y_known,kind='linear') 
+    # x = np.arange(0,20) 
+    # q_ramp = f_interp(x) 
 
-    f_interp = interp1d(x_knwon,y_known,kind='linear')
+    # if smoothing_start_indx < smoothing_end_indx: 
+    #     Q_cons_user[:, smoothing_start_indx:smoothing_end_indx] = q_ramp 
+        
+    # else: 
+    #     wrap_len = (solver_param['cell_number']+4) - smoothing_start_indx 
+    #     Q_cons_user[:, smoothing_start_indx:] = q_ramp[:, :wrap_len] 
+    #     Q_cons_user[:, :smoothing_end_indx]   = q_ramp[:, wrap_len:]
 
-    x        = np.arange(0,20)
+    # # --- Reapply periodic BCs to maintain consistency ---
+    # Q_cons_user[:, 0:2] = Q_cons_user[:, -4:-2]   # left ghosts
+    # Q_cons_user[:, -2:] = Q_cons_user[:, 2:4]  # right ghosts
 
-    q_ramp   = f_interp(x)
-
-    if smoothing_start_indx < smoothing_end_indx:
-        Q_cons_user[:, smoothing_start_indx:smoothing_end_indx] = q_ramp
+    ncell_total = solver_param['cell_number'] + 4  # Total cells including ghosts
+    ncell_interior = solver_param['cell_number']   # Interior cells only
+    
+    # Define smoothing region (10 cells on each side of detonation)
+    smoothing_width = 10
+    smoothing_start = (detonation[0] - smoothing_width) % ncell_interior
+    smoothing_end = (detonation[0] + smoothing_width) % ncell_interior
+    
+    # Get the actual smoothing length (accounts for periodic wrapping)
+    if smoothing_start <= smoothing_end:
+        smoothing_length = smoothing_end - smoothing_start
     else:
-        wrap_len = (solver_param['cell_number']+4) - smoothing_start_indx
-        Q_cons_user[:, smoothing_start_indx:] = q_ramp[:, :wrap_len]
-        Q_cons_user[:, :smoothing_end_indx]   = q_ramp[:, wrap_len:]
-
-    state['Q_cons'] = Q_cons_user.ravel()
-
+        smoothing_length = (ncell_interior - smoothing_start) + smoothing_end
+    
+    # Adjust for ghost cells - work only on interior cells
+    # Ghost cells are typically at indices: [0:2] and [-2:]
+    interior_start = 2  # First interior cell index
+    interior_end = interior_start + ncell_interior
+    
+    # Convert to absolute indices including ghost cells
+    abs_start = interior_start + smoothing_start
+    abs_end = interior_start + smoothing_end
+    
+    # Get the boundary values for interpolation
+    # Make sure we're using interior cells, not ghost cells
+    q_left_idx = interior_start + ((detonation[0] - smoothing_width) % ncell_interior)
+    q_right_idx = interior_start + ((detonation[0] + smoothing_width) % ncell_interior)
+    
+    q_left = Q_cons_user[:, q_left_idx]
+    q_right = Q_cons_user[:, q_right_idx]
+    
+    # Create interpolation
+    x_known = np.array([0, smoothing_length])
+    y_known = np.array([q_left, q_right]).T
+    f_interp = interp1d(x_known, y_known, kind='linear', axis=1)
+    
+    # Generate smoothed values
+    x_interp = np.arange(0, smoothing_length)
+    q_ramp = f_interp(x_interp)
+    
+    # Apply smoothing with proper periodic handling
+    if smoothing_start < smoothing_end:
+        # No wrap-around case
+        start_idx = interior_start + smoothing_start
+        end_idx = interior_start + smoothing_end
+        Q_cons_user[:, start_idx:end_idx] = q_ramp
+    else:
+        # Wrap-around case
+        # First segment: from start to end of domain
+        wrap_len1 = ncell_interior - smoothing_start
+        start_idx1 = interior_start + smoothing_start
+        Q_cons_user[:, start_idx1:start_idx1 + wrap_len1] = q_ramp[:, :wrap_len1]
+        
+        # Second segment: from start of domain to end point
+        wrap_len2 = smoothing_end
+        start_idx2 = interior_start
+        Q_cons_user[:, start_idx2:start_idx2 + wrap_len2] = q_ramp[:, wrap_len1:wrap_len1 + wrap_len2]
+    
+    # Reapply periodic BCs (important after modification)
+    Q_cons_user[:, 0:2] = Q_cons_user[:, interior_end-2:interior_end]    # left ghosts from right interior
+    Q_cons_user[:, -2:] = Q_cons_user[:, interior_start:interior_start+2]  # right ghosts from left interior
+    
     return state
 
 def source_calculator(solver_param,rom_param,state):

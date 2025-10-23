@@ -76,4 +76,5 @@ def assemble_snapshots(solver_param):
         file_name_cons = str(iter)+'iteration'+'_cons.npy'
         training_data_cons[:, :, indx] = np.load(os.path.join(solver_param['training_data_dir'], file_name_cons))
 
+    print('Assembling Snapshots Completed!')
     return training_data_cons
