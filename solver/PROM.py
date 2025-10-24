@@ -63,7 +63,7 @@ def precomputer(solver_param):
         truncation_indx = np.where(np.array(POD_res_energy) < POD_energy_limit)[0][0]
 
         # finalize the basis
-        basis = V[:,0:truncation_indx]
+        basis = V[:,0:truncation_indx+1]
 
         # wrap up and exit the function
         denormalizor = np.repeat(norm_factor, solver_param['cell_number'])

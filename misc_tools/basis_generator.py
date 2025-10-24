@@ -1,13 +1,13 @@
 import os
 import numpy as np
 
-data_dir    = r'C:\GIT_Fork\ROMify\examples\1D_RDE\FOM_results_11cycles\cons_gathered.npy'
-pod_energy  = 95
-cell_number = 200
+data_dir    = r'C:\GIT_Fork\ROMify\examples\1D_RDE\FOM_results2\cons_gathered.npy'
+pod_energy  = 99.999
+cell_number = 500
 
 main_data = np.load(data_dir)
 
-training_data_cons = main_data[:,:,5000:10000:10]
+training_data_cons = main_data[:,:,500:1000:10]
 
 # number of snapshot
 num_snapshot = len(training_data_cons[0,0,:])
@@ -42,7 +42,7 @@ POD_energy_limit = 100-pod_energy
 truncation_indx = np.where(np.array(POD_res_energy) < POD_energy_limit)[0][0]
 
 # finalize the basis
-basis = V[:,0:truncation_indx]
+basis = V[:,0:truncation_indx+1]
 
 # wrap up and exit the function
 denormalizor = np.repeat(norm_factor, cell_number)
@@ -57,9 +57,9 @@ import matplotlib.pyplot as plt
 fig, ax = plt.subplots(1,1)
 line0, = ax.plot([],[],c='tab:blue',ls='-')
 line1, = ax.plot([],[],c='tab:red' ,ls='--')
-x = np.arange(0,200)
+x = np.arange(0,500)
 
-iter_list = np.arange(5000,10000,1)
+iter_list = np.arange(0,100,10)
 
 for indx , iter in enumerate(iter_list):
 
@@ -73,11 +73,11 @@ for indx , iter in enumerate(iter_list):
 
     q_cons_rep = q_ref + denorm *(basis@qr)
 
-    line0.set_data(x,q_cons[400:600])
-    line1.set_data(x,q_cons_rep[400:600])
+    line0.set_data(x,q_cons[0:500])
+    line1.set_data(x,q_cons_rep[0:500])
 
     ax.set_ylim([-50,450])
-    ax.set_xlim([-1,201])
+    ax.set_xlim([-1,501])
 
     plt.pause(0.001)
 

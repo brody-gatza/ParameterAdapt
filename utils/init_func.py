@@ -102,7 +102,7 @@ def init_solver(solver_param,state):
 
         rom_param   = solver_module.precomputer(solver_param)
         state['qr'] = rom_param['qr0']
-        new_ic_cons = rom_param['q_ref'] + (rom_param['cent_norm_train_data'][:,0]*rom_param['denorm'])
+        new_ic_cons = rom_param['q_ref'] + (rom_param['basis']@rom_param['qr0']*rom_param['denorm'])
         state['Q_cons'] = reshape_func.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],new_ic_cons)
 
         if solver_param['hyper']:
@@ -117,7 +117,7 @@ def init_solver(solver_param,state):
 
         rom_param   = solver_module.precomputer(solver_param)
         state['qr'] = rom_param['qr0']
-        new_ic_cons = rom_param['q_ref'] + (rom_param['cent_norm_train_data'][:,0]*rom_param['denorm'])
+        new_ic_cons = rom_param['q_ref'] + (rom_param['basis']@rom_param['qr0']*rom_param['denorm'])
         state['Q_cons'] = reshape_func.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],new_ic_cons)
 
         if solver_param['hyper']:
@@ -133,7 +133,7 @@ def init_solver(solver_param,state):
 
         rom_param   = solver_module.precomputer(solver_param)
         state['qr'] = rom_param['qr0']
-        new_ic_cons = rom_param['q_ref'] + (rom_param['cent_norm_train_data'][:,0]*rom_param['denorm'])
+        new_ic_cons = rom_param['q_ref'] + (rom_param['basis']@rom_param['qr0']*rom_param['denorm'])
         state['Q_cons'] = reshape_func.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],new_ic_cons)
 
         if solver_param['hyper']:
@@ -149,7 +149,7 @@ def init_solver(solver_param,state):
 
         rom_param   = solver_module.precomputer(solver_param)
         state['qr'] = rom_param['qr0']
-        new_ic_cons = rom_param['q_ref'] + (rom_param['cent_norm_train_data'][:,0]*rom_param['denorm'])
+        new_ic_cons = rom_param['q_ref'] + (rom_param['basis']@rom_param['qr0']*rom_param['denorm'])
         state['Q_cons'] = reshape_func.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],new_ic_cons)
 
         if solver_param['hyper']:
