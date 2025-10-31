@@ -253,7 +253,7 @@ def ic_generator(solver_param,state):
                     MF[:,cell] = MF_np
                 
             state['Q_prim'] = np.vstack((rho,vx,P,T,MF)).ravel()
-
+    
     return state
 
 def init_dir(solver_param):

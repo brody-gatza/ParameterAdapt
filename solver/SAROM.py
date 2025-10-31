@@ -66,6 +66,8 @@ def init_inc_SVD(solver_param,state,rom_param):
 
 def update_inc_SVD(solver_param,state,rom_param):
 
+    # this is the algorithm 4 from zhang's incremental SVD paper
+
     Q_cons_current_step      = state['Q_cons']
 
     Q_cons_current_step      = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],

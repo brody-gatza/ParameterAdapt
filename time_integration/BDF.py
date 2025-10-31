@@ -15,32 +15,61 @@ def implicit_bdf_residual_calculator(q,q_old,solver_param,rom_param,state,physic
 
     len_Q_cons_full = (solver_param['cell_number']+4) * solver_param['num_state_var']
 
-    # must be the case when hyper-reduction is used
-
-    if len(state['Q_cons']) != len_Q_cons_full:
-
-        Q_cons_old_int                             = state['cons_results_save'].ravel()
-
-        Q_cons_old_int[rom_param['S_indx_solver']] = q
-
-        Q_cons_old_solver = reshape_func.solver_add_ghost(solver_param['cell_number'],
-                                                          solver_param['num_state_var'],
-                                                          Q_cons_old_int)
-        
-        state['Q_cons']   = Q_cons_old_solver
-
     # must be the case in FOM
+    if len(q) == len_Q_cons_full:
+
+        state           = physics.residual_calculator(solver_param,rom_param,state)
+        flux_res        = state['d_flux_dx']
+        dt              = solver_param['dt']
+
+        res             = q - q_old - dt * flux_res
+
+        # state['Q_cons'] = q
+
+    # must be the case in ROM
     else:
 
-        state['Q_cons'] = q
+        num_mode = len(rom_param['basis'][0,:])
 
-    
-    state           = physics.residual_calculator(solver_param,rom_param,state)
-    state['Q_cons'] = q     # rolling back to original value to not increase the size of matrix if hyper-reduction is used
-    flux_res        = state['d_flux_dx']
-    dt              = solver_param['dt']
+        # must be the case when hyper-reduction is used in projected space
+        if len(q) == num_mode:
 
-    res             = q - q_old - dt * flux_res
+            qr                = q
+            Q_cons_solver_int = rom_param['q_ref'] + rom_param['denorm'] * (rom_param['basis']@qr)
+
+            Q_cons_solver = reshape_func.solver_add_ghost(solver_param['cell_number'],
+                                                            solver_param['num_state_var'],
+                                                            Q_cons_solver_int)            
+
+            state['Q_cons']   = Q_cons_solver
+            state             = physics.residual_calculator(solver_param,rom_param,state)
+            # state['Q_cons']   = qr
+            cent_denorm_res   = rom_param['norm'][rom_param['S_indx_solver']]*(state['d_flux_dx']-rom_param['q_ref'][rom_param['S_indx_solver']])
+            flux_res          = rom_param['hyper_precompute'] @ cent_denorm_res
+            dt                = solver_param['dt']
+            res               = q - q_old - dt * flux_res
+
+
+        # must be the case when hyper-reduction is used in full space
+        else:
+
+            Q_cons_old_int                             = state['cons_results_save'].ravel()
+
+            Q_cons_old_int[rom_param['S_indx_solver']] = q
+
+            Q_cons_old_solver = reshape_func.solver_add_ghost(solver_param['cell_number'],
+                                                            solver_param['num_state_var'],
+                                                            Q_cons_old_int)
+            
+            state['Q_cons']   = Q_cons_old_solver
+
+
+            state           = physics.residual_calculator(solver_param,rom_param,state)
+            # state['Q_cons'] = q     # rolling back to original value to not increase the size of matrix if hyper-reduction is used
+            flux_res        = state['d_flux_dx']
+            dt              = solver_param['dt']
+
+            res             = q - q_old - dt * flux_res
 
     return res
 
@@ -54,9 +83,11 @@ def advance_time(solver_param,rom_param,state,physics):
             lambda q: implicit_bdf_residual_calculator(q, q_guess, solver_param, rom_param, state, physics),
             q_guess,
             maxiter=30,
-            f_tol  = 1e-4,
+            f_tol  = 6e-6,
             method ='gmres'
         )
+
+        state['Q_cons'] = sol
 
     except NoConvergence as e:
         # The last iterate is stored in e.args[0]

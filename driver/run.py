@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 
 from utils import init_func
 from visual import visual_func
+from utils import reshape_func
 
 def run(solver_param):
 
@@ -35,6 +36,8 @@ def run(solver_param):
 
     # create folders for storing data
     init_func.init_dir(solver_param)
+
+    state['cons_results_save'] = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],state['Q_cons'])[:,2:-2]
 
     # initialize the visualization
     if solver_param['visual']:
