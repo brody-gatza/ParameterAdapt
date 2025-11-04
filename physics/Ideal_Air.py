@@ -50,7 +50,7 @@ def cons2prim_converter(solver_param, state):
 
     return state
 
-def first_order_roe_inviscid_flux_calculator(solver_param,rom_param,state):
+def second_order_roe_inviscid_flux_calculator(solver_param,rom_param,state):
     
     state            = cons2prim_converter(solver_param,state)
     state            = bc_func.update_ghost_cell(solver_param,state)
@@ -238,9 +238,9 @@ def d_flux_dx_calculator(solver_param,rom_param,state):
 
 def residual_calculator(solver_param,rom_param,state):
     
-    if solver_param['flux_scheme'] == '1st Order Roe':
+    if solver_param['flux_scheme'] == '2nd Order Roe':
 
-        state = first_order_roe_inviscid_flux_calculator(solver_param,rom_param,state)
+        state = second_order_roe_inviscid_flux_calculator(solver_param,rom_param,state)
 
     # apply flux vector
     state   = d_flux_dx_calculator(solver_param,rom_param,state)
