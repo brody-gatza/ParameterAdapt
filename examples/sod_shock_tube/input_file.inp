@@ -1,9 +1,9 @@
 # solver
-solver_mode   = ROM
+solver_mode   = AROM
 
 # time discretization
 dt            = 5e-5
-num_steps     = 3000
+num_steps     = 5000
 time_scheme   = FDF
 
 # space discretization
@@ -39,7 +39,7 @@ mass_frac_ic  = [[1.0, 0.0],[1.0, 0.0]]
 
 # gas model
 gas_model       = Air
-flux_scheme     = 1st Order Roe
+flux_scheme     = 2nd Order Roe
 limiter	        = False
 limiter_method  = minmod
 viscous	        = False

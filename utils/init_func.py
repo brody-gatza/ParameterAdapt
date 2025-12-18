@@ -200,6 +200,14 @@ def init_solver(solver_param,state):
         solver_param['AROM_solver']        = AROM_solver_module
         solver_param['ROM_solver']         = ROM_solver_module
 
+    elif solver_param['solver_mode'] == 'KAROM':
+
+        import solver.KAROM as solver_module
+
+        rom_param = {}
+        solver_param['hyper']              =  False
+        solver_param['FOM2ROM_trans_iter'] = solver_param['init_training_win']
+
     return solver_module , rom_param, state
 
 def ic_generator(solver_param,state):
