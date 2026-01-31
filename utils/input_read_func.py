@@ -94,6 +94,7 @@ def init_solver_param(args,input_param):
     solver_param['limiter']       =  eval(input_param['limiter'])
     solver_param['limiter_method']=  input_param['limiter_method']
     solver_param['viscous_flag']  =  eval(input_param['viscous'])
+    solver_param['numpy_vector']  =  eval(input_param['numpy_vector'])
     solver_param['injection']     =  eval(input_param['injection'])
 
     if solver_param['injection']:

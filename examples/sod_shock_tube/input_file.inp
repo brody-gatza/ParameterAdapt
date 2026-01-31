@@ -1,5 +1,5 @@
 # solver
-solver_mode   = AROM
+solver_mode   = FOM
 
 # time discretization
 dt            = 5e-5
@@ -43,6 +43,7 @@ flux_scheme     = 2nd Order Roe
 limiter	        = False
 limiter_method  = minmod
 viscous	        = False
+numpy_vector    = True
 
 # Visualization
 visual          = True

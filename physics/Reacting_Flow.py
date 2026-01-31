@@ -387,6 +387,191 @@ def second_order_roe_inviscid_flux_calculator(solver_param,rom_param,state):
 
     return state
 
+def second_order_roe_inviscid_flux_calculator_for(solver_param,rom_param,state):
+    
+    state            = cons2prim_converter(solver_param,state)
+    state            = bc_func.update_ghost_cell(solver_param,state)
+
+    Q_cons           = state['Q_cons']
+    Q_prim           = state['Q_prim']
+
+    Q_cons_user      = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
+    Q_prim_user      = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
+
+    rho    = Q_prim_user[0,:]
+    vx     = Q_prim_user[1,:]
+    press  = Q_prim_user[2,:]
+    temp   = Q_prim_user[3,:]
+
+
+    Y      = Q_prim_user[4:,:]
+    Y_ct   = reshape_func.find_mass_fraction_full_cantera(Y)
+
+
+    vol    = solver_param['vol']
+    num_state_var = solver_param['num_state_var']
+    num_species   = solver_param['num_species']
+
+
+    # total energy (rho * e_t)
+    en               = Q_cons_user[2,:] / vol
+
+    state['gas_array'].TPY = temp,press,Y_ct
+
+    c       = np.squeeze(state['gas_array'].sound_speed)
+    int_en  = np.squeeze(state['gas_array'].int_energy_mass)
+    h       = np.squeeze(state['gas_array'].enthalpy_mass)
+
+    # breakpoint()
+
+    # c_max = np.max(c)
+
+    # cfl = c_max*1e-8/vol
+
+    # dt = 0.08*vol/c_max
+
+    # total enthalpy
+    htot = h + (0.5*(vx**2))
+
+    # number of cell
+    cell_num = len(rho)
+
+    flux = np.zeros((num_state_var,cell_num+1))
+    diss_matrix = np.zeros((num_state_var,num_state_var))
+
+    if solver_param['hyper'] == True:
+
+        S_indx_user = rom_param['S_indx_user']
+
+        range_flux = S_indx_user + 2 
+        range_flux_neighbor_left  = range_flux - 1
+        range_flux = np.concatenate((range_flux,range_flux_neighbor_left))
+        range_flux = np.sort(np.unique(range_flux))
+
+    else : 
+        
+        range_flux = range(0,cell_num-1)
+
+    for j in range_flux:
+    
+        # Compute Roe averages
+        R=np.sqrt(rho[j+1]/rho[j])                      # R_{j+1/2}
+        rmoy=R*rho[j]                                   # {hat rho}_{j+1/2}
+        umoy=(R*vx[j+1]+vx[j])/(R+1)                    # {hat U}_{j+1/2}
+        Hmoy=(R*htot[j+1]+htot[j])/(R+1)                # {hat H}_{j+1/2}
+        emoy=(R*int_en[j+1]+int_en[j])/(R+1)              
+        hmoy=Hmoy - (0.5*umoy*umoy)
+        Ymoy=(R*Y[:,j+1]+Y[:,j])/(R+1)                  
+
+        Ymoy_ct = reshape_func.find_mass_fraction_full_cantera(Ymoy.reshape(-1,1))
+
+        state['gas'].UVY = emoy,1/rmoy,Ymoy_ct
+
+        Pmoy         = state['gas'].P
+        Tmoy         = state['gas'].T
+        cpmoy        = state['gas'].cp
+        cmoy         = state['gas'].sound_speed
+        meanMWmoy    = state['gas'].mean_molecular_weight
+        MWmoy        = state['gas'].molecular_weights
+        partial_hmoy = state['gas'].partial_molar_enthalpies / MWmoy
+        
+        d_rho_d_press = rmoy / Pmoy
+        d_rho_d_temp = -rmoy/Tmoy
+
+        d_rho_d_mass_frac = np.zeros_like(Ymoy)
+
+        for sp in range(len(Ymoy)):
+
+            d_rho_d_mass_frac[sp] = rmoy*meanMWmoy*(1/MWmoy[-1] - 1/MWmoy[sp])
+
+        d_enth_d_press = 0
+        d_enth_d_temp = cpmoy
+
+        d_enth_d_mass_frac = np.zeros_like(Ymoy)
+
+        for sp in range(len(Ymoy)):
+
+            d_enth_d_mass_frac[sp] = partial_hmoy[sp] - partial_hmoy[-1]
+
+        # Gamma terms for energy equation
+        g_press     = rmoy * d_enth_d_press + d_rho_d_press * Hmoy - 1.0
+        g_temp      = rmoy * d_enth_d_temp + d_rho_d_temp * Hmoy
+        g_mass_frac = rmoy * d_enth_d_mass_frac + Hmoy * d_rho_d_mass_frac
+
+        # Characteristic speeds
+        lambda1 = umoy + cmoy
+        lambda2 = umoy - cmoy
+        lambda1_abs = np.absolute(lambda1)
+        lambda2_abs = np.absolute(lambda2)
+
+        r_roe = (lambda2_abs - lambda1_abs) / (lambda2 - lambda1)
+        alpha = cmoy * (lambda1_abs + lambda2_abs) / (lambda1 - lambda2)
+        beta  = np.power(cmoy, 2.0) * (lambda1_abs - lambda2_abs) / (lambda1 - lambda2)
+        phi   = cmoy * (lambda1_abs + lambda2_abs) / (lambda1 - lambda2)
+
+        eta = (1.0 - rmoy * d_enth_d_press) / d_enth_d_temp
+        psi = eta * d_rho_d_temp + rmoy * d_rho_d_press
+
+        vel_abs = np.absolute(umoy)
+
+        beta_star = beta * psi
+        beta_e = beta * (rmoy * g_press + g_temp * eta)
+        phi_star = d_rho_d_press * phi + d_rho_d_temp * eta * (phi - vel_abs) / rmoy
+        phi_e = g_press * phi + g_temp * eta * (phi - vel_abs) / rmoy
+        m = rmoy * alpha
+        e = rmoy * umoy * alpha
+
+        delta_p = press[j]-press[j+1]
+        delta_u = vx[j]-vx[j+1]
+        delta_T = temp[j]-temp[j+1]
+        delta_Y = (Y[:,j]-Y[:,j+1]).reshape(-1,1)
+
+
+        del_q_prim = np.vstack((delta_p,delta_u,delta_T,delta_Y))
+
+        diss_matrix[ 0 , 0 ] = phi_star
+        diss_matrix[ 0 , 1 ] = beta_star
+        diss_matrix[ 0 , 2 ] = vel_abs * d_rho_d_temp
+        diss_matrix[ 0 , 3:] = vel_abs * d_rho_d_mass_frac
+
+        diss_matrix[ 1 , 0 ] = umoy * phi_star + r_roe
+        diss_matrix[ 1 , 1 ] = umoy * beta_star + m
+        diss_matrix[ 1 , 2 ] = umoy * vel_abs * d_rho_d_temp
+        diss_matrix[ 1 , 3:] = (umoy * vel_abs) * d_rho_d_mass_frac
+
+        diss_matrix[ 2 , 0 ] = phi_e + r_roe * umoy
+        diss_matrix[ 2 , 1 ] = beta_e + e
+        diss_matrix[ 2 , 2 ] = g_temp * vel_abs
+        diss_matrix[ 2 , 3:] = g_mass_frac * vel_abs
+
+        diss_matrix[3:, 0] = Ymoy * phi_star
+        diss_matrix[3:, 1] = Ymoy * beta_star
+        diss_matrix[3:, 2] = Ymoy * (vel_abs * d_rho_d_temp)
+
+        for mf_idx_out in range(3, num_state_var):
+
+            for mf_idx_in in range(3, num_state_var):
+
+                if mf_idx_out == mf_idx_in:
+                    diss_matrix[mf_idx_out, mf_idx_in] = vel_abs * (
+                        rmoy + Ymoy[mf_idx_out - 3] * d_rho_d_mass_frac[mf_idx_in - 3]
+                    )
+                else:
+                    diss_matrix[mf_idx_out, mf_idx_in] = (
+                        vel_abs * Ymoy[mf_idx_out - 3] * d_rho_d_mass_frac[mf_idx_in - 3]
+                    )
+
+        dissipation = diss_matrix @ del_q_prim
+    
+        flux[0,j+1] = 0.5*(rho[j]*vx[j]               + rho[j+1]*vx[j+1])                         + 0.5 * dissipation[0 ,0]
+        flux[1,j+1] = 0.5*(rho[j]*vx[j]**2 + press[j] + rho[j+1]*vx[j+1]**2+press[j+1])           + 0.5 * dissipation[1 ,0]
+        flux[2,j+1] = 0.5*(vx[j]*(en[j]+press[j])     + vx[j+1]*(en[j+1]+press[j+1]))             + 0.5 * dissipation[2 ,0]
+        flux[3:,j+1]= 0.5*(rho[j]*vx[j]*Y[:,j]        + rho[j+1]*vx[j+1]*Y[:,j+1] )               + 0.5 * dissipation[3:,0]
+        
+    state['flux_cons'] = flux
+
+    return state
+
 def second_order_roe_viscous_flux_calculator(solver_param,rom_param,state):
 
     Q_cons           = state['Q_cons']
@@ -551,6 +736,111 @@ def second_order_roe_viscous_flux_calculator(solver_param,rom_param,state):
         flux[3:,1:-1] = (rmoy[:,np.newaxis]*mass_diff_mix[:,:-1]*dY_dx[:-1].T).T-(rmoy*corr_vel*Ymoy)
 
         
+    state['flux_visc_cons'] = flux
+
+    return state
+
+def second_order_roe_viscous_flux_calculator_for(solver_param,rom_param,state):
+
+    # state            = cons2prim_converter(solver_param,state)
+    # state            = update_ghost_cell(solver_param,state)
+
+    Q_cons           = state['Q_cons']
+    Q_prim           = state['Q_prim']
+
+    Q_cons_user      = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
+    Q_prim_user      = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
+
+    rho    = Q_prim_user[0,:]
+    vx     = Q_prim_user[1,:]
+    press  = Q_prim_user[2,:]
+    temp   = Q_prim_user[3,:]
+
+    Y      = Q_prim_user[4:,:]
+    Y_full = reshape_func.find_mass_fraction_full(Y)
+    Y_ct   = reshape_func.find_mass_fraction_full_cantera(Y)
+
+
+    vol           = solver_param['vol']
+    dx            = vol
+    num_state_var = solver_param['num_state_var']
+    num_species   = solver_param['num_species']
+
+
+
+    # total energy (rho * e_t)
+    en               = Q_cons_user[2,:] / vol
+
+    state['gas_array'].TPY = temp,press,Y_ct
+
+    c       = np.squeeze(state['gas_array'].sound_speed)
+    int_en  = np.squeeze(state['gas_array'].int_energy_mass)
+    h       = np.squeeze(state['gas_array'].enthalpy_mass)
+
+    # total enthalpy
+    htot = h + (0.5*(vx**2))
+
+    # number of cell
+    cell_num = len(rho)
+
+    flux = np.zeros((num_state_var,cell_num+1))
+
+    if solver_param['hyper'] == True:
+
+        S_indx_user = rom_param['S_indx_user']
+
+        range_flux = S_indx_user + 2 
+        range_flux_neighbor_left  = range_flux - 1
+        range_flux = np.concatenate((range_flux,range_flux_neighbor_left))
+        range_flux = np.sort(np.unique(range_flux))
+
+
+    else : 
+        
+        range_flux = range(0,cell_num-1)
+
+    for j in range_flux:
+    
+        # Compute Roe averages
+        R=np.sqrt(rho[j+1]/rho[j])                      # R_{j+1/2}
+        rmoy=R*rho[j]                                   # {hat rho}_{j+1/2}
+        umoy=(R*vx[j+1]+vx[j])/(R+1)                    # {hat U}_{j+1/2}
+        Hmoy=(R*htot[j+1]+htot[j])/(R+1);               # {hat H}_{j+1/2}
+        hmoy=(R*h[j+1]+h[j])/(R+1);                     # {hat h}_{j+1/2}
+        emoy=(R*int_en[j+1]+int_en[j])/(R+1);           # {hat e}_{j+1/2}
+        Ymoy=(R*Y[:,j+1]+Y[:,j])/(R+1);                 # {hat Y}_{j+1/2}          
+        Pmoy = (hmoy - emoy)*rmoy                       # {hat P}_{j+1/2}
+
+        Ymoy_full = np.squeeze( reshape_func.find_mass_fraction_full(Ymoy.reshape(-1,1)) )
+
+        state['gas'].UVY            = emoy,1/rmoy,Ymoy_full
+
+        dyn_vsc_mix                 = state['gas'].viscosity
+        mass_diff_mix               = state['gas'].mix_diff_coeffs_mass
+        therm_cond_mix              = state['gas'].thermal_conductivity
+
+        MW                          = state['gas'].molecular_weights
+        MW_mix                      = state['gas'].mean_molecular_weight
+        enthalpies                  = state['gas'].partial_molar_enthalpies / MW
+
+
+        du_dx = (vx[j+1] - vx[j]) /dx
+        dT_dx = (temp[j+1] - temp[j]) /dx
+        dY_dx = (Y_full[:,j+1] - Y_full[:,j]) / dx
+
+        corr_vel  = np.sum(mass_diff_mix*dY_dx)
+
+        diff_vel  = -mass_diff_mix*dY_dx/Ymoy_full + corr_vel
+
+        tau       = 4/3 * dyn_vsc_mix * du_dx
+
+        q         = -therm_cond_mix * dT_dx + rmoy*np.sum(enthalpies*diff_vel*Ymoy_full)
+
+        flux[0,j+1] = 0 
+        flux[1,j+1] = tau
+        flux[2,j+1] = (umoy * tau) - q
+        flux[3:,j+1]= (rmoy*mass_diff_mix[:-1]*dY_dx[:-1])-(rmoy*corr_vel*Ymoy)
+
     state['flux_visc_cons'] = flux
 
     return state
@@ -832,11 +1122,24 @@ def residual_calculator(solver_param,rom_param,state):
     
     if solver_param['flux_scheme'] == '2nd Order Roe':
 
-        state = second_order_roe_inviscid_flux_calculator(solver_param,rom_param,state)
+        if solver_param['numpy_vector']:
+
+            state = second_order_roe_inviscid_flux_calculator(solver_param,rom_param,state)
+
+        else:
+
+            state = second_order_roe_inviscid_flux_calculator_for(solver_param,rom_param,state)
+
 
         if solver_param['viscous_flag']:
 
-            state = second_order_roe_viscous_flux_calculator(solver_param,rom_param,state)
+            if solver_param['numpy_vector']:
+
+                state = second_order_roe_viscous_flux_calculator(solver_param,rom_param,state)
+
+            else: 
+
+                state = second_order_roe_viscous_flux_calculator_for(solver_param,rom_param,state)
 
     # apply flux vector
     state   = d_flux_dx_calculator(solver_param,rom_param,state)

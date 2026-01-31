@@ -207,6 +207,98 @@ def second_order_roe_inviscid_flux_calculator(solver_param,rom_param,state):
 
     return state
 
+def second_order_roe_inviscid_flux_calculator_for(solver_param,rom_param,state):
+    
+    state            = cons2prim_converter(solver_param,state)
+    state            = bc_func.update_ghost_cell(solver_param,state)
+    state            = prim2cons_converter(solver_param,state)
+
+    Q_cons           = state['Q_cons']
+    Q_prim           = state['Q_prim']
+
+    Q_cons_user      = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
+    Q_prim_user      = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
+
+    rho    = Q_prim_user[0,:]
+    vx     = Q_prim_user[1,:]
+    press  = Q_prim_user[2,:]
+
+    
+    gamma         = 1.4
+    vol           = solver_param['vol']
+    num_state_var = solver_param['num_state_var']
+
+    en               = press  / (gamma-1) + 0.5 * rho  * (vx**2)
+
+    cell_num = len(rho)
+
+    # total enthalpy
+    htot = gamma/(gamma-1)*press/rho+0.5*vx**2
+
+    en               = press  / (gamma-1) + 0.5 * rho  * (vx**2)
+    # number of cell
+    cell_num = len(rho)
+
+    # total enthalpy
+    htot = gamma/(gamma-1)*press/rho+0.5*vx**2
+
+    flux = np.zeros((num_state_var,cell_num+1))
+    diffusion = np.zeros((num_state_var,cell_num+1))
+
+    if solver_param['hyper'] == True:
+
+        S_indx_user = rom_param['S_indx_user']
+
+        range_flux = S_indx_user + 2 
+        range_flux_neighbor_left  = range_flux - 1
+        range_flux = np.concatenate((range_flux,range_flux_neighbor_left))
+        range_flux = np.sort(np.unique(range_flux))
+
+    else : 
+        
+        range_flux = range(0,cell_num-1)
+
+    for j in range_flux:
+    
+        # Compute Roe averages
+        R=np.sqrt(rho[j+1]/rho[j])                      # R_{j+1/2}
+        rmoy=R*rho[j]                                   # {hat rho}_{j+1/2}
+        umoy=(R*vx[j+1]+vx[j])/(R+1)                    # {hat U}_{j+1/2}
+        hmoy=(R*htot[j+1]+htot[j])/(R+1);               # {hat H}_{j+1/2}
+        amoy=np.sqrt((gamma-1.0)*(hmoy-0.5*umoy*umoy))  # {hat a}_{j+1/2}
+        
+        # Auxiliary variables used to compute P_{j+1/2}^{-1}
+        alph1=(gamma-1)*umoy*umoy/(2*amoy*amoy)
+        alph2=(gamma-1)/(amoy*amoy)
+
+        # Compute matrix P^{-1}_{j+1/2}
+        Pinv = np.array([[0.5*(alph1+umoy/amoy), -0.5*(alph2*umoy+1/amoy),  alph2/2],
+                        [1-alph1,                alph2*umoy,                -alph2 ],
+                        [0.5*(alph1-umoy/amoy),  -0.5*(alph2*umoy-1/amoy),  alph2/2]])
+                
+        # Compute matrix P_{j+1/2}
+        P    = np.array([[ 1,              1,              1              ],
+                        [umoy-amoy,        umoy,           umoy+amoy      ],
+                        [hmoy-amoy*umoy,   0.5*umoy*umoy,  hmoy+amoy*umoy ]])
+        
+        # Compute matrix Lambda_{j+1/2}
+        lamb = np.array([[ abs(umoy-amoy),  0,              0                 ],
+                        [0,                 abs(umoy),      0                 ],
+                        [0,                 0,              abs(umoy+amoy)    ]])
+                    
+        # Compute Roe matrix |A_{j+1/2}|
+        A = P @ lamb @ Pinv
+
+        diffusion[:,j+1] = 0.5 * A @ (Q_cons_user[:,j+1]-Q_cons_user[:,j]) / vol
+
+        flux[0,j+1] = 0.5*(rho[j]*vx[j]               + rho[j+1]*vx[j+1])                         - diffusion[0,j+1] 
+        flux[1,j+1] = 0.5*(rho[j]*vx[j]**2 + press[j] + rho[j+1]*vx[j+1]**2+press[j+1])           - diffusion[1,j+1] 
+        flux[2,j+1] = 0.5*(vx[j]*(en[j]+press[j])     + vx[j+1]*(en[j+1]+press[j+1]))             - diffusion[2,j+1] 
+
+    state['flux_cons'] = flux
+
+    return state
+
 def d_flux_dx_calculator(solver_param,rom_param,state):
 
     # apply viscous flux if exsted
@@ -240,7 +332,13 @@ def residual_calculator(solver_param,rom_param,state):
     
     if solver_param['flux_scheme'] == '2nd Order Roe':
 
-        state = second_order_roe_inviscid_flux_calculator(solver_param,rom_param,state)
+        if solver_param['numpy_vector']:
+
+            state = second_order_roe_inviscid_flux_calculator(solver_param,rom_param,state)
+
+        else:
+
+            state = second_order_roe_inviscid_flux_calculator_for(solver_param,rom_param,state)
 
     # apply flux vector
     state   = d_flux_dx_calculator(solver_param,rom_param,state)

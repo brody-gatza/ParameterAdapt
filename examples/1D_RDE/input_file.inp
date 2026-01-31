@@ -3,13 +3,13 @@ solver_mode   = FOM
 
 # time discretization
 dt            = 1e-10
-num_steps     = 10000000
+num_steps     = 1000
 time_scheme   = FDF
 
 # space discretization
 x_initial   = 0
-x_final     = 0.288
-cell_number = 1000
+x_final     = 0.0288
+cell_number = 200
 
 # inlet BC
 rho_inlet         = periodic
@@ -27,7 +27,7 @@ mass_frac_outlet  = periodic
 
 
 # Initial Condition
-ic_path        = C:\GIT_Fork\ROMify\examples\1D_RDE\IC_ramp_PR_2_1000.npy
+ic_path        = C:\GIT_Fork\ROMify\examples\1D_RDE\IC_ramp_PR_2_200.npy
 
 
 # gas model
@@ -36,6 +36,7 @@ flux_scheme     = 2nd Order Roe
 limiter	        = False
 limiter_method  = minmod    
 viscous	        = True
+numpy_vector    = True
 
 # Visualization
 visual          = True
@@ -44,13 +45,13 @@ variable1 	    = Heat Release
 variable2 	    = Pressure
 variable3 	    = MF
 variable4 	    = Temprature
-update_interval = 1000
+update_interval = 100
 
 # Saving
 save_interval   = 1000
 
 # Profiling
-profiling	    = False
+profiling	    = True
 
 # Injection
 injection                 = True
