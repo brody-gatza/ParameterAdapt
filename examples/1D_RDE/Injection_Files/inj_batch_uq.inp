@@ -1,0 +1,12 @@
+# equivalence ratio (phi) - affects the wave speed
+phi_l       = 0.8  # lower bound
+phi_u       = 1.2  # upper bound
+phi_n       = 3    # number of total cases
+
+# injection pressure (P0) [atm] - affects the wave amplitdue 
+P_l       = 0.5  # lower bound - anything below 0.5 turns into deflagration instead of detonation
+P_u       = 4    # upper bound - anything above 4 makes detonation so strong that blows up the code (for values larger than 4, smaller time step in solver must be setup)
+P_n       = 4    # number of total cases
+
+# number of processors 
+n_processor = 12    # if 0 it will automatically assign one processor for each task
