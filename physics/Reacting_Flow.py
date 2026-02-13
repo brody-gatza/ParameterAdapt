@@ -62,76 +62,76 @@ def cons2prim_converter(solver_param, state):
 
     internal_energy = (energy/vol/rho)-(0.5*vx**2)
 
-    try:
+    # try:
 
-        state['gas_array'].UVY = internal_energy,sp_vol,MF_ct
+    state['gas_array'].UVY = internal_energy,sp_vol,MF_ct
 
-        T = np.squeeze(state['gas_array'].T)
-        P = np.squeeze(state['gas_array'].P)
+    T = np.squeeze(state['gas_array'].T)
+    P = np.squeeze(state['gas_array'].P)
 
-    except:
+    # except:
 
-        # sometimes rom can give shitty results but it might recover in the later time steps
-        # but when cantera gets invalid states directly raises an error and stops the whole simulation
-        # to avoid this issue I implemented this sloppy way of finding prim vars 
-        # I am just finding a coefficient (psudo Cp, Cv) that converts energy term to pressure and temperature 
-        # by looking at the previous time step solution and finally I trim the invalid results by max and min pressure
+        # # sometimes rom can give shitty results but it might recover in the later time steps
+        # # but when cantera gets invalid states directly raises an error and stops the whole simulation
+        # # to avoid this issue I implemented this sloppy way of finding prim vars 
+        # # I am just finding a coefficient (psudo Cp, Cv) that converts energy term to pressure and temperature 
+        # # by looking at the previous time step solution and finally I trim the invalid results by max and min pressure
 
-        Q_prim   = state['Q_prim']
+        # Q_prim   = state['Q_prim']
 
-        Q_prim_user = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],
-                                                                solver_param['cell_number'],
-                                                                Q_prim)
+        # Q_prim_user = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],
+        #                                                         solver_param['cell_number'],
+        #                                                         Q_prim)
         
-        rho_spare = Q_prim_user[0,:]
-        vx_spare  = Q_prim_user[1,:]
-        P_spare   = Q_prim_user[2,:]
-        T_spare   = Q_prim_user[3,:]
-        Y_spare   = Q_prim_user[4:,:]
-        Y_spare_ct= reshape_func.find_mass_fraction_full_cantera(Y_spare)
+        # rho_spare = Q_prim_user[0,:]
+        # vx_spare  = Q_prim_user[1,:]
+        # P_spare   = Q_prim_user[2,:]
+        # T_spare   = Q_prim_user[3,:]
+        # Y_spare   = Q_prim_user[4:,:]
+        # Y_spare_ct= reshape_func.find_mass_fraction_full_cantera(Y_spare)
 
-        state['gas_array'].TPY = T_spare, P_spare, Y_spare_ct
+        # state['gas_array'].TPY = T_spare, P_spare, Y_spare_ct
 
-        coef_temp  = np.squeeze(state['gas_array'].int_energy_mass)/T_spare
-        coef_press = np.squeeze(state['gas_array'].int_energy_mass)/P_spare
+        # coef_temp  = np.squeeze(state['gas_array'].int_energy_mass)/T_spare
+        # coef_press = np.squeeze(state['gas_array'].int_energy_mass)/P_spare
 
-        T = np.abs(internal_energy / coef_temp)
-        P = np.abs(internal_energy / coef_press)
+        # T = np.abs(internal_energy / coef_temp)
+        # P = np.abs(internal_energy / coef_press)
 
-        Q_prim = np.vstack((rho,vx,P,T,MF))
+        # Q_prim = np.vstack((rho,vx,P,T,MF))
 
-        P_max = np.max(P_spare)
-        P_min = np.min(P_spare)
+        # P_max = np.max(P_spare)
+        # P_min = np.min(P_spare)
 
-        P_max_indx = np.argmax(P_spare)
-        P_min_indx = np.argmin(P_spare)
+        # P_max_indx = np.argmax(P_spare)
+        # P_min_indx = np.argmin(P_spare)
 
-        indx_pass_max = np.where(Q_prim[2,:]>P_max)[0]
-        indx_pass_min = np.where(Q_prim[2,:]<P_min)[0]
+        # indx_pass_max = np.where(Q_prim[2,:]>P_max)[0]
+        # indx_pass_min = np.where(Q_prim[2,:]<P_min)[0]
 
-        Q_prim[:,indx_pass_max] = Q_prim_user[:,P_max_indx].reshape(-1,1)
-        Q_prim[:,indx_pass_min] = Q_prim_user[:,P_min_indx].reshape(-1,1)
+        # Q_prim[:,indx_pass_max] = Q_prim_user[:,P_max_indx].reshape(-1,1)
+        # Q_prim[:,indx_pass_min] = Q_prim_user[:,P_min_indx].reshape(-1,1)
 
-        rho = Q_prim_user[0,:]
-        vx  = Q_prim_user[1,:]
-        P   = Q_prim_user[2,:]
-        T   = Q_prim_user[3,:]
-        Y   = Q_prim_user[4:,:]
+        # rho = Q_prim_user[0,:]
+        # vx  = Q_prim_user[1,:]
+        # P   = Q_prim_user[2,:]
+        # T   = Q_prim_user[3,:]
+        # Y   = Q_prim_user[4:,:]
 
-        Y_ct= reshape_func.find_mass_fraction_full_cantera(Y)
+        # Y_ct= reshape_func.find_mass_fraction_full_cantera(Y)
 
-        state['gas_array'].TPY = T, P, Y_ct
+        # state['gas_array'].TPY = T, P, Y_ct
 
-        internal_energy = np.squeeze(state['gas_array'].int_energy_mass)
+        # internal_energy = np.squeeze(state['gas_array'].int_energy_mass)
 
-        internal_energy_tot = internal_energy + (0.5 * (vx **2))
+        # internal_energy_tot = internal_energy + (0.5 * (vx **2))
 
-        mass   = rho * vol
-        momx   = rho * vx * vol
-        energy = (rho * internal_energy_tot) * vol
-        mass_species = rho * Y * vol
+        # mass   = rho * vol
+        # momx   = rho * vx * vol
+        # energy = (rho * internal_energy_tot) * vol
+        # mass_species = rho * Y * vol
 
-        state['Q_cons'] = np.vstack((mass,momx,energy,mass_species)).ravel()
+        # state['Q_cons'] = np.vstack((mass,momx,energy,mass_species)).ravel()
 
     state['Q_prim'] = np.vstack((rho,vx,P,T,MF)).ravel()
 
@@ -967,7 +967,6 @@ def injection_correction(solver_param,state):
     P_in            = solver_param['injcetion_prim_state'][2]
     T_in            = solver_param['injcetion_prim_state'][3]
     Y_in            = solver_param['injcetion_prim_state'][4:] 
-
 
     # compute injection rate 
     area_in     = solver_param['injector_face_area']

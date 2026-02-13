@@ -3,7 +3,7 @@ solver_mode   = FOM
 
 # time discretization
 dt            = 1e-9
-num_steps     = 1000
+num_steps     = 20000
 time_scheme   = FDF
 
 # space discretization
@@ -36,7 +36,7 @@ flux_scheme     = 2nd Order Roe
 limiter	        = True
 limiter_method  = minmod    
 viscous	        = True
-numpy_vector    = False
+numpy_vector    = True
 
 # Visualization
 visual          = True
@@ -45,7 +45,7 @@ variable1 	    = Heat Release
 variable2 	    = Pressure
 variable3 	    = MF
 variable4 	    = Temprature
-update_interval = 10
+update_interval = 1000
 
 # Saving
 save_interval   = 100
@@ -55,7 +55,7 @@ profiling	    = False
 
 # Injection
 injection                 = True
-injection_state_dir       = C:\GIT_Fork\ROMify\examples\1D_RDE\Injection_Files\h2o2ar_phi_1_200ms_4atm_inject_prim_state.npy
+injection_state_dir       = C:\GIT_Fork\ROMify\examples\1D_RDE\Injection_Files\h2o2ar_phi_1_200ms_025atm_inject_prim_state.npy
 rde                       = True
 injector_face_area        = 0.05
 injector_area_ratio       = 0.8
@@ -71,7 +71,7 @@ hyper	    		    = True
 hyper_method		    = FGS
 sampling_rate           = 2
 init_training_win 	    = 10
-unsampled_update_freq 	= 10
+unsampled_update_freq 	= 15
 
 training_data_dir       = C:\GIT_Fork\ROMify\examples\1D_RDE\FOM_results_11cycles
 training_start_iter     = 50000

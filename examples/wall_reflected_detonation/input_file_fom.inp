@@ -1,20 +1,10 @@
-# solver setup
-
-solver_mode 		    = FOM
-rom_method  		    = Galerkin
-arom_method		        = Direct Adapt
-pod_energy  		    = 99.999
-hyper	    		    = True
-hyper_method		    = Gappy POD + Shock
-init_training_win 	    = 10
-unsampled_update_freq 	= 10
-fom_results_max_iter    = ""
-
+# solver
+solver_mode   = FOM
 
 # time discretization
-dt            = 1e-8
-num_steps     = 10000
-time_scheme   = Implicit - BDF2
+dt            = 2e-10
+num_steps     = 625000
+time_scheme   = FDF
 
 # space discretization
 x_initial   = 0
@@ -38,40 +28,77 @@ mass_frac_outlet  = extrapolate
 
 # Initial Condition
 
-#x_interval_ic = [[0,0.0005],[0.0005,0.12]]
-#press_ic      = [6687.45,36679.65]
-#temp_ic       = [298,621]
-#vel_ic        = [0.01,-476]
-#rho_ic        = [0.085203447,0.224257236]
-#mass_frac_ic  = [[0.012772428, 0.0, 0.0, 0.101362139, 0.0, 0.0, 0.0, 0.0, 0.885865433],[0.012772428, 0.0, 0.0,     0.101362139, 0.0, 0.0, 0.0, 0.0, 0.885865433]]
+x_interval_ic = [[0,0.0005],[0.0005,0.12]]
+press_ic      = [6687.45,36679.65]
+temp_ic       = [298,621]
+vel_ic        = [0.01,-476]
+rho_ic        = [0.085203447,0.224257236]
+mass_frac_ic  = [[0.012772428, 0.0, 0.0, 0.101362139, 0.0, 0.0, 0.0, 0.0, 0.885865433],[0.012772428, 0.0, 0.0,     0.101362139, 0.0, 0.0, 0.0, 0.0, 0.885865433]]
 
 
-ic_path = C:\GIT_Fork\ROMify\examples\wall_reflected_detonation\test_init_cond.npy
+#ic_path = C:\GIT_Fork\ROMify\examples\wall_reflected_detonation\test_init_cond.npy
+
 
 # gas model
-gas_model       = H2/Air Combustion
-flux_scheme     = 1st Order Roe
-limiter	        = False
-limiter_method  = barth
+gas_model       = h2o2.yaml
+flux_scheme     = 2nd Order Roe 
+limiter	        = True
+limiter_method  = minmod    
 viscous	        = True
+numpy_vector    = True
 
 # Visualization
-
 visual          = True
-variable1 	    = Density
+save_visual     = False
+variable1 	    = Heat Release
 variable2 	    = Pressure
-variable3 	    = Velocity
-variable4 	    = Heat Release
-update_interval = 10
-plot_fom	    = False
-
+variable3 	    = MF
+variable4 	    = Temprature
+update_interval = 100
 
 # Saving
-save_interval = 1000
-
+save_interval   = 100
 
 # Profiling
-profiling	= False
+profiling	    = False
+
+# Injection
+injection                 = False
+injection_state_dir       = ''
+rde                       = False
+injector_face_area        = 0.05
+injector_area_ratio       = 0.8
+non_injection_portion     = 0.5
+non_injection_tail_portion= 0.15
+
+# ROM Setup
+rom_method  		    = Galerkin
+nl_rom_model            = rbf
+arom_method		        = direct
+pod_energy  		    = 99
+hyper	    		    = True
+hyper_method		    = FGS
+sampling_rate           = 2
+init_training_win 	    = 10
+unsampled_update_freq 	= 10
+
+training_data_dir       = ''
+training_start_iter     = 50000
+training_step_iter      = 10
+training_end_iter       = 100000
+
+rom_basis_generate       = False
+rom_basis_dir            = ''
+
+sarom_training_step      = 100
+sarom_srom_solver        = PROM
+sarom_cumsum_tol         = 0.01
+sarom_moving_avg_tol     = 0.01
+
+# Restart 
+arom_restart            = False
 
 
-injection = False
+
+
+

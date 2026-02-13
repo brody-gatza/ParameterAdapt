@@ -2,8 +2,8 @@
 solver_mode   = FOM
 
 # time discretization
-dt            = 5e-5
-num_steps     = 5000
+dt            = 5e-4
+num_steps     = 500
 time_scheme   = FDF
 
 # space discretization
@@ -52,7 +52,7 @@ variable1 	    = Density
 variable2 	    = Pressure
 variable3 	    = Velocity
 variable4 	    = Temprature
-update_interval = 100
+update_interval = 10
 
 # Saving
 save_interval   = 100

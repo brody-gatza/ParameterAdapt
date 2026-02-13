@@ -922,10 +922,10 @@ def injection_correction(solver_param,state):
     # ref: properties before entering to injector
     # inj: properties after entering to injector
 
-    rho_in          = solver_param['injcetion_prim_state'][0]
+    rho_in          = solver_param['injcetion_prim_state'][0]/2
     v_in            = solver_param['injcetion_prim_state'][1]
     P_in            = solver_param['injcetion_prim_state'][2]
-    T_in            = solver_param['injcetion_prim_state'][3]
+    T_in            = solver_param['injcetion_prim_state'][3]/2
     # Y_in            = solver_param['injcetion_prim_state'][4:] 
     Y_in            = 1
     Y_in_full       = Y_in + np.zeros_like(Y_full)
@@ -993,29 +993,29 @@ def injection_correction(solver_param,state):
 
     Q_cons_user[:,inj_indx] = Q_cons_inject
 
-    smoothing_start_indx = (detonation[0]-10)%(solver_param['cell_number']+4) 
-    smoothing_end_indx   = (detonation[0]+10)%(solver_param['cell_number']+4) 
+    # smoothing_start_indx = (detonation[0]-10)%(solver_param['cell_number']+4) 
+    # smoothing_end_indx   = (detonation[0]+10)%(solver_param['cell_number']+4) 
 
-    q_left  = Q_cons_user[:,smoothing_start_indx] 
-    q_right = Q_cons_user[:,smoothing_end_indx]
+    # q_left  = Q_cons_user[:,smoothing_start_indx] 
+    # q_right = Q_cons_user[:,smoothing_end_indx]
 
-    x_knwon = np.array([0,20]) 
-    y_known = np.array([q_left,q_right]).T 
-    f_interp = interp1d(x_knwon,y_known,kind='linear') 
-    x = np.arange(0,20) 
-    q_ramp = f_interp(x) 
+    # x_knwon = np.array([0,20]) 
+    # y_known = np.array([q_left,q_right]).T 
+    # f_interp = interp1d(x_knwon,y_known,kind='linear') 
+    # x = np.arange(0,20) 
+    # q_ramp = f_interp(x) 
 
-    if smoothing_start_indx < smoothing_end_indx: 
-        Q_cons_user[:, smoothing_start_indx:smoothing_end_indx] = q_ramp 
+    # if smoothing_start_indx < smoothing_end_indx: 
+    #     Q_cons_user[:, smoothing_start_indx:smoothing_end_indx] = q_ramp 
         
-    else: 
-        wrap_len = (solver_param['cell_number']+4) - smoothing_start_indx 
-        Q_cons_user[:, smoothing_start_indx:] = q_ramp[:, :wrap_len] 
-        Q_cons_user[:, :smoothing_end_indx]   = q_ramp[:, wrap_len:]
+    # else: 
+    #     wrap_len = (solver_param['cell_number']+4) - smoothing_start_indx 
+    #     Q_cons_user[:, smoothing_start_indx:] = q_ramp[:, :wrap_len] 
+    #     Q_cons_user[:, :smoothing_end_indx]   = q_ramp[:, wrap_len:]
 
-    # --- Reapply periodic BCs to maintain consistency ---
-    Q_cons_user[:, 0:2] = Q_cons_user[:, -4:-2]   # left ghosts
-    Q_cons_user[:, -2:] = Q_cons_user[:, 2:4]  # right ghosts
+    # # --- Reapply periodic BCs to maintain consistency ---
+    # Q_cons_user[:, 0:2] = Q_cons_user[:, -4:-2]   # left ghosts
+    # Q_cons_user[:, -2:] = Q_cons_user[:, 2:4]  # right ghosts
 
     ncell_total = solver_param['cell_number'] + 4  # Total cells including ghosts
     ncell_interior = solver_param['cell_number']   # Interior cells only

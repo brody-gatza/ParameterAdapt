@@ -1,9 +1,9 @@
 # solver
-solver_mode   = AROM
+solver_mode   = FOM
 
 # time discretization
-dt            = 1e-10
-num_steps     = 1000
+dt            = 1e-9
+num_steps     = 200000
 time_scheme   = FDF
 
 # space discretization
@@ -32,10 +32,10 @@ ic_path        = C:\GIT_Fork\ROMify\examples\1D_RDE\IC_ramp_PR_2_200.npy
 
 # gas model
 gas_model       = h2o2.yaml
-flux_scheme     = 2nd Order Roe 
+flux_scheme     = 2nd Order Roe
 limiter	        = False
 limiter_method  = minmod    
-viscous	        = True
+viscous	        = False
 numpy_vector    = True
 
 # Visualization
@@ -48,16 +48,16 @@ variable4 	    = Temprature
 update_interval = 100
 
 # Saving
-save_interval   = 1000
+save_interval   = 100
 
 # Profiling
-profiling	    = True
+profiling	    = False
 
 # Injection
 injection                 = True
 injection_state_dir       = C:\GIT_Fork\ROMify\examples\1D_RDE\Injection_Files\h2o2ar_phi_1_200ms_4atm_inject_prim_state.npy
 rde                       = True
-injector_face_area        = 1
+injector_face_area        = 0.5
 injector_area_ratio       = 0.8
 non_injection_portion     = 0.5
 non_injection_tail_portion= 0.3

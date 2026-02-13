@@ -1,42 +1,32 @@
-# solver setup
-
-solver_mode 		    = Adaptive ROM
-rom_method  		    = Galerkin
-arom_method		        = Direct Adapt
-pod_energy  		    = 99.999
-hyper	    		    = True
-hyper_method		    = QDEIM
-init_training_win 	    = 10
-unsampled_update_freq 	= 10
-fom_results_max_iter    = ""
+# solver
+solver_mode   = FOM
 
 # time discretization
-dt            = 5e-5
-num_steps     = 3500
-time_scheme   = Explicit - FD Euler
-
+dt            = 5e-6
+num_steps     = 35000
+time_scheme   = FDF
 
 # space discretization
 x_initial   = 0
 x_final     = 1
-cell_number = 500 
+cell_number = 10000 
 
 # inlet BC
-rho_inlet        = extrapolate
-vel_inlet        = extrapolate
-press_inlet      = extrapolate
-temp_inlet       = extrapolate
-mass_frac_inlet  = extrapolate
+rho_inlet         = periodic
+vel_inlet         = periodic
+press_inlet       = periodic
+temp_inlet        = periodic
+mass_frac_inlet   = periodic
 
 # outlet BC
-rho_outlet        = extrapolate
-vel_outlet        = extrapolate
-press_outlet      = extrapolate
-temp_outlet       = extrapolate
-mass_frac_outlet  = extrapolate
+rho_outlet        = periodic
+vel_outlet        = periodic
+press_outlet      = periodic
+temp_outlet       = periodic
+mass_frac_outlet  = periodic
+
 
 # Initial Condition
-
 x_interval_ic = [[0,0.48],[0.48,0.52],[0.52,1]]
 press_ic      = [0.0001,10,0.0001]
 temp_ic       = [300,300,300]
@@ -45,28 +35,65 @@ rho_ic        = [1,1,1]
 mass_frac_ic  = [[1.0, 0.0],[1.0, 0.0],[1.0, 0.0]]
 
 # gas model
-gas_model       = Non-Reacting Air
-flux_scheme     = 1st Order Roe
+gas_model       = Air
+flux_scheme     = 2nd Order Roe 
 limiter	        = False
-limiter_method  = minmod
-viscous	        = True
+limiter_method  = minmod    
+viscous	        = False
+numpy_vector    = True
 
 # Visualization
-
 visual          = True
+save_visual     = True
 variable1 	    = Density
 variable2 	    = Pressure
 variable3 	    = Velocity
 variable4 	    = Temprature
 update_interval = 100
-plot_fom	    = False
-
 
 # Saving
-save_interval = 100
+save_interval   = 1000
 
 # Profiling
 profiling	    = False
+
+# Injection
+injection                 = False
+injection_state_dir       = C:\GIT_Fork\ROMify\examples\1D_RDE\Injection_Files\h2o2ar_phi_1_200ms_4atm_inject_prim_state.npy
+rde                       = False
+injector_face_area        = 1
+injector_area_ratio       = 0.8
+non_injection_portion     = 0.5
+non_injection_tail_portion= 0.3
+
+# ROM Setup
+rom_method  		    = Galerkin
+nl_rom_model            = rbf
+arom_method		        = direct
+pod_energy  		    = 99
+hyper	    		    = True
+hyper_method		    = QDEIM
+sampling_rate           = 10
+init_training_win 	    = 10
+unsampled_update_freq 	= 10
+
+training_data_dir       = ''
+training_start_iter     = 50000
+training_step_iter      = 10
+training_end_iter       = 100000
+
+rom_basis_generate       = False
+rom_basis_dir            = ''
+
+sarom_training_step      = 100
+sarom_srom_solver        = PROM
+sarom_cumsum_tol         = 0.01
+sarom_moving_avg_tol     = 0.01
+
+# Restart 
+arom_restart            = False
+
+
 
 
 
