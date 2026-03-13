@@ -28,6 +28,25 @@ def adapt_basis(solver_param,rom_param,Q_bar_new_solver_int):
         rom_param['F']      = F
         rom_param['Q_R']    = Q_R
 
+    if solver_param['adaptive_rom_method'] == 'svd':
+
+        # roll the training window to the left
+        F   = np.roll(rom_param['F']   , shift=-1,axis=1)
+        Q_R = np.roll(rom_param['Q_R'] , shift=-1,axis=1)
+        
+        # include the estimated snapshot
+        F [:,-1]          = (Q_bar_new_solver_int-q_ref)*normalizor
+        Q_R[:,-1]         = rom_param['basis'].T @ F [:,-1]
+
+        #orthogonalize the basis
+        new_basis , _ , _ = np.linalg.svd(F,full_matrices=False)
+
+        rom_param['basis'] = new_basis[:,:-1]
+
+        # update the states
+        rom_param['F']      = F
+        rom_param['Q_R']    = Q_R
+
     if solver_param['adaptive_rom_method'] == 'ojas':
 
         V_old = rom_param['old_basis']
