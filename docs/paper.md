@@ -19,7 +19,6 @@ authors:
 affiliations:
  - name: PhD Student, University of Kansas, United States
    index: 1
-   ror: 00hx57361
  - name: Assistant Professor, University of Kansas, United States
    index: 2
 date: 30 March 2026
