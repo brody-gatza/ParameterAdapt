@@ -1,5 +1,5 @@
 # solver
-solver_mode   = PROM
+solver_mode   = FOM
 
 # time discretization
 dt            = 5e-5

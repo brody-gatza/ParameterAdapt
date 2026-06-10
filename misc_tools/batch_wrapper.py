@@ -60,7 +60,7 @@ if __name__ == '__main__':
     root_dir = Path(__file__).resolve().parent.parent
     sys.path.append(str(root_dir))
 
-    from utils import input_read_func
+    from CompFlowLab.utils import input_read_func
 
     # Set up argument parsing
     parser = argparse.ArgumentParser(description='Process an input file and specify a working directory.')

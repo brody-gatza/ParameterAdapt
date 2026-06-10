@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "compflowlab"
+version = "2.2.10"
+description = "A Python code to develop and prototype new data-driven models for challenging compressible flow problems with shocks and chemical reactions"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Ali Mohaghegh", email = "mohaghegh.ali76@gmail.com" }
+]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=2.4.6",
+    "scipy>=1.17.1",
+    "scikit-learn>=1.9.0",
+    "matplotlib>=3.10.9",
+    "cantera>=3.2.0"
+]
+

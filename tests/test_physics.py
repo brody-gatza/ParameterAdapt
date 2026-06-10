@@ -8,8 +8,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from physics import Ideal_Air
-from physics import Single_Step_Reacting_Flow
+from compflowlab.physics import Ideal_Air
+from compflowlab.physics import Single_Step_Reacting_Flow
 
 
 def _ideal_air_solver_cell(cell_number: int):
@@ -153,7 +153,7 @@ def test_single_step_cache_cantera():
 
 def test_reacting_flow_imports():
     """Reacting_Flow depends on Cantera; importing the module should succeed."""
-    import physics.Reacting_Flow as rf  # noqa: F401
+    import compflowlab.physics.Reacting_Flow as rf  # noqa: F401
 
     assert hasattr(rf, "prim2cons_converter")
     assert hasattr(rf, "residual_calculator")

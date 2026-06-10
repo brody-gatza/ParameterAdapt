@@ -9,8 +9,8 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from rom import basis_func
-from rom import sampling_func
+from compflowlab.rom import basis_func
+from compflowlab.rom import sampling_func
 
 
 # --- basis_func.adapt_basis ---

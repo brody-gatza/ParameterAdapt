@@ -10,16 +10,16 @@ _ROOT = Path(__file__).resolve().parents[1]
 
 
 def _load_module(name: str, filename: str):
-    spec = importlib.util.spec_from_file_location(name, _ROOT / "time_integration" / filename)
+    spec = importlib.util.spec_from_file_location(name, _ROOT / "src/time_integration" / filename)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
 
 
-FDF = _load_module("FDF", "FDF.py")
-SSPRK2 = _load_module("SSPRK2", "SSPRK2.py")
-SSPRK3 = _load_module("SSPRK3", "SSPRK3.py")
-BDF = _load_module("BDF", "BDF.py")
+from compflowlab.time_integration import FDF
+from compflowlab.time_integration import SSPRK2
+from compflowlab.time_integration import SSPRK3
+from compflowlab.time_integration import BDF
 
 
 def _fom_solver_state(cell_number: int, num_state_var: int, dt: float, d_flux_fill: float = 0.5):

@@ -13,9 +13,9 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from utils import reshape_func
-from utils import input_read_func
-from utils import init_func
+from compflowlab.utils import reshape_func
+from compflowlab.utils import input_read_func
+from compflowlab.utils import init_func
 
 
 # --- reshape_func ---
