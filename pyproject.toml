@@ -17,6 +17,7 @@ dependencies = [
     "scipy>=1.17.1",
     "scikit-learn>=1.9.0",
     "matplotlib>=3.10.9",
-    "cantera>=3.2.0"
+    "cantera>=3.2.0",
+    "pytest>=9.0.3"
 ]
 
