@@ -54,6 +54,12 @@ def init_state(solver_param):
         # heat release is also plotted part of prim when there is a combustion case
         state['prim_results_save']      = np.zeros(( num_prim_var+1  , int(solver_param['cell_number'])))
 
+    if solver_param['error_check']:
+        state['Q_cons_interp_error_save'] = np.zeros(( num_state_var , int(solver_param['cell_number']) ))
+        state['Q_cons_proj_error_save'] = np.zeros(( num_state_var , int(solver_param['cell_number']) ))
+        state['Q_prim_interp_error_save'] = np.zeros(( num_prim_var+1  , int(solver_param['cell_number'])))
+        state['Q_prim_proj_error_save'] = np.zeros(( num_prim_var+1  , int(solver_param['cell_number'])))
+
     return state
 
 def init_injection(solver_param,state):
@@ -280,6 +286,7 @@ def ic_generator(solver_param,state):
 def init_dir(solver_param):
 
     dir_results = os.path.join(solver_param['working_dir'], f"{solver_param['solver_mode']}_results")
+    dir_results_FOM_error = dir_results + '_FOM_error'
     solver_param['dir_results'] = dir_results
 
     # Check if the directory exists
@@ -303,10 +310,12 @@ def init_dir(solver_param):
         os.makedirs( os.path.join(dir_results, 'q_ref')         )
         os.makedirs( os.path.join(dir_results, 'norm')          )
         os.makedirs( os.path.join(dir_results, 'denorm')        )
-        
+        if solver_param['error_check']:
+            os.makedirs( os.path.join(dir_results, 'error')          )
+            os.makedirs( os.path.join(dir_results, 'error/full_data'))
+            os.makedirs( os.path.join(dir_results, 'error/FOM_data') )
+
     # create rom related folders if we are running rom
     if solver_param['save_visual']:
 
         os.makedirs( os.path.join(dir_results, 'plots')     )
-
-

@@ -1,5 +1,5 @@
 # solver
-solver_mode   = FOM
+solver_mode   = ROM
 
 # time discretization
 dt            = 1e-9
@@ -27,7 +27,7 @@ mass_frac_outlet  = periodic
 
 
 # Initial Condition
-ic_path        = C:\GIT_Fork\ROMify\examples\1D_RDE\IC_ramp_PR_2_200.npy
+ic_path        = examples/1D_RDE/IC_ramp_PR_2_200.npy
 
 
 # gas model
@@ -55,7 +55,7 @@ profiling	    = False
 
 # Injection
 injection                 = True
-injection_state_dir       = C:\GIT_Fork\ROMify\examples\1D_RDE\Injection_Files\h2o2ar_phi_1_200ms_4atm_inject_prim_state.npy
+injection_state_dir       = examples/1D_RDE/Injection_Files/h2o2ar_phi_1_200ms_4atm_inject_prim_state.npy
 rde                       = True
 injector_face_area        = 0.5
 injector_area_ratio       = 0.8
@@ -73,13 +73,13 @@ sampling_rate           = 10
 init_training_win 	    = 10
 unsampled_update_freq 	= 10
 
-training_data_dir       = C:\GIT_Fork\ROMify\examples\1D_RDE\FOM_results_11cycles
+training_data_dir       = exmaples/1D_RDE/FOM_results_11cycles
 training_start_iter     = 50000
 training_step_iter      = 10
 training_end_iter       = 100000
 
 rom_basis_generate       = False
-rom_basis_dir            = C:\GIT_Fork\ROMify\examples\sod_shock_tube\precomputed_basis
+rom_basis_dir            = examples/sod_shock_tube/precomputed_basis
 
 sarom_training_step      = 100
 sarom_srom_solver        = PROM

@@ -1,5 +1,5 @@
 # solver
-solver_mode   = FOM
+solver_mode   = AROM
 
 # time discretization
 dt            = 1e-9
@@ -27,11 +27,11 @@ mass_frac_outlet  = periodic
 
 
 # Initial Condition
-ic_path        = C:\GIT_Fork\ROMify\examples\1D_RDE\IC_ramp_PR_2_2000_one_step_reaction.npy
+ic_path        = examples/1D_RDE/IC_ramp_PR_2_2000_one_step_reaction.npy
 
 
 # gas model
-gas_model       = C:\GIT_Fork\ROMify\examples\1D_RDE\chem_one_step_reaction.inp
+gas_model       = examples/1D_RDE/chem_one_step_reaction.inp
 flux_scheme     = 2nd Order Roe 
 limiter	        = True
 limiter_method  = minmod    
@@ -55,7 +55,7 @@ profiling	    = False
 
 # Injection
 injection                 = True
-injection_state_dir       = C:\GIT_Fork\ROMify\examples\1D_RDE\Injection_Files\h2o2ar_phi_1_200ms_025atm_inject_prim_state.npy
+injection_state_dir       = examples/1D_RDE/Injection_Files/h2o2ar_phi_1_200ms_025atm_inject_prim_state.npy
 rde                       = True
 injector_face_area        = 0.05
 injector_area_ratio       = 0.8
@@ -73,13 +73,13 @@ sampling_rate           = 2
 init_training_win 	    = 10
 unsampled_update_freq 	= 15
 
-training_data_dir       = C:\GIT_Fork\ROMify\examples\1D_RDE\FOM_results_11cycles
+training_data_dir       = examples/1D_RDE/FOM_results_11cycles
 training_start_iter     = 50000
 training_step_iter      = 10
 training_end_iter       = 100000
 
 rom_basis_generate       = False
-rom_basis_dir            = C:\GIT_Fork\ROMify\examples\sod_shock_tube\precomputed_basis
+rom_basis_dir            = 11examples/sod_shock_tube/precomputed_basis
 
 sarom_training_step      = 100
 sarom_srom_solver        = PROM
@@ -88,6 +88,10 @@ sarom_moving_avg_tol     = 0.01
 
 # Restart 
 arom_restart            = False
+error_check             = True
+multi_samp              = False
+unsampled_update_freq_2 = 10
+multi_samp_iter         = 5000
 
 
 
