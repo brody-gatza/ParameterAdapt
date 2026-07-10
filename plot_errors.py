@@ -39,7 +39,7 @@ class Settings:
     # Plot simplification
     # ----------------------------
     plot_every_nth_point: int | None = 1
-    
+
     # ----------------------------
     # Moving/running averages
     # ----------------------------
@@ -79,11 +79,13 @@ class Settings:
     # Y-axis limits
     # ----------------------------
     apply_auto_y_limits: bool = True
-    apply_auto_y_limits_to_slope_plots: bool = False
 
     y_limit_padding_fraction: float = 0.08
     auto_y_limits_ignore_extreme_outliers: bool = True
     y_limit_log_min_positive_value: float | None = None
+
+    auto_y_limits_endpoint_exclusion_fraction: float = 0.1
+    auto_y_limits_endpoint_exclusion_max_points: int | None = None
 
     # ----------------------------
     # Colors
@@ -114,6 +116,32 @@ class Settings:
             "indigo",
         ]
     )
+
+    # ----------------------------
+    # Variable normalization
+    # ----------------------------
+    normalize_variables: bool = True
+
+    primitive_variable_normalization_factors: list[float] = field(
+        default_factory=lambda: [
+            2.55,
+            5.47E2,
+            3.46E6,
+            3.52E3,
+            1.0,
+            3.86E12,
+        ]
+    )
+
+    conservative_variable_normalization_factors: list[float] = field(
+        default_factory=lambda: [
+            3.67E-4,
+            1.38E-1,
+            2.51E3,
+            2.19E-4,
+        ]
+    )
+
 
 # ----------------------------
 # Data Locations
@@ -220,6 +248,63 @@ def apply_iteration_limits(
 
     return iterations, variables
 
+def get_normalization_factors_for_filename(
+    filename: Path,
+    settings: Settings,
+) -> list:
+    filename_text = filename.name.lower()
+
+    if "prim" in filename_text:
+        return settings.primitive_variable_normalization_factors
+
+    if "cons" in filename_text:
+        return settings.conservative_variable_normalization_factors
+
+    return []
+
+
+def normalize_loaded_variables(
+    variables: np.ndarray,
+    filename: Path,
+    settings: Settings,
+) -> np.ndarray:
+    variables = np.asarray(variables, dtype=float).copy()
+
+    if not settings.normalize_variables:
+        return variables
+
+    normalization_factors = get_normalization_factors_for_filename(
+        filename=filename,
+        settings=settings,
+    )
+
+    if not normalization_factors:
+        return variables
+
+    num_variables = variables.shape[1]
+
+    for var_index in range(num_variables):
+        if var_index >= len(normalization_factors):
+            normalization_factor = 1.0
+        else:
+            normalization_factor = float(normalization_factors[var_index])
+
+        if not np.isfinite(normalization_factor):
+            raise ValueError(
+                f"Normalization factor for var{var_index + 1} in "
+                f"{filename} is not finite."
+            )
+
+        if normalization_factor == 0.0:
+            raise ValueError(
+                f"Normalization factor for var{var_index + 1} in "
+                f"{filename} is zero."
+            )
+
+        variables[:, var_index] = variables[:, var_index] / normalization_factor
+
+    return variables
+
 
 def load_dataset(
     filename: Path,
@@ -242,6 +327,12 @@ def load_dataset(
         variables,
         filename,
         settings,
+    )
+
+    variables = normalize_loaded_variables(
+        variables=variables,
+        filename=filename,
+        settings=settings,
     )
 
     return LoadedDataset(
@@ -271,7 +362,6 @@ def load_group_data(
     if group.selected_vars is None:
         variable_indices = list(range(max_num_vars))
     else:
-        # User-facing variable numbers are 1-based.
         variable_indices = [index - 1 for index in group.selected_vars]
 
     return LoadedGroup(
@@ -461,59 +551,62 @@ def compute_online_moving_average_comparison_cumulative_sum(
 # Y-AXIS LIMIT HELPERS
 # ============================================================
 
-def get_automatic_endpoint_trim_count(num_points: int) -> int:
-    if num_points < 20:
+def get_endpoint_exclusion_count(
+    num_points: int,
+    settings: Settings,
+) -> int:
+    if num_points <= 0:
         return 0
 
-    trim_count = int(np.ceil(0.02 * num_points))
-    trim_count = min(trim_count, 100)
+    exclusion_fraction = settings.auto_y_limits_endpoint_exclusion_fraction
 
-    max_safe_trim = max(0, (num_points - 10) // 2)
-    trim_count = min(trim_count, max_safe_trim)
+    if exclusion_fraction <= 0.0:
+        return 0
 
-    return trim_count
+    if exclusion_fraction >= 0.5:
+        raise ValueError(
+            "auto_y_limits_endpoint_exclusion_fraction must be less than 0.5."
+        )
 
+    exclusion_count = int(np.floor(exclusion_fraction * num_points))
 
-def automatically_trim_line_endpoints(y: np.ndarray) -> np.ndarray:
-    y = np.asarray(y, dtype=float)
+    if settings.auto_y_limits_endpoint_exclusion_max_points is not None:
+        exclusion_count = min(
+            exclusion_count,
+            settings.auto_y_limits_endpoint_exclusion_max_points,
+        )
 
-    if len(y) == 0:
-        return y
+    max_safe_exclusion_count = max(0, (num_points - 2) // 2)
+    exclusion_count = min(exclusion_count, max_safe_exclusion_count)
 
-    trim_count = get_automatic_endpoint_trim_count(len(y))
-
-    if trim_count <= 0:
-        return y
-
-    if 2 * trim_count >= len(y):
-        return y
-
-    return y[trim_count:-trim_count]
+    return exclusion_count
 
 
-def robust_center_and_scale(y: np.ndarray) -> tuple[float | None, float | None]:
+def exclude_line_endpoints_for_y_limits(
+    y: np.ndarray,
+    settings: Settings,
+) -> np.ndarray:
     y = np.asarray(y, dtype=float)
     y = y[np.isfinite(y)]
 
     if len(y) == 0:
-        return None, None
+        return y
 
-    center = np.median(y)
-    absolute_deviation = np.abs(y - center)
-    mad = np.median(absolute_deviation)
+    exclusion_count = get_endpoint_exclusion_count(
+        num_points=len(y),
+        settings=settings,
+    )
 
-    if not np.isfinite(center):
-        return None, None
+    if exclusion_count <= 0:
+        return y
 
-    if not np.isfinite(mad):
-        return None, None
+    if 2 * exclusion_count >= len(y):
+        return y
 
-    robust_sigma = 1.4826 * mad
-
-    return center, robust_sigma
+    return y[exclusion_count:-exclusion_count]
 
 
-def get_percentile_limits_automatic(
+def get_automatic_y_limits_from_data(
     y: np.ndarray,
 ) -> tuple[float, float] | None:
     y = np.asarray(y, dtype=float)
@@ -521,90 +614,6 @@ def get_percentile_limits_automatic(
 
     if len(y) == 0:
         return None
-
-    num_points = len(y)
-
-    if num_points < 20:
-        lower_percentile = 0.0
-        upper_percentile = 100.0
-    elif num_points < 100:
-        lower_percentile = 2.0
-        upper_percentile = 98.0
-    elif num_points < 1000:
-        lower_percentile = 1.0
-        upper_percentile = 99.0
-    else:
-        lower_percentile = 0.5
-        upper_percentile = 99.5
-
-    y_min = np.percentile(y, lower_percentile)
-    y_max = np.percentile(y, upper_percentile)
-
-    if not np.isfinite(y_min):
-        return None
-
-    if not np.isfinite(y_max):
-        return None
-
-    if y_min >= y_max:
-        return None
-
-    return y_min, y_max
-
-
-def get_robust_automatic_y_limits(
-    y: np.ndarray,
-) -> tuple[float, float] | None:
-    y = np.asarray(y, dtype=float)
-    y = y[np.isfinite(y)]
-
-    if len(y) == 0:
-        return None
-
-    if len(y) < 4:
-        y_min = np.min(y)
-        y_max = np.max(y)
-
-        if y_min == y_max:
-            pad = abs(y_min) * 0.1
-
-            if pad == 0.0:
-                pad = 1.0
-
-            return y_min - pad, y_max + pad
-
-        return y_min, y_max
-
-    center, robust_sigma = robust_center_and_scale(y)
-
-    if center is not None and robust_sigma is not None and robust_sigma > 0.0:
-        modified_z_score_limit = 10.0
-
-        lower_fence = center - modified_z_score_limit * robust_sigma
-        upper_fence = center + modified_z_score_limit * robust_sigma
-
-        visible_y = y[
-            (y >= lower_fence)
-            & (y <= upper_fence)
-        ]
-
-        minimum_fraction_to_keep = 0.50
-        minimum_points_to_keep = min(10, len(y))
-
-        enough_points_kept = len(visible_y) >= minimum_points_to_keep
-        enough_fraction_kept = len(visible_y) >= minimum_fraction_to_keep * len(y)
-
-        if enough_points_kept and enough_fraction_kept:
-            y_min = np.min(visible_y)
-            y_max = np.max(visible_y)
-
-            if np.isfinite(y_min) and np.isfinite(y_max) and y_min < y_max:
-                return y_min, y_max
-
-    percentile_limits = get_percentile_limits_automatic(y)
-
-    if percentile_limits is not None:
-        return percentile_limits
 
     y_min = np.min(y)
     y_max = np.max(y)
@@ -623,7 +632,7 @@ def get_robust_automatic_y_limits(
 
         return y_min - pad, y_max + pad
 
-    if y_min >= y_max:
+    if y_min > y_max:
         return None
 
     return y_min, y_max
@@ -705,7 +714,7 @@ def apply_adaptive_y_limits(
     if not settings.auto_y_limits_ignore_extreme_outliers:
         return
 
-    all_working_y_values = []
+    all_y_values_for_limits = []
 
     for line in ax.get_lines():
         y = np.asarray(line.get_ydata(), dtype=float)
@@ -732,35 +741,33 @@ def apply_adaptive_y_limits(
         if len(working_y) == 0:
             continue
 
-        working_y = automatically_trim_line_endpoints(working_y)
+        working_y = exclude_line_endpoints_for_y_limits(
+            y=working_y,
+            settings=settings,
+        )
 
         if len(working_y) > 0:
-            all_working_y_values.append(working_y)
+            all_y_values_for_limits.append(working_y)
 
-    if not all_working_y_values:
+    if not all_y_values_for_limits:
         return
 
-    combined_working_y = np.concatenate(all_working_y_values)
-    combined_working_y = combined_working_y[np.isfinite(combined_working_y)]
+    combined_y_values_for_limits = np.concatenate(all_y_values_for_limits)
+    combined_y_values_for_limits = combined_y_values_for_limits[
+        np.isfinite(combined_y_values_for_limits)
+    ]
 
-    if len(combined_working_y) == 0:
+    if len(combined_y_values_for_limits) == 0:
         return
 
-    robust_limits = get_robust_automatic_y_limits(combined_working_y)
+    automatic_limits = get_automatic_y_limits_from_data(
+        combined_y_values_for_limits
+    )
 
-    if robust_limits is None:
+    if automatic_limits is None:
         return
 
-    visible_min_working, visible_max_working = robust_limits
-
-    if not np.isfinite(visible_min_working):
-        return
-
-    if not np.isfinite(visible_max_working):
-        return
-
-    if visible_min_working >= visible_max_working:
-        return
+    visible_min_working, visible_max_working = automatic_limits
 
     if logy:
         visible_min = 10.0 ** visible_min_working
@@ -774,6 +781,7 @@ def apply_adaptive_y_limits(
 
         if visible_min >= visible_max:
             return
+
     else:
         visible_min = visible_min_working
         visible_max = visible_max_working
@@ -1022,7 +1030,9 @@ def figure_online_cumulative_ma_comparison(
 
     fig, axes = create_figure(loaded_group.variable_indices)
 
-    for ax, var_index in zip(axes, loaded_group.variable_indices):
+    for ax_left, var_index in zip(axes, loaded_group.variable_indices):
+        ax_right = ax_left.twinx()
+
         for dataset_index, dataset in enumerate(loaded_group.datasets):
             x = dataset.iterations
             y = dataset.variables[:, var_index]
@@ -1046,41 +1056,42 @@ def figure_online_cumulative_ma_comparison(
                 settings,
             )
 
-            ax.plot(
-                x_difference_plot,
-                difference_plot,
-                color=get_plot_color(dataset_index, settings, "primary"),
-                linewidth=1.6,
-                alpha=0.85,
-                label=(
-                    f"{dataset.filename.stem} "
-                    f"MA-{moving_average_window} - "
-                    f"MA-{settings.baseline_moving_average_window}"
-                ),
-                zorder=4,
-            )
-
-            x_plot, cumsum_plot = downsample_for_plotting(
+            x_cumsum_plot, cumsum_plot = downsample_for_plotting(
                 x_comparison,
                 cumulative_moving_average_difference,
                 settings,
             )
 
-            ax.plot(
-                x_plot,
+            ax_left.plot(
+                x_difference_plot,
+                difference_plot,
+                color=get_plot_color(dataset_index, settings, "primary"),
+                linewidth=1.8,
+                alpha=0.90,
+                label=(
+                    f"{dataset.filename.stem} "
+                    f"MA-{moving_average_window} - "
+                    f"MA-{settings.baseline_moving_average_window}"
+                ),
+                zorder=5,
+            )
+
+            ax_right.plot(
+                x_cumsum_plot,
                 cumsum_plot,
                 color=get_plot_color(dataset_index, settings, "secondary"),
                 linewidth=3.0,
+                linestyle="-.",
                 alpha=1.0,
                 label=(
                     f"{dataset.filename.stem} cumsum "
-                    f"(CFD MA-{moving_average_window} minus "
-                    f"CFD MA-{settings.baseline_moving_average_window})"
+                    f"(MA-{moving_average_window} - "
+                    f"MA-{settings.baseline_moving_average_window})"
                 ),
                 zorder=6,
             )
 
-        ax.axhline(
+        ax_left.axhline(
             0.0,
             color="black",
             linewidth=1.0,
@@ -1089,22 +1100,62 @@ def figure_online_cumulative_ma_comparison(
             zorder=1,
         )
 
-        format_axis(
-            ax,
-            ylabel=f"MA difference / cumsum var{var_index + 1}",
-            settings=settings,
-            logy=False,
+        ax_right.axhline(
+            0.0,
+            color="gray",
+            linewidth=1.0,
+            linestyle=":",
+            alpha=0.5,
+            zorder=1,
+        )
+
+        ax_left.set_ylabel(
+            f"MA difference var{var_index + 1}",
+            fontsize=12,
+        )
+
+        ax_right.set_ylabel(
+            f"cumsum MA difference var{var_index + 1}",
+            fontsize=12,
+        )
+
+        ax_left.set_axisbelow(True)
+
+        if settings.show_grid:
+            ax_left.grid(
+                True,
+                which="both",
+                linestyle="--",
+                linewidth=0.7,
+                alpha=0.6,
+                zorder=0,
+            )
+
+        ax_left.tick_params(axis="both", labelsize=11)
+        ax_right.tick_params(axis="y", labelsize=11)
+
+        merge_twin_axis_legends(
+            ax_left,
+            ax_right,
+            fontsize=9,
         )
 
         apply_limits_if_enabled(
-            ax,
+            ax_left,
+            settings=settings,
+            logy=False,
+            keep_zero_visible=True,
+        )
+
+        apply_limits_if_enabled(
+            ax_right,
             settings=settings,
             logy=False,
             keep_zero_visible=True,
         )
 
     title = (
-        f"{group.title} Cumulative Sum of Moving-Average Comparison "
+        f"{group.title} Moving-Average Difference and Cumulative Sum "
         f"[MA-{moving_average_window} minus "
         f"MA-{settings.baseline_moving_average_window}]"
     )
@@ -1211,13 +1262,12 @@ def figure_slope_of_cumulative_ma_comparison(
             logy=False,
         )
 
-        if settings.apply_auto_y_limits_to_slope_plots:
-            apply_limits_if_enabled(
-                ax,
-                settings=settings,
-                logy=False,
-                keep_zero_visible=True,
-            )
+        apply_limits_if_enabled(
+            ax,
+            settings=settings,
+            logy=False,
+            keep_zero_visible=True,
+        )
 
     title = (
         f"{group.title} Slope of Cumulative Moving-Average Comparison "
@@ -1502,13 +1552,12 @@ def figure_slope(
             logy=slope_logy,
         )
 
-        if settings.apply_auto_y_limits_to_slope_plots:
-            apply_limits_if_enabled(
-                ax,
-                settings=settings,
-                logy=slope_logy,
-                keep_zero_visible=not slope_logy,
-            )
+        apply_limits_if_enabled(
+            ax,
+            settings=settings,
+            logy=slope_logy,
+            keep_zero_visible=not slope_logy,
+        )
 
     title = group.title
 
@@ -1624,13 +1673,12 @@ def figure_cumulative_slope(
             logy=settings.cumulative_slope_logy,
         )
 
-        if settings.apply_auto_y_limits_to_slope_plots:
-            apply_limits_if_enabled(
-                ax,
-                settings=settings,
-                logy=settings.cumulative_slope_logy,
-                keep_zero_visible=not settings.cumulative_slope_logy,
-            )
+        apply_limits_if_enabled(
+            ax,
+            settings=settings,
+            logy=settings.cumulative_slope_logy,
+            keep_zero_visible=not settings.cumulative_slope_logy,
+        )
 
     title = f"{group.title} Cumulative Sum of Raw Error Slope"
 
