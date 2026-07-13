@@ -258,7 +258,7 @@ if __name__ == '__main__':
     # ROM case list settings
     # ------------------------------------------------------------
 
-    s_list = [1, 2, 50, 10, 15, 20]
+    s_list = [5, 10]
     u_list = [1, 2, 5, 10, 15, 20]
 
     rom_label = os.path.join('AROM_results', 'cons_prim')
