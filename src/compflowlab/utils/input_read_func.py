@@ -183,5 +183,6 @@ def init_solver_param(args,input_param):
     solver_param['multi_samp']            = eval(input_param['multi_samp'])
     solver_param['unsampled_update_freq_2'] = float(input_param['unsampled_update_freq_2'])
     solver_param['multi_samp_iter']       = float(input_param['multi_samp_iter'])
+    solver_param['parameter_adapt']       = float(input_param['parameter_adapt'])
 
     return solver_param

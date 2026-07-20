@@ -501,15 +501,9 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             Q_cons_proj_error_reshape = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons_proj_error)[:,2:-2]
             Q_cons_FOM_max = np.max(reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons_FOM)[:,2:-2], axis=1)
 
-            # if solver_param['gas_model'] == 'Air':
             Q_prim_interp_error_reshape = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim_interp_error)[:,2:-2]
             Q_prim_proj_error_reshape = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim_proj_error)[:,2:-2]
             Q_prim_FOM_max = np.max(reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim_FOM)[:,2:-2], axis=1)
-
-            # Is heat release not stored in the state vector?    
-            # else:
-            #     state['prim_results_save'][:-1,:] = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],[state['Q_prim']])[:,2:-2]
-            #     state['prim_results_save'][-1,:]  = state['heat_release'][2:-2]
 
             # Normalize the errors by the maximum value in the field
             Q_cons_interp_error_reshape = Q_cons_interp_error_reshape / Q_cons_FOM_max[:, np.newaxis]
@@ -536,49 +530,55 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             # Write the error values
             dir_results = os.path.join(solver_param['dir_results'] + "/error/")
             if iter == int(solver_param['FOM2ROM_trans_iter']) + 1:
+                # Creates a new file or clears an existing file
                 mode = "w"
 
-                gradient_files = [
-                    "grad_prim_interp_max.txt",
-                    "grad_prim_interp_min.txt",
-                    "grad_prim_interp_avg.txt",
-                    "grad_prim_proj_max.txt",
-                    "grad_prim_proj_min.txt",
-                    "grad_prim_proj_avg.txt",
-                    "grad_cons_interp_max.txt",
-                    "grad_cons_interp_min.txt",
-                    "grad_cons_interp_avg.txt",
-                    "grad_cons_proj_max.txt",
-                    "grad_cons_proj_min.txt",
-                    "grad_cons_proj_avg.txt",
-                ]
+                state['cons_interp_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                state['cons_interp_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                state['cons_proj_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                state['cons_proj_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
 
-                for filename in gradient_files:
-                    open(dir_results + filename, "w").close()
+                state['prim_interp_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                state['prim_interp_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                state['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                state['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
 
             else:
+                # Appends to an exisitng file
                 mode = "a"
 
-                # # Calculate the error gradient
-                # grad_cons_interp = np.abs(Q_cons_interp_error_reshape - state['Q_cons_interp_error_save'])
-                # grad_prim_interp = np.abs(Q_prim_interp_error_reshape - state['Q_prim_interp_error_save'])
-                # grad_cons_proj = np.abs(Q_cons_proj_error_reshape - state['Q_cons_proj_error_save'])
-                # grad_prim_proj = np.abs(Q_prim_proj_error_reshape - state['Q_prim_proj_error_save'])
-            
-                # # Calculate the gradient QoIs per variable
-                # grad_cons_interp_max = np.max(grad_cons_interp, axis=1)
-                # grad_cons_interp_min = np.min(grad_cons_interp, axis=1)
-                # grad_cons_interp_avg = np.mean(grad_cons_interp, axis=1)
-                # grad_cons_proj_max = np.max(grad_cons_proj, axis=1)
-                # grad_cons_proj_min = np.min(grad_cons_proj, axis=1)
-                # grad_cons_proj_avg = np.mean(grad_cons_proj, axis=1)
+                # Compute the error slope
+                cons_interp_max_slope = cons_interp_max - state['cons_interp_max_store']
+                cons_interp_avg_slope = cons_interp_avg - state['cons_interp_avg_store']
+                cons_proj_max_slope = cons_proj_max - state['cons_proj_max_store']
+                cons_proj_avg_slope = cons_proj_avg - state['cons_proj_avg_store']
 
-                # grad_prim_interp_max = np.max(grad_prim_interp, axis=1)
-                # grad_prim_interp_min = np.min(grad_prim_interp, axis=1)
-                # grad_prim_interp_avg = np.mean(grad_prim_interp, axis=1)
-                # grad_prim_proj_max = np.max(grad_prim_proj, axis=1)
-                # grad_prim_proj_min = np.min(grad_prim_proj, axis=1)
-                # grad_prim_proj_avg = np.mean(grad_prim_proj, axis=1)
+                prim_interp_max_slope = prim_interp_max - state['prim_interp_max_store']
+                prim_interp_avg_slope = prim_interp_avg - state['prim_interp_avg_store']
+                prim_proj_max_slope = prim_proj_max - state['prim_proj_max_store']
+                prim_proj_avg_slope = prim_proj_avg - state['prim_proj_avg_store']
+
+                # Find the sign and add to the counter
+                state['cons_interp_max_slope_counter'] += np.sign(cons_interp_max_slope)
+                state['cons_interp_avg_slope_counter'] += np.sign(cons_interp_avg_slope)
+                state['cons_proj_max_slope_counter'] += np.sign(cons_proj_max_slope)
+                state['cons_proj_avg_slope_counter'] += np.sign(cons_proj_avg_slope)
+
+                state['prim_interp_max_slope_counter'] += np.sign(prim_interp_max_slope)
+                state['prim_interp_avg_slope_counter'] += np.sign(prim_interp_avg_slope)
+                state['prim_proj_max_slope_counter'] += np.sign(prim_proj_max_slope)
+                state['prim_proj_avg_slope_counter'] += np.sign(prim_proj_avg_slope)
+
+            # Store the current error QoIs
+            state['cons_interp_max_store'] = cons_interp_max
+            state['cons_interp_avg_store'] = cons_interp_avg
+            state['cons_proj_max_store'] = cons_proj_max
+            state['cons_proj_avg_store'] = cons_proj_avg
+
+            state['prim_interp_max_store'] = prim_interp_max
+            state['prim_interp_avg_store'] = prim_interp_avg
+            state['prim_proj_max_store'] = prim_proj_max
+            state['prim_proj_avg_store'] = prim_proj_avg
 
             # # Save the current errors for gradient calculation
             # state['Q_cons_interp_error_save'] = Q_cons_interp_error_reshape
@@ -635,43 +635,71 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
             with open(dir_results + "cons_proj_avg.txt", mode) as file:
                 file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_proj_avg) + "\n")
-            
-            # if iter > int(solver_param['FOM2ROM_trans_iter']) + 1:
-            #     with open(dir_results + "grad_prim_interp_max.txt", mode) as file:
-            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_interp_max) + "\n")
-                    
-            #     with open(dir_results + "grad_prim_interp_min.txt", mode) as file:
-            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_interp_min) + "\n")
 
-            #     with open(dir_results + "grad_prim_interp_avg.txt", mode) as file:
-            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_interp_avg) + "\n")
 
-            #     with open(dir_results + "grad_prim_proj_max.txt", mode) as file:
-            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_proj_max) + "\n")
-                    
-            #     with open(dir_results + "grad_prim_proj_min.txt", mode) as file:
-            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_proj_min) + "\n")
+            with open(dir_results + "cons_interp_max_slope_counter.txt", mode) as file:
+                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['cons_interp_max_slope_counter']) + "\n")
 
-            #     with open(dir_results + "grad_prim_proj_avg.txt", mode) as file:
-            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_proj_avg) + "\n")
+            with open(dir_results + "cons_interp_avg_slope_counter.txt", mode) as file:
+                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['cons_interp_avg_slope_counter']) + "\n")
 
-            #     with open(dir_results + "grad_cons_interp_max.txt", mode) as file:
-            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_interp_max) + "\n")
-                    
-            #     with open(dir_results + "grad_cons_interp_min.txt", mode) as file:
-            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_interp_min) + "\n")
+            with open(dir_results + "cons_proj_max_slope_counter.txt", mode) as file:
+                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['cons_proj_max_slope_counter']) + "\n")
 
-            #     with open(dir_results + "grad_cons_interp_avg.txt", mode) as file:
-            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_interp_avg) + "\n")
+            with open(dir_results + "cons_proj_avg_slope_counter.txt", mode) as file:
+                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['cons_proj_avg_slope_counter']) + "\n")
 
-            #     with open(dir_results + "grad_cons_proj_max.txt", mode) as file:
-            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_proj_max) + "\n")
-                    
-            #     with open(dir_results + "grad_cons_proj_min.txt", mode) as file:
-            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_proj_min) + "\n")
+            with open(dir_results + "prim_interp_max_slope_counter.txt", mode) as file:
+                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['prim_interp_max_slope_counter']) + "\n")
 
-            #     with open(dir_results + "grad_cons_proj_avg.txt", mode) as file:
-            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_proj_avg) + "\n")
+            with open(dir_results + "prim_interp_avg_slope_counter.txt", mode) as file:
+                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['prim_interp_avg_slope_counter']) + "\n")
+
+            with open(dir_results + "prim_proj_max_slope_counter.txt", mode) as file:
+                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['prim_proj_max_slope_counter']) + "\n")
+
+            with open(dir_results + "prim_proj_avg_slope_counter.txt", mode) as file:
+                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['prim_proj_avg_slope_counter']) + "\n")
+
+
+            with open(dir_results + "sampling_freq.txt", mode) as file:
+                file.write(str(iter) + "," + str(solver_param['unsamped_update_freq']))
+
+            # Check if the slope counter thresholds are exceeded
+            if solver_param['parameter_adapt']:
+                if np.any(np.abs(state['prim_interp_max_slope_counter']) >= 100):
+
+                    if np.any(state['prim_interp_max_slope_counter'] >= 100):
+                        solver_param['unsampled_update_freq'] -= 1
+                    elif np.any(state['prim_interp_max_slope_counter'] <= -100):
+                        solver_param['unsampled_update_freq'] += 1
+
+                    print('Updated the sampling frequency to', solver_param['unsampled_update_freq'])
+
+                    # Reset the slope counter
+                    state['cons_interp_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                    state['cons_interp_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                    state['cons_proj_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                    state['cons_proj_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
+
+                    state['prim_interp_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                    state['prim_interp_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                    state['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                    state['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+
+                    # Update the sampling iterations
+                    past_samples = solver_param['resample_iter_list'][solver_param['resample_iter_list'] <= iter]
+
+                    future_samples = np.arange(
+                        iter + 1,
+                        solver_param['num_step'],
+                        solver_param['unsampled_update_freq'],
+                        dtype=int
+                    )
+
+                    solver_param['resample_iter_list'] = np.concatenate((past_samples, future_samples))
+
+
         # Update Samples
         # if (sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0) or (iter == int(solver_param['init_training_win'])+1):
         # if (sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0):
