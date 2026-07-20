@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+import argparse
 from pathlib import Path
 
 import numpy as np
@@ -38,13 +39,13 @@ class Settings:
     # ----------------------------
     # Plot simplification
     # ----------------------------
-    plot_every_nth_point: int | None = 1
+    plot_every_nth_point: int | None = 33
 
     # ----------------------------
     # Moving/running averages
     # ----------------------------
     plot_moving_average: bool = True
-    moving_average_windows: list[int] = field(default_factory=lambda: [250])
+    moving_average_windows: list[int] = field(default_factory=lambda: [1000])
     baseline_moving_average_window: int = 5000
 
     plot_running_average: bool = True
@@ -54,26 +55,46 @@ class Settings:
     # ----------------------------
     plot_online_cumulative_sum_of_moving_average_comparison: bool = True
     plot_slope_of_cumulative_sum_of_moving_average_comparison: bool = True
-    plot_raw_ma_and_cumulative_sum_second_axis: bool = True
+
+    # Disabled per request.
+    plot_raw_ma_and_cumulative_sum_second_axis: bool = False
+
+    plot_moving_average_ratio: bool = False
+    plot_rms_ratio: bool = False
+    plot_lag1_autocorrelation: bool = True
+    plot_short_long_rms: bool = False
 
     # ----------------------------
     # Slope figure toggles
     # ----------------------------
     calculate_slope: bool = True
 
-    plot_slope_of_raw: bool = False
-    plot_slope_of_moving_average: bool = False
+    plot_slope_of_raw: bool = True
+    plot_slope_of_moving_average: bool = True
+    plot_slope_of_rms_average: bool = False
     plot_slope_magnitude: bool = False
-    plot_moving_average_of_slope: bool = False
+    plot_moving_average_of_slope: bool = True
     plot_raw_slope_moving_average_only: bool = False
     plot_positive_raw_slopes_only: bool = False
 
-    plot_cumulative_sum_of_error_slope: bool = True
-    plot_moving_average_of_cumulative_sum: bool = True
+    plot_cumulative_sum_of_error_slope: bool = False
+    plot_cumulative_sum_of_moving_average_slope: bool = False
+    plot_moving_average_of_cumulative_sum: bool = False
+
+    plot_raw_slope_sign_running_total: bool = True
+    plot_raw_slope_sign_indicator: bool = False
+    plot_moving_average_of_raw_slope_sign_indicator: bool = False
+
+
 
     slope_logy: bool = False
     slope_magnitude_logy: bool = False
     cumulative_slope_logy: bool = False
+
+    # ----------------------------
+    # Ratio plot options
+    # ----------------------------
+    ratio_logy: bool = False
 
     # ----------------------------
     # Y-axis limits
@@ -118,34 +139,41 @@ class Settings:
     )
 
     # ----------------------------
+    # Variable names
+    # ----------------------------
+    primitive_variable_names: list[str] | None = None
+    conservative_variable_names: list[str] | None = None
+
+    # ----------------------------
     # Variable normalization
     # ----------------------------
-    normalize_variables: bool = True
+    normalize_variables: bool = False
 
-    primitive_variable_normalization_factors: list[float] = field(
-        default_factory=lambda: [
-            2.55,
-            5.47E2,
-            3.46E6,
-            3.52E3,
-            1.0,
-            3.86E12,
-        ]
-    )
+    # primitive_variable_normalization_factors: list[float] = field(
+    #     default_factory=lambda: [
+    #         2.55,
+    #         1250,
+    #         3.46E6,
+    #         3.52E3,
+    #         1.0,
+    #         3.86E12,
+    #     ]
+    # )
 
-    conservative_variable_normalization_factors: list[float] = field(
-        default_factory=lambda: [
-            3.67E-4,
-            1.38E-1,
-            2.51E3,
-            2.19E-4,
-        ]
-    )
+    # conservative_variable_normalization_factors: list[float] = field(
+    #     default_factory=lambda: [
+    #         3.67E-4,
+    #         1.38E-1,
+    #         2.51E3,
+    #         2.19E-4,
+    #     ]
+    # )
 
 
 # ----------------------------
 # Data Locations
 # ----------------------------
+
 @dataclass(frozen=True)
 class FigureGroup:
     title: str
@@ -155,23 +183,32 @@ class FigureGroup:
     skiprows: int | None = None
 
 
-SETTINGS = Settings()
+SETTINGS = Settings(
+    primitive_variable_names=[
+        "Density",
+        "Velocity",
+        "Pressure",
+        "Temperature",
+        "Y Reactant",
+        "Heat Release Rate",
+    ],
+)
 
 FIGURE_GROUPS = [
     FigureGroup(
         title="Primitive Variables - Max",
         filenames=[
             "prim_interp_max.txt",
-            "prim_proj_max.txt",
+            # "prim_proj_max.txt",
         ],
         selected_vars=None,
         logy=True,
     ),
-        FigureGroup(
+    FigureGroup(
         title="Conservative Variables - Max",
         filenames=[
             "cons_interp_max.txt",
-            "cons_proj_max.txt",
+            # "cons_proj_max.txt",
         ],
         selected_vars=None,
         logy=True,
@@ -180,7 +217,7 @@ FIGURE_GROUPS = [
         title="Primitive Variables - Avg",
         filenames=[
             "prim_interp_avg.txt",
-            "prim_proj_avg.txt",
+            # "prim_proj_avg.txt",
         ],
         selected_vars=None,
         logy=True,
@@ -189,7 +226,7 @@ FIGURE_GROUPS = [
         title="Conservative Variables - Avg",
         filenames=[
             "cons_interp_avg.txt",
-            "cons_proj_avg.txt",
+            # "cons_proj_avg.txt",
         ],
         selected_vars=None,
         logy=True,
@@ -213,6 +250,110 @@ class LoadedGroup:
     group: FigureGroup
     datasets: list[LoadedDataset]
     variable_indices: list[int]
+
+
+# ============================================================
+# VARIABLE NAME HELPERS
+# ============================================================
+
+def get_variable_kind_for_filename(filename: Path) -> str | None:
+    filename_text = filename.name.lower()
+
+    if "prim" in filename_text:
+        return "primitive"
+
+    if "cons" in filename_text:
+        return "conservative"
+
+    return None
+
+
+def get_variable_kind_for_group(group: FigureGroup) -> str | None:
+    title_text = group.title.lower()
+
+    if "primitive" in title_text or "prim" in title_text:
+        return "primitive"
+
+    if "conservative" in title_text or "cons" in title_text:
+        return "conservative"
+
+    detected_kinds = set()
+
+    for filename_text in group.filenames:
+        variable_kind = get_variable_kind_for_filename(Path(filename_text))
+
+        if variable_kind is not None:
+            detected_kinds.add(variable_kind)
+
+    if len(detected_kinds) == 1:
+        return detected_kinds.pop()
+
+    return None
+
+
+def get_variable_names_for_kind(
+    variable_kind: str | None,
+    settings: Settings,
+) -> list[str] | None:
+    if variable_kind == "primitive":
+        return settings.primitive_variable_names
+
+    if variable_kind == "conservative":
+        return settings.conservative_variable_names
+
+    return None
+
+
+def get_default_variable_label(var_index: int) -> str:
+    return f"var{var_index + 1}"
+
+
+def get_variable_label_from_names(
+    variable_names: list[str] | None,
+    var_index: int,
+) -> str:
+    default_label = get_default_variable_label(var_index)
+
+    if variable_names is None:
+        return default_label
+
+    if var_index >= len(variable_names):
+        return default_label
+
+    variable_label = str(variable_names[var_index]).strip()
+
+    if variable_label == "":
+        return default_label
+
+    return variable_label
+
+
+def get_variable_label_for_filename(
+    filename: Path,
+    settings: Settings,
+    var_index: int,
+) -> str:
+    variable_kind = get_variable_kind_for_filename(filename)
+    variable_names = get_variable_names_for_kind(variable_kind, settings)
+
+    return get_variable_label_from_names(
+        variable_names=variable_names,
+        var_index=var_index,
+    )
+
+
+def get_variable_label_for_group(
+    group: FigureGroup,
+    settings: Settings,
+    var_index: int,
+) -> str:
+    variable_kind = get_variable_kind_for_group(group)
+    variable_names = get_variable_names_for_kind(variable_kind, settings)
+
+    return get_variable_label_from_names(
+        variable_names=variable_names,
+        var_index=var_index,
+    )
 
 
 # ============================================================
@@ -247,6 +388,7 @@ def apply_iteration_limits(
         )
 
     return iterations, variables
+
 
 def get_normalization_factors_for_filename(
     filename: Path,
@@ -284,6 +426,12 @@ def normalize_loaded_variables(
     num_variables = variables.shape[1]
 
     for var_index in range(num_variables):
+        variable_label = get_variable_label_for_filename(
+            filename=filename,
+            settings=settings,
+            var_index=var_index,
+        )
+
         if var_index >= len(normalization_factors):
             normalization_factor = 1.0
         else:
@@ -291,13 +439,13 @@ def normalize_loaded_variables(
 
         if not np.isfinite(normalization_factor):
             raise ValueError(
-                f"Normalization factor for var{var_index + 1} in "
+                f"Normalization factor for {variable_label} in "
                 f"{filename} is not finite."
             )
 
         if normalization_factor == 0.0:
             raise ValueError(
-                f"Normalization factor for var{var_index + 1} in "
+                f"Normalization factor for {variable_label} in "
                 f"{filename} is zero."
             )
 
@@ -451,6 +599,76 @@ def compute_moving_average_ignore_nan(
     return x, y_avg
 
 
+def compute_moving_rms(
+    x: np.ndarray,
+    y: np.ndarray,
+    window: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    if window <= 0:
+        raise ValueError("Moving-RMS window must be positive.")
+
+    y_rms = np.full(len(y), np.nan)
+    cumulative_sum_squares = 0.0
+
+    for i in range(len(y)):
+        cumulative_sum_squares += y[i] * y[i]
+
+        if i >= window:
+            cumulative_sum_squares -= y[i - window] * y[i - window]
+            y_rms[i] = np.sqrt(cumulative_sum_squares / window)
+        else:
+            y_rms[i] = np.sqrt(cumulative_sum_squares / (i + 1))
+
+    return x, y_rms
+
+
+def compute_moving_lag1_autocorrelation(
+    x: np.ndarray,
+    y: np.ndarray,
+    window: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    if window <= 0:
+        raise ValueError("Lag-1 autocorrelation window must be positive.")
+
+    lag1_autocorrelation = np.full(len(y), np.nan)
+
+    for i in range(len(y)):
+        start_index = max(0, i - window + 1)
+        y_window = y[start_index : i + 1]
+
+        if len(y_window) < 3:
+            continue
+
+        y0 = y_window[:-1]
+        y1 = y_window[1:]
+
+        finite_mask = np.isfinite(y0) & np.isfinite(y1)
+
+        if np.count_nonzero(finite_mask) < 2:
+            continue
+
+        y0 = y0[finite_mask]
+        y1 = y1[finite_mask]
+
+        y0 = y0 - np.mean(y0)
+        y1 = y1 - np.mean(y1)
+
+        denominator = np.sqrt(np.sum(y0 * y0) * np.sum(y1 * y1))
+
+        if denominator == 0.0:
+            lag1_autocorrelation[i] = 0.0
+        else:
+            lag1_autocorrelation[i] = np.sum(y0 * y1) / denominator
+
+    return x, lag1_autocorrelation
+
+
 def compute_running_average(
     x: np.ndarray,
     y: np.ndarray,
@@ -462,6 +680,105 @@ def compute_running_average(
     running_average = cumulative_sum / sample_count
 
     return x, running_average
+
+
+def compute_slope_sign_indicator(
+    slope_y: np.ndarray,
+    use_nan_for_zero_or_invalid: bool = False,
+) -> np.ndarray:
+    slope_y = np.asarray(slope_y, dtype=float)
+
+    if use_nan_for_zero_or_invalid:
+        sign_indicator = np.full(len(slope_y), np.nan)
+    else:
+        sign_indicator = np.zeros(len(slope_y), dtype=float)
+
+    positive_mask = np.isfinite(slope_y) & (slope_y > 0.0)
+    negative_mask = np.isfinite(slope_y) & (slope_y < 0.0)
+
+    sign_indicator[positive_mask] = 1.0
+    sign_indicator[negative_mask] = -1.0
+
+    return sign_indicator
+
+
+def figure_raw_slope_sign_running_total(
+    group: FigureGroup,
+    settings: Settings,
+):
+    loaded_group = load_group_data(group, settings)
+
+    fig, axes = create_figure(loaded_group.variable_indices)
+
+    for ax, var_index in zip(axes, loaded_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
+        for dataset_index, dataset in enumerate(loaded_group.datasets):
+            x = dataset.iterations
+            y = dataset.variables[:, var_index]
+
+            slope_x, raw_slope = compute_slope(x, y)
+
+            slope_sign = compute_slope_sign_indicator(
+                raw_slope,
+                use_nan_for_zero_or_invalid=False,
+            )
+
+            slope_sign_running_total = np.cumsum(slope_sign)
+
+            x_plot, running_total_plot = downsample_for_plotting(
+                slope_x,
+                slope_sign_running_total,
+                settings,
+            )
+
+            ax.plot(
+                x_plot,
+                running_total_plot,
+                color=get_plot_color(dataset_index, settings, "primary"),
+                linewidth=2.2,
+                alpha=0.95,
+                label=(
+                    f"{dataset.filename.stem} running total of raw slope sign"
+                ),
+                zorder=5,
+            )
+
+        ax.axhline(
+            0.0,
+            color="black",
+            linewidth=1.0,
+            linestyle="--",
+            alpha=0.5,
+            zorder=1,
+        )
+
+        format_axis(
+            ax,
+            ylabel=f"running total sign d({variable_label})/dIteration",
+            settings=settings,
+            logy=False,
+        )
+
+        apply_limits_if_enabled(
+            ax,
+            settings=settings,
+            logy=False,
+            keep_zero_visible=True,
+        )
+
+    title = (
+        f"{group.title} Running Total of Raw Slope Sign "
+        "[+1 positive slope, -1 negative slope]"
+    )
+
+    finalize_figure(fig, axes, title)
+
+    return fig
 
 
 def compute_slope(
@@ -497,6 +814,46 @@ def compute_cumulative_sum(y: np.ndarray) -> np.ndarray:
     y = np.asarray(y, dtype=float)
     y = np.nan_to_num(y, nan=0.0)
     return np.cumsum(y)
+
+
+def compute_ratio(
+    numerator: np.ndarray,
+    denominator: np.ndarray,
+) -> np.ndarray:
+    numerator = np.asarray(numerator, dtype=float)
+    denominator = np.asarray(denominator, dtype=float)
+
+    ratio = np.full(len(numerator), np.nan)
+
+    valid_mask = (
+        np.isfinite(numerator)
+        & np.isfinite(denominator)
+        & (denominator != 0.0)
+    )
+
+    ratio[valid_mask] = numerator[valid_mask] / denominator[valid_mask]
+
+    return ratio
+
+
+def compute_cumsum_normalized_by_iteration(
+    x: np.ndarray,
+    cumulative_sum: np.ndarray,
+) -> np.ndarray:
+    x = np.asarray(x, dtype=float)
+    cumulative_sum = np.asarray(cumulative_sum, dtype=float)
+
+    normalized = np.full(len(cumulative_sum), np.nan)
+
+    valid_mask = (
+        np.isfinite(x)
+        & np.isfinite(cumulative_sum)
+        & (x != 0.0)
+    )
+
+    normalized[valid_mask] = cumulative_sum[valid_mask] / x[valid_mask]
+
+    return normalized
 
 
 def compute_online_moving_average_comparison_cumulative_sum(
@@ -931,6 +1288,12 @@ def figure_main_data(
     fig, axes = create_figure(loaded_group.variable_indices)
 
     for ax, var_index in zip(axes, loaded_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
         for dataset_index, dataset in enumerate(loaded_group.datasets):
             x = dataset.iterations
             y = dataset.variables[:, var_index]
@@ -995,7 +1358,7 @@ def figure_main_data(
 
         format_axis(
             ax,
-            ylabel=f"var{var_index + 1}",
+            ylabel=variable_label,
             settings=settings,
             logy=group.logy,
         )
@@ -1018,7 +1381,7 @@ def figure_main_data(
 
 
 # ============================================================
-# FIGURE 2: ONLINE CUMULATIVE MOVING-AVERAGE COMPARISON
+# FIGURE 2: CUMULATIVE MOVING-AVERAGE COMPARISON
 # ============================================================
 
 def figure_online_cumulative_ma_comparison(
@@ -1031,6 +1394,12 @@ def figure_online_cumulative_ma_comparison(
     fig, axes = create_figure(loaded_group.variable_indices)
 
     for ax_left, var_index in zip(axes, loaded_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
         ax_right = ax_left.twinx()
 
         for dataset_index, dataset in enumerate(loaded_group.datasets):
@@ -1041,7 +1410,7 @@ def figure_online_cumulative_ma_comparison(
                 x_comparison,
                 _y_short_ma,
                 _y_long_ma,
-                moving_average_difference,
+                _moving_average_difference,
                 cumulative_moving_average_difference,
             ) = compute_online_moving_average_comparison_cumulative_sum(
                 x,
@@ -1050,10 +1419,9 @@ def figure_online_cumulative_ma_comparison(
                 baseline_moving_average_window=settings.baseline_moving_average_window,
             )
 
-            x_difference_plot, difference_plot = downsample_for_plotting(
+            normalized_cumsum = compute_cumsum_normalized_by_iteration(
                 x_comparison,
-                moving_average_difference,
-                settings,
+                cumulative_moving_average_difference,
             )
 
             x_cumsum_plot, cumsum_plot = downsample_for_plotting(
@@ -1062,29 +1430,35 @@ def figure_online_cumulative_ma_comparison(
                 settings,
             )
 
+            x_norm_plot, norm_plot = downsample_for_plotting(
+                x_comparison,
+                normalized_cumsum,
+                settings,
+            )
+
             ax_left.plot(
-                x_difference_plot,
-                difference_plot,
+                x_cumsum_plot,
+                cumsum_plot,
                 color=get_plot_color(dataset_index, settings, "primary"),
-                linewidth=1.8,
-                alpha=0.90,
+                linewidth=2.4,
+                alpha=0.95,
                 label=(
-                    f"{dataset.filename.stem} "
-                    f"MA-{moving_average_window} - "
-                    f"MA-{settings.baseline_moving_average_window}"
+                    f"{dataset.filename.stem} cumsum "
+                    f"(MA-{moving_average_window} - "
+                    f"MA-{settings.baseline_moving_average_window})"
                 ),
                 zorder=5,
             )
 
             ax_right.plot(
-                x_cumsum_plot,
-                cumsum_plot,
+                x_norm_plot,
+                norm_plot,
                 color=get_plot_color(dataset_index, settings, "secondary"),
-                linewidth=3.0,
+                linewidth=2.4,
                 linestyle="-.",
                 alpha=1.0,
                 label=(
-                    f"{dataset.filename.stem} cumsum "
+                    f"{dataset.filename.stem} cumsum / iteration "
                     f"(MA-{moving_average_window} - "
                     f"MA-{settings.baseline_moving_average_window})"
                 ),
@@ -1110,12 +1484,12 @@ def figure_online_cumulative_ma_comparison(
         )
 
         ax_left.set_ylabel(
-            f"MA difference var{var_index + 1}",
+            f"cumsum MA difference {variable_label}",
             fontsize=12,
         )
 
         ax_right.set_ylabel(
-            f"cumsum MA difference var{var_index + 1}",
+            f"cumsum MA difference / iteration {variable_label}",
             fontsize=12,
         )
 
@@ -1155,7 +1529,8 @@ def figure_online_cumulative_ma_comparison(
         )
 
     title = (
-        f"{group.title} Moving-Average Difference and Cumulative Sum "
+        f"{group.title} Cumulative Moving-Average Difference "
+        f"and Iteration-Normalized Cumulative Difference "
         f"[MA-{moving_average_window} minus "
         f"MA-{settings.baseline_moving_average_window}]"
     )
@@ -1179,6 +1554,12 @@ def figure_slope_of_cumulative_ma_comparison(
     fig, axes = create_figure(loaded_group.variable_indices)
 
     for ax, var_index in zip(axes, loaded_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
         for dataset_index, dataset in enumerate(loaded_group.datasets):
             x = dataset.iterations
             y = dataset.variables[:, var_index]
@@ -1257,7 +1638,7 @@ def figure_slope_of_cumulative_ma_comparison(
 
         format_axis(
             ax,
-            ylabel=f"d cumsum MA comparison var{var_index + 1}/dIteration",
+            ylabel=f"d cumsum MA comparison ({variable_label})/dIteration",
             settings=settings,
             logy=False,
         )
@@ -1282,6 +1663,7 @@ def figure_slope_of_cumulative_ma_comparison(
 
 # ============================================================
 # FIGURE 4: RAW, MOVING AVERAGE, AND CUMSUM ON SECOND AXIS
+# Disabled by default, retained for optional future use.
 # ============================================================
 
 def figure_raw_ma_cumsum_second_axis(
@@ -1294,6 +1676,12 @@ def figure_raw_ma_cumsum_second_axis(
     fig, axes = create_figure(loaded_group.variable_indices)
 
     for ax_left, var_index in zip(axes, loaded_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
         ax_right = ax_left.twinx()
 
         for dataset_index, dataset in enumerate(loaded_group.datasets):
@@ -1362,7 +1750,7 @@ def figure_raw_ma_cumsum_second_axis(
                 zorder=6,
             )
 
-        ax_left.set_ylabel(f"var{var_index + 1}", fontsize=12)
+        ax_left.set_ylabel(variable_label, fontsize=12)
         ax_right.set_ylabel(
             f"cumsum(MA-{moving_average_window} - "
             f"{settings.baseline_moving_average_window})",
@@ -1418,7 +1806,368 @@ def figure_raw_ma_cumsum_second_axis(
 
 
 # ============================================================
-# FIGURE 5: SLOPE
+# FIGURE 5: MOVING-AVERAGE RATIO
+# ============================================================
+
+def figure_moving_average_ratio(
+    group: FigureGroup,
+    settings: Settings,
+    moving_average_window: int,
+):
+    loaded_group = load_group_data(group, settings)
+
+    fig, axes = create_figure(loaded_group.variable_indices)
+
+    for ax, var_index in zip(axes, loaded_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
+        for dataset_index, dataset in enumerate(loaded_group.datasets):
+            x = dataset.iterations
+            y = dataset.variables[:, var_index]
+
+            _, y_short_ma = compute_moving_average(
+                x,
+                y,
+                moving_average_window,
+            )
+
+            _, y_long_ma = compute_moving_average(
+                x,
+                y,
+                settings.baseline_moving_average_window,
+            )
+
+            ma_ratio = compute_ratio(y_short_ma, y_long_ma)
+
+            x_ratio_plot, ratio_plot = downsample_for_plotting(
+                x,
+                ma_ratio,
+                settings,
+            )
+
+            ax.plot(
+                x_ratio_plot,
+                ratio_plot,
+                color=get_plot_color(dataset_index, settings, "primary"),
+                linewidth=2.2,
+                alpha=0.95,
+                label=(
+                    f"{dataset.filename.stem} "
+                    f"MA-{moving_average_window}/"
+                    f"MA-{settings.baseline_moving_average_window}"
+                ),
+                zorder=5,
+            )
+
+        ax.axhline(
+            1.0,
+            color="black",
+            linewidth=1.0,
+            linestyle="--",
+            alpha=0.6,
+            zorder=1,
+        )
+
+        format_axis(
+            ax,
+            ylabel=f"MA ratio ({variable_label})",
+            settings=settings,
+            logy=settings.ratio_logy,
+        )
+
+        apply_limits_if_enabled(
+            ax,
+            settings=settings,
+            logy=settings.ratio_logy,
+            keep_zero_visible=False,
+        )
+
+    title = (
+        f"{group.title} Moving-Average Ratio "
+        f"[MA-{moving_average_window} / "
+        f"MA-{settings.baseline_moving_average_window}]"
+    )
+
+    finalize_figure(fig, axes, title)
+
+    return fig
+
+
+# ============================================================
+# FIGURE 6: RMS RATIO
+# ============================================================
+
+def figure_rms_ratio(
+    group: FigureGroup,
+    settings: Settings,
+    moving_average_window: int,
+):
+    loaded_group = load_group_data(group, settings)
+
+    fig, axes = create_figure(loaded_group.variable_indices)
+
+    for ax, var_index in zip(axes, loaded_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
+        for dataset_index, dataset in enumerate(loaded_group.datasets):
+            x = dataset.iterations
+            y = dataset.variables[:, var_index]
+
+            _, short_rms = compute_moving_rms(
+                x,
+                y,
+                moving_average_window,
+            )
+
+            _, long_rms = compute_moving_rms(
+                x,
+                y,
+                settings.baseline_moving_average_window,
+            )
+
+            rms_ratio = compute_ratio(short_rms, long_rms)
+
+            x_ratio_plot, ratio_plot = downsample_for_plotting(
+                x,
+                rms_ratio,
+                settings,
+            )
+
+            ax.plot(
+                x_ratio_plot,
+                ratio_plot,
+                color=get_plot_color(dataset_index, settings, "primary"),
+                linewidth=2.2,
+                alpha=0.95,
+                label=(
+                    f"{dataset.filename.stem} "
+                    f"RMS-{moving_average_window}/"
+                    f"RMS-{settings.baseline_moving_average_window}"
+                ),
+                zorder=5,
+            )
+
+        ax.axhline(
+            1.0,
+            color="black",
+            linewidth=1.0,
+            linestyle="--",
+            alpha=0.6,
+            zorder=1,
+        )
+
+        format_axis(
+            ax,
+            ylabel=f"RMS ratio ({variable_label})",
+            settings=settings,
+            logy=settings.ratio_logy,
+        )
+
+        apply_limits_if_enabled(
+            ax,
+            settings=settings,
+            logy=settings.ratio_logy,
+            keep_zero_visible=False,
+        )
+
+    title = (
+        f"{group.title} RMS Ratio "
+        f"[RMS-{moving_average_window} / "
+        f"RMS-{settings.baseline_moving_average_window}]"
+    )
+
+    finalize_figure(fig, axes, title)
+
+    return fig
+
+
+# ============================================================
+# FIGURE 7: LAG-1 AUTOCORRELATION
+# ============================================================
+
+def figure_lag1_autocorrelation(
+    group: FigureGroup,
+    settings: Settings,
+    moving_average_window: int,
+):
+    loaded_group = load_group_data(group, settings)
+
+    fig, axes = create_figure(loaded_group.variable_indices)
+
+    for ax, var_index in zip(axes, loaded_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
+        for dataset_index, dataset in enumerate(loaded_group.datasets):
+            x = dataset.iterations
+            y = dataset.variables[:, var_index]
+
+            x_lag1, lag1_autocorrelation = compute_moving_lag1_autocorrelation(
+                x,
+                y,
+                moving_average_window,
+            )
+
+            x_lag1_plot, lag1_autocorrelation_plot = downsample_for_plotting(
+                x_lag1,
+                lag1_autocorrelation,
+                settings,
+            )
+
+            ax.plot(
+                x_lag1_plot,
+                lag1_autocorrelation_plot,
+                color=get_plot_color(dataset_index, settings, "primary"),
+                linewidth=2.0,
+                alpha=0.90,
+                label=(
+                    f"{dataset.filename.stem} lag-1 autocorr "
+                    f"window-{moving_average_window}"
+                ),
+                zorder=5,
+            )
+
+        ax.axhline(
+            0.0,
+            color="black",
+            linewidth=1.0,
+            linestyle="--",
+            alpha=0.5,
+            zorder=1,
+        )
+
+        format_axis(
+            ax,
+            ylabel=f"lag-1 autocorr ({variable_label})",
+            settings=settings,
+            logy=False,
+        )
+
+        ax.set_ylim(-1.05, 1.05)
+
+    title = (
+        f"{group.title} Lag-1 Autocorrelation "
+        f"[window = {moving_average_window}]"
+    )
+
+    finalize_figure(fig, axes, title)
+
+    return fig
+
+
+# ============================================================
+# FIGURE 8: SHORT AND LONG RMS
+# ============================================================
+
+def figure_short_long_rms(
+    group: FigureGroup,
+    settings: Settings,
+    moving_average_window: int,
+):
+    loaded_group = load_group_data(group, settings)
+
+    fig, axes = create_figure(loaded_group.variable_indices)
+
+    for ax, var_index in zip(axes, loaded_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
+        for dataset_index, dataset in enumerate(loaded_group.datasets):
+            x = dataset.iterations
+            y = dataset.variables[:, var_index]
+
+            x_short_rms, short_rms = compute_moving_rms(
+                x,
+                y,
+                moving_average_window,
+            )
+
+            x_long_rms, long_rms = compute_moving_rms(
+                x,
+                y,
+                settings.baseline_moving_average_window,
+            )
+
+            x_short_rms_plot, short_rms_plot = downsample_for_plotting(
+                x_short_rms,
+                short_rms,
+                settings,
+            )
+
+            x_long_rms_plot, long_rms_plot = downsample_for_plotting(
+                x_long_rms,
+                long_rms,
+                settings,
+            )
+
+            ax.plot(
+                x_short_rms_plot,
+                short_rms_plot,
+                color=get_plot_color(dataset_index, settings, "secondary"),
+                linewidth=2.6,
+                alpha=1.0,
+                label=f"{dataset.filename.stem} RMS-{moving_average_window}",
+                zorder=6,
+            )
+
+            ax.plot(
+                x_long_rms_plot,
+                long_rms_plot,
+                color=get_plot_color(dataset_index, settings, "tertiary"),
+                linewidth=2.6,
+                linestyle="-.",
+                alpha=0.95,
+                label=(
+                    f"{dataset.filename.stem} RMS-"
+                    f"{settings.baseline_moving_average_window}"
+                ),
+                zorder=5,
+            )
+
+        format_axis(
+            ax,
+            ylabel=f"RMS ({variable_label})",
+            settings=settings,
+            logy=group.logy,
+        )
+
+        apply_limits_if_enabled(
+            ax,
+            settings=settings,
+            logy=group.logy,
+            keep_zero_visible=False,
+        )
+
+    title = (
+        f"{group.title} Short and Long RMS "
+        f"[RMS-{moving_average_window} vs "
+        f"RMS-{settings.baseline_moving_average_window}]"
+    )
+
+    if group.logy:
+        title += " [log-y]"
+
+    finalize_figure(fig, axes, title)
+
+    return fig
+
+
+# ============================================================
+# FIGURE 9: SLOPE
 # ============================================================
 
 def figure_slope(
@@ -1436,7 +2185,25 @@ def figure_slope(
 
     fig, axes = create_figure(loaded_group.variable_indices)
 
-    for ax, var_index in zip(axes, loaded_group.variable_indices):
+    use_second_axis_for_moving_average_of_slope = (
+        plot_slope_curve
+        and plot_moving_average_of_slope
+        and moving_average_window is not None
+        and slope_source in ("raw", "ma")
+    )
+
+    for ax_left, var_index in zip(axes, loaded_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
+        if use_second_axis_for_moving_average_of_slope:
+            ax_right = ax_left.twinx()
+        else:
+            ax_right = None
+
         for dataset_index, dataset in enumerate(loaded_group.datasets):
             x = dataset.iterations
             y = dataset.variables[:, var_index]
@@ -1467,24 +2234,29 @@ def figure_slope(
 
             if plot_magnitude:
                 slope_y = np.abs(slope_y)
+
                 line_label = f"{dataset.filename.stem} |{source_label}|"
+
                 ma_label = (
-                    f"{dataset.filename.stem} |{source_label}| "
+                    f"{dataset.filename.stem} moving avg of |{source_label}| "
                     f"CFD MA-{moving_average_window}"
                 )
 
             elif plot_positive_only:
                 slope_y = np.where(slope_y > 0.0, slope_y, np.nan)
+
                 line_label = f"{dataset.filename.stem} positive {source_label}"
+
                 ma_label = (
-                    f"{dataset.filename.stem} positive {source_label} "
-                    f"CFD MA-{moving_average_window}"
+                    f"{dataset.filename.stem} moving avg of positive "
+                    f"{source_label} CFD MA-{moving_average_window}"
                 )
 
             else:
                 line_label = f"{dataset.filename.stem} {source_label}"
+
                 ma_label = (
-                    f"{dataset.filename.stem} {source_label} "
+                    f"{dataset.filename.stem} moving avg of {source_label} "
                     f"CFD MA-{moving_average_window}"
                 )
 
@@ -1495,7 +2267,7 @@ def figure_slope(
                     settings,
                 )
 
-                ax.plot(
+                ax_left.plot(
                     slope_x_plot,
                     slope_y_plot,
                     color=get_plot_color(dataset_index, settings, "primary"),
@@ -1518,18 +2290,26 @@ def figure_slope(
                     settings,
                 )
 
-                ax.plot(
+                if ax_right is not None:
+                    slope_average_axis = ax_right
+                    slope_average_zorder = 7
+                else:
+                    slope_average_axis = ax_left
+                    slope_average_zorder = 6
+
+                slope_average_axis.plot(
                     x_slope_avg_plot,
                     slope_avg_plot,
                     color=get_plot_color(dataset_index, settings, "secondary"),
                     linewidth=3.0,
                     alpha=1.0,
+                    linestyle="-",
                     label=ma_label,
-                    zorder=6,
+                    zorder=slope_average_zorder,
                 )
 
         if not plot_magnitude and not plot_positive_only and plot_slope_curve:
-            ax.axhline(
+            ax_left.axhline(
                 0.0,
                 color="black",
                 linewidth=1.0,
@@ -1538,26 +2318,118 @@ def figure_slope(
                 zorder=1,
             )
 
+            if ax_right is not None:
+                ax_right.axhline(
+                    0.0,
+                    color="gray",
+                    linewidth=1.0,
+                    linestyle=":",
+                    alpha=0.5,
+                    zorder=1,
+                )
+
         if plot_magnitude:
-            ylabel = f"|d(var{var_index + 1})/dIteration|"
+            if slope_source == "raw":
+                ylabel_left = f"|d({variable_label})/dIteration|"
+                ylabel_right = (
+                    f"moving avg of |d({variable_label})/dIteration|"
+                )
+            else:
+                ylabel_left = f"|d(CFD MA-{moving_average_window} {variable_label})/dIteration|"
+                ylabel_right = (
+                    f"moving avg of |d(CFD MA-{moving_average_window} "
+                    f"{variable_label})/dIteration|"
+                )
+
         elif plot_positive_only:
-            ylabel = f"positive d(var{var_index + 1})/dIteration"
+            if slope_source == "raw":
+                ylabel_left = f"positive d({variable_label})/dIteration"
+                ylabel_right = (
+                    f"moving avg of positive d({variable_label})/dIteration"
+                )
+            else:
+                ylabel_left = (
+                    f"positive d(CFD MA-{moving_average_window} "
+                    f"{variable_label})/dIteration"
+                )
+                ylabel_right = (
+                    f"moving avg of positive d(CFD MA-{moving_average_window} "
+                    f"{variable_label})/dIteration"
+                )
+
         else:
-            ylabel = f"d(var{var_index + 1})/dIteration"
+            if slope_source == "raw":
+                ylabel_left = f"d({variable_label})/dIteration"
+                ylabel_right = (
+                    f"moving avg of d({variable_label})/dIteration"
+                )
+            else:
+                ylabel_left = (
+                    f"d(CFD MA-{moving_average_window} "
+                    f"{variable_label})/dIteration"
+                )
+                ylabel_right = (
+                    f"moving avg of d(CFD MA-{moving_average_window} "
+                    f"{variable_label})/dIteration"
+                )
 
-        format_axis(
-            ax,
-            ylabel=ylabel,
-            settings=settings,
-            logy=slope_logy,
-        )
+        if ax_right is None:
+            format_axis(
+                ax_left,
+                ylabel=ylabel_left,
+                settings=settings,
+                logy=slope_logy,
+            )
 
-        apply_limits_if_enabled(
-            ax,
-            settings=settings,
-            logy=slope_logy,
-            keep_zero_visible=not slope_logy,
-        )
+            apply_limits_if_enabled(
+                ax_left,
+                settings=settings,
+                logy=slope_logy,
+                keep_zero_visible=not slope_logy,
+            )
+
+        else:
+            ax_left.set_ylabel(ylabel_left, fontsize=12)
+            ax_right.set_ylabel(ylabel_right, fontsize=12)
+
+            if slope_logy:
+                ax_left.set_yscale("log")
+                ax_right.set_yscale("log")
+
+            ax_left.set_axisbelow(True)
+
+            if settings.show_grid:
+                ax_left.grid(
+                    True,
+                    which="both",
+                    linestyle="--",
+                    linewidth=0.7,
+                    alpha=0.6,
+                    zorder=0,
+                )
+
+            ax_left.tick_params(axis="both", labelsize=11)
+            ax_right.tick_params(axis="y", labelsize=11)
+
+            merge_twin_axis_legends(
+                ax_left,
+                ax_right,
+                fontsize=9,
+            )
+
+            apply_limits_if_enabled(
+                ax_left,
+                settings=settings,
+                logy=slope_logy,
+                keep_zero_visible=not slope_logy,
+            )
+
+            apply_limits_if_enabled(
+                ax_right,
+                settings=settings,
+                logy=slope_logy,
+                keep_zero_visible=not slope_logy,
+            )
 
     title = group.title
 
@@ -1586,13 +2458,16 @@ def figure_slope(
     if plot_moving_average_of_slope and plot_slope_curve:
         title += f" [slope CFD MA window = {moving_average_window}]"
 
+    if use_second_axis_for_moving_average_of_slope:
+        title += " [moving average of slope on right axis]"
+
     finalize_figure(fig, axes, title)
 
     return fig
 
 
 # ============================================================
-# FIGURE 6: CUMULATIVE SLOPE
+# FIGURE 10: CUMULATIVE SLOPE
 # ============================================================
 
 def figure_cumulative_slope(
@@ -1604,7 +2479,15 @@ def figure_cumulative_slope(
 
     fig, axes = create_figure(loaded_group.variable_indices)
 
-    for ax, var_index in zip(axes, loaded_group.variable_indices):
+    for ax_left, var_index in zip(axes, loaded_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
+        ax_right = ax_left.twinx()
+
         for dataset_index, dataset in enumerate(loaded_group.datasets):
             x = dataset.iterations
             y = dataset.variables[:, var_index]
@@ -1612,20 +2495,42 @@ def figure_cumulative_slope(
             slope_x, raw_slope = compute_slope(x, y)
             cumulative_raw_slope = compute_cumulative_sum(raw_slope)
 
+            normalized_cumulative_raw_slope = compute_cumsum_normalized_by_iteration(
+                slope_x,
+                cumulative_raw_slope,
+            )
+
             x_plot, cumulative_raw_slope_plot = downsample_for_plotting(
                 slope_x,
                 cumulative_raw_slope,
                 settings,
             )
 
-            ax.plot(
+            x_norm_plot, normalized_cumulative_raw_slope_plot = downsample_for_plotting(
+                slope_x,
+                normalized_cumulative_raw_slope,
+                settings,
+            )
+
+            ax_left.plot(
                 x_plot,
                 cumulative_raw_slope_plot,
                 color=get_plot_color(dataset_index, settings, "primary"),
-                linewidth=1.2,
-                alpha=0.55,
+                linewidth=1.8,
+                alpha=0.85,
                 label=f"{dataset.filename.stem} cumulative raw slope",
                 zorder=3,
+            )
+
+            ax_right.plot(
+                x_norm_plot,
+                normalized_cumulative_raw_slope_plot,
+                color=get_plot_color(dataset_index, settings, "secondary"),
+                linewidth=2.2,
+                linestyle="-.",
+                alpha=1.0,
+                label=f"{dataset.filename.stem} cumulative raw slope / iteration",
+                zorder=6,
             )
 
             if (
@@ -1644,14 +2549,522 @@ def figure_cumulative_slope(
                     settings,
                 )
 
-                ax.plot(
+                ax_left.plot(
                     x_avg_plot,
                     cumulative_avg_plot,
-                    color=get_plot_color(dataset_index, settings, "secondary"),
+                    color=get_plot_color(dataset_index, settings, "tertiary"),
                     linewidth=3.0,
                     alpha=1.0,
                     label=(
                         f"{dataset.filename.stem} cumulative raw slope "
+                        f"CFD MA-{moving_average_window}"
+                    ),
+                    zorder=7,
+                )
+
+        ax_left.axhline(
+            0.0,
+            color="black",
+            linewidth=1.0,
+            linestyle="--",
+            alpha=0.5,
+            zorder=1,
+        )
+
+        ax_right.axhline(
+            0.0,
+            color="gray",
+            linewidth=1.0,
+            linestyle=":",
+            alpha=0.5,
+            zorder=1,
+        )
+
+        ax_left.set_ylabel(
+            f"cumsum d({variable_label})/dIteration",
+            fontsize=12,
+        )
+
+        ax_right.set_ylabel(
+            f"cumsum d({variable_label})/dIteration / iteration",
+            fontsize=12,
+        )
+
+        if settings.cumulative_slope_logy:
+            ax_left.set_yscale("log")
+            ax_right.set_yscale("log")
+
+        ax_left.set_axisbelow(True)
+
+        if settings.show_grid:
+            ax_left.grid(
+                True,
+                which="both",
+                linestyle="--",
+                linewidth=0.7,
+                alpha=0.6,
+                zorder=0,
+            )
+
+        ax_left.tick_params(axis="both", labelsize=11)
+        ax_right.tick_params(axis="y", labelsize=11)
+
+        merge_twin_axis_legends(
+            ax_left,
+            ax_right,
+            fontsize=9,
+        )
+
+        apply_limits_if_enabled(
+            ax_left,
+            settings=settings,
+            logy=settings.cumulative_slope_logy,
+            keep_zero_visible=not settings.cumulative_slope_logy,
+        )
+
+        apply_limits_if_enabled(
+            ax_right,
+            settings=settings,
+            logy=settings.cumulative_slope_logy,
+            keep_zero_visible=not settings.cumulative_slope_logy,
+        )
+
+    title = f"{group.title} Cumulative Sum of Raw Data Slope"
+
+    if settings.plot_moving_average_of_cumulative_sum:
+        title += f" [cumsum CFD MA window = {moving_average_window}]"
+
+    title += " [normalized cumsum on right axis]"
+
+    finalize_figure(fig, axes, title)
+
+    return fig
+
+# ============================================================
+# FIGURE 9: SLOPE OF MOVING RMS AVERAGE
+# ============================================================
+
+def figure_slope_of_rms_average(
+    group: FigureGroup,
+    settings: Settings,
+    moving_average_window: int,
+):
+    loaded_group = load_group_data(group, settings)
+
+    fig, axes = create_figure(loaded_group.variable_indices)
+
+    use_second_axis_for_moving_average_of_rms_slope = (
+        settings.plot_moving_average_of_slope
+        and moving_average_window is not None
+    )
+
+    for ax_left, var_index in zip(axes, loaded_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
+        if use_second_axis_for_moving_average_of_rms_slope:
+            ax_right = ax_left.twinx()
+        else:
+            ax_right = None
+
+        for dataset_index, dataset in enumerate(loaded_group.datasets):
+            x = dataset.iterations
+            y = dataset.variables[:, var_index]
+
+            x_rms, y_rms = compute_moving_rms(
+                x,
+                y,
+                moving_average_window,
+            )
+
+            slope_x, slope_y = compute_slope(
+                x_rms,
+                y_rms,
+            )
+
+            x_slope_plot, slope_y_plot = downsample_for_plotting(
+                slope_x,
+                slope_y,
+                settings,
+            )
+
+            ax_left.plot(
+                x_slope_plot,
+                slope_y_plot,
+                color=get_plot_color(dataset_index, settings, "primary"),
+                linewidth=1.2,
+                alpha=0.55,
+                label=(
+                    f"{dataset.filename.stem} "
+                    f"RMS-{moving_average_window} slope"
+                ),
+                zorder=3,
+            )
+
+            if settings.plot_moving_average_of_slope:
+                x_slope_avg, slope_avg = compute_moving_average_ignore_nan(
+                    slope_x,
+                    slope_y,
+                    moving_average_window,
+                )
+
+                x_slope_avg_plot, slope_avg_plot = downsample_for_plotting(
+                    x_slope_avg,
+                    slope_avg,
+                    settings,
+                )
+
+                if ax_right is not None:
+                    slope_average_axis = ax_right
+                    slope_average_zorder = 7
+                else:
+                    slope_average_axis = ax_left
+                    slope_average_zorder = 6
+
+                slope_average_axis.plot(
+                    x_slope_avg_plot,
+                    slope_avg_plot,
+                    color=get_plot_color(dataset_index, settings, "secondary"),
+                    linewidth=3.0,
+                    alpha=1.0,
+                    linestyle="-",
+                    label=(
+                        f"{dataset.filename.stem} moving avg of "
+                        f"RMS-{moving_average_window} slope "
+                        f"CFD MA-{moving_average_window}"
+                    ),
+                    zorder=slope_average_zorder,
+                )
+
+        ax_left.axhline(
+            0.0,
+            color="black",
+            linewidth=1.0,
+            linestyle="--",
+            alpha=0.5,
+            zorder=1,
+        )
+
+        ylabel_left = f"d(RMS-{moving_average_window} {variable_label})/dIteration"
+        ylabel_right = (
+            f"moving avg of d(RMS-{moving_average_window})/dIteration "
+            f"({variable_label})"
+        )
+
+        if ax_right is None:
+            format_axis(
+                ax_left,
+                ylabel=ylabel_left,
+                settings=settings,
+                logy=settings.slope_logy,
+            )
+
+            apply_limits_if_enabled(
+                ax_left,
+                settings=settings,
+                logy=settings.slope_logy,
+                keep_zero_visible=not settings.slope_logy,
+            )
+
+        else:
+            ax_left.set_ylabel(ylabel_left, fontsize=12)
+            ax_right.set_ylabel(ylabel_right, fontsize=12)
+
+            if settings.slope_logy:
+                ax_left.set_yscale("log")
+                ax_right.set_yscale("log")
+
+            ax_left.set_axisbelow(True)
+
+            if settings.show_grid:
+                ax_left.grid(
+                    True,
+                    which="both",
+                    linestyle="--",
+                    linewidth=0.7,
+                    alpha=0.6,
+                    zorder=0,
+                )
+
+            ax_left.tick_params(axis="both", labelsize=11)
+            ax_right.tick_params(axis="y", labelsize=11)
+
+            merge_twin_axis_legends(
+                ax_left,
+                ax_right,
+                fontsize=9,
+            )
+
+            apply_limits_if_enabled(
+                ax_left,
+                settings=settings,
+                logy=settings.slope_logy,
+                keep_zero_visible=not settings.slope_logy,
+            )
+
+            apply_limits_if_enabled(
+                ax_right,
+                settings=settings,
+                logy=settings.slope_logy,
+                keep_zero_visible=not settings.slope_logy,
+            )
+
+    title = (
+        f"{group.title} Slope of Moving RMS Average "
+        f"[RMS-{moving_average_window} slope]"
+    )
+
+    if settings.plot_moving_average_of_slope:
+        title += f" [slope CFD MA window = {moving_average_window}]"
+
+    if use_second_axis_for_moving_average_of_rms_slope:
+        title += " [moving average of slope on right axis]"
+
+    finalize_figure(fig, axes, title)
+
+    return fig
+
+
+def figure_cumulative_slope_of_moving_average(
+    group: FigureGroup,
+    settings: Settings,
+    moving_average_window: int,
+):
+    loaded_group = load_group_data(group, settings)
+
+    fig, axes = create_figure(loaded_group.variable_indices)
+
+    for ax_left, var_index in zip(axes, loaded_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
+        ax_right = ax_left.twinx()
+
+        for dataset_index, dataset in enumerate(loaded_group.datasets):
+            x = dataset.iterations
+            y = dataset.variables[:, var_index]
+
+            x_avg, y_avg = compute_moving_average(
+                x,
+                y,
+                moving_average_window,
+            )
+
+            slope_x, moving_average_slope = compute_slope(
+                x_avg,
+                y_avg,
+            )
+
+            cumulative_moving_average_slope = compute_cumulative_sum(
+                moving_average_slope
+            )
+
+            normalized_cumulative_moving_average_slope = (
+                compute_cumsum_normalized_by_iteration(
+                    slope_x,
+                    cumulative_moving_average_slope,
+                )
+            )
+
+            x_plot, cumulative_moving_average_slope_plot = downsample_for_plotting(
+                slope_x,
+                cumulative_moving_average_slope,
+                settings,
+            )
+
+            x_norm_plot, normalized_cumulative_moving_average_slope_plot = (
+                downsample_for_plotting(
+                    slope_x,
+                    normalized_cumulative_moving_average_slope,
+                    settings,
+                )
+            )
+
+            ax_left.plot(
+                x_plot,
+                cumulative_moving_average_slope_plot,
+                color=get_plot_color(dataset_index, settings, "primary"),
+                linewidth=1.8,
+                alpha=0.85,
+                label=(
+                    f"{dataset.filename.stem} cumulative "
+                    f"CFD MA-{moving_average_window} slope"
+                ),
+                zorder=3,
+            )
+
+            ax_right.plot(
+                x_norm_plot,
+                normalized_cumulative_moving_average_slope_plot,
+                color=get_plot_color(dataset_index, settings, "secondary"),
+                linewidth=2.2,
+                linestyle="-.",
+                alpha=1.0,
+                label=(
+                    f"{dataset.filename.stem} cumulative "
+                    f"CFD MA-{moving_average_window} slope / iteration"
+                ),
+                zorder=6,
+            )
+
+        ax_left.axhline(
+            0.0,
+            color="black",
+            linewidth=1.0,
+            linestyle="--",
+            alpha=0.5,
+            zorder=1,
+        )
+
+        ax_right.axhline(
+            0.0,
+            color="gray",
+            linewidth=1.0,
+            linestyle=":",
+            alpha=0.5,
+            zorder=1,
+        )
+
+        ax_left.set_ylabel(
+            f"cumsum d(CFD MA-{moving_average_window} {variable_label})/dIteration",
+            fontsize=12,
+        )
+
+        ax_right.set_ylabel(
+            (
+                f"cumsum d(CFD MA-{moving_average_window} {variable_label})"
+                f"/dIteration / iteration"
+            ),
+            fontsize=12,
+        )
+
+        if settings.cumulative_slope_logy:
+            ax_left.set_yscale("log")
+            ax_right.set_yscale("log")
+
+        ax_left.set_axisbelow(True)
+
+        if settings.show_grid:
+            ax_left.grid(
+                True,
+                which="both",
+                linestyle="--",
+                linewidth=0.7,
+                alpha=0.6,
+                zorder=0,
+            )
+
+        ax_left.tick_params(axis="both", labelsize=11)
+        ax_right.tick_params(axis="y", labelsize=11)
+
+        merge_twin_axis_legends(
+            ax_left,
+            ax_right,
+            fontsize=9,
+        )
+
+        apply_limits_if_enabled(
+            ax_left,
+            settings=settings,
+            logy=settings.cumulative_slope_logy,
+            keep_zero_visible=not settings.cumulative_slope_logy,
+        )
+
+        apply_limits_if_enabled(
+            ax_right,
+            settings=settings,
+            logy=settings.cumulative_slope_logy,
+            keep_zero_visible=not settings.cumulative_slope_logy,
+        )
+
+    title = (
+        f"{group.title} Cumulative Sum of Moving-Average Slope "
+        f"[CFD MA-{moving_average_window} slope] "
+        f"[normalized cumsum on right axis]"
+    )
+
+    finalize_figure(fig, axes, title)
+
+    return fig
+
+
+def figure_raw_slope_sign_indicator(
+    group: FigureGroup,
+    settings: Settings,
+    moving_average_window: int | None,
+):
+    loaded_group = load_group_data(group, settings)
+
+    fig, axes = create_figure(loaded_group.variable_indices)
+
+    for ax, var_index in zip(axes, loaded_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
+        for dataset_index, dataset in enumerate(loaded_group.datasets):
+            x = dataset.iterations
+            y = dataset.variables[:, var_index]
+
+            slope_x, raw_slope = compute_slope(x, y)
+
+            slope_sign_for_plot = compute_slope_sign_indicator(
+                raw_slope,
+                use_nan_for_zero_or_invalid=True,
+            )
+
+            x_sign_plot, sign_plot = downsample_for_plotting(
+                slope_x,
+                slope_sign_for_plot,
+                settings,
+            )
+
+            ax.plot(
+                x_sign_plot,
+                sign_plot,
+                color=get_plot_color(dataset_index, settings, "primary"),
+                linewidth=1.1,
+                alpha=0.55,
+                drawstyle="steps-post",
+                label=(
+                    f"{dataset.filename.stem} raw slope sign "
+                    "[+1 positive, -1 negative]"
+                ),
+                zorder=3,
+            )
+
+            if (
+                settings.plot_moving_average_of_raw_slope_sign_indicator
+                and moving_average_window is not None
+            ):
+                x_sign_avg, sign_avg = compute_moving_average_ignore_nan(
+                    slope_x,
+                    slope_sign_for_plot,
+                    moving_average_window,
+                )
+
+                x_sign_avg_plot, sign_avg_plot = downsample_for_plotting(
+                    x_sign_avg,
+                    sign_avg,
+                    settings,
+                )
+
+                ax.plot(
+                    x_sign_avg_plot,
+                    sign_avg_plot,
+                    color=get_plot_color(dataset_index, settings, "secondary"),
+                    linewidth=3.0,
+                    alpha=1.0,
+                    label=(
+                        f"{dataset.filename.stem} moving avg of raw slope sign "
                         f"CFD MA-{moving_average_window}"
                     ),
                     zorder=6,
@@ -1662,28 +3075,47 @@ def figure_cumulative_slope(
             color="black",
             linewidth=1.0,
             linestyle="--",
-            alpha=0.5,
+            alpha=0.55,
+            zorder=1,
+        )
+
+        ax.axhline(
+            1.0,
+            color="gray",
+            linewidth=0.8,
+            linestyle=":",
+            alpha=0.45,
+            zorder=1,
+        )
+
+        ax.axhline(
+            -1.0,
+            color="gray",
+            linewidth=0.8,
+            linestyle=":",
+            alpha=0.45,
             zorder=1,
         )
 
         format_axis(
             ax,
-            ylabel=f"cumsum d(var{var_index + 1})/dIteration",
+            ylabel=f"sign d({variable_label})/dIteration",
             settings=settings,
-            logy=settings.cumulative_slope_logy,
+            logy=False,
         )
 
-        apply_limits_if_enabled(
-            ax,
-            settings=settings,
-            logy=settings.cumulative_slope_logy,
-            keep_zero_visible=not settings.cumulative_slope_logy,
-        )
+        ax.set_ylim(-1.15, 1.15)
 
-    title = f"{group.title} Cumulative Sum of Raw Error Slope"
+    title = (
+        f"{group.title} Raw Slope Sign Indicator "
+        "[+1 positive slope, -1 negative slope]"
+    )
 
-    if settings.plot_moving_average_of_cumulative_sum:
-        title += f" [cumsum CFD MA window = {moving_average_window}]"
+    if (
+        settings.plot_moving_average_of_raw_slope_sign_indicator
+        and moving_average_window is not None
+    ):
+        title += f" [sign CFD MA window = {moving_average_window}]"
 
     finalize_figure(fig, axes, title)
 
@@ -1804,6 +3236,38 @@ def add_enabled_figures_for_group(
         )
         add_page_to_pdf(pdf, fig, settings)
 
+    if settings.plot_moving_average_ratio:
+        fig = figure_moving_average_ratio(
+            group=group,
+            settings=settings,
+            moving_average_window=moving_average_window,
+        )
+        add_page_to_pdf(pdf, fig, settings)
+
+    if settings.plot_rms_ratio:
+        fig = figure_rms_ratio(
+            group=group,
+            settings=settings,
+            moving_average_window=moving_average_window,
+        )
+        add_page_to_pdf(pdf, fig, settings)
+
+    if settings.plot_lag1_autocorrelation:
+        fig = figure_lag1_autocorrelation(
+            group=group,
+            settings=settings,
+            moving_average_window=moving_average_window,
+        )
+        add_page_to_pdf(pdf, fig, settings)
+
+    if settings.plot_short_long_rms:
+        fig = figure_short_long_rms(
+            group=group,
+            settings=settings,
+            moving_average_window=moving_average_window,
+        )
+        add_page_to_pdf(pdf, fig, settings)
+
     if not settings.calculate_slope:
         return
 
@@ -1874,6 +3338,22 @@ def add_enabled_figures_for_group(
             )
             add_page_to_pdf(pdf, fig, settings)
 
+
+        if settings.plot_raw_slope_sign_running_total:
+            fig = figure_raw_slope_sign_running_total(
+                group=group,
+                settings=settings,
+            )
+            add_page_to_pdf(pdf, fig, settings)
+
+        if settings.plot_raw_slope_sign_indicator:
+            fig = figure_raw_slope_sign_indicator(
+                group=group,
+                settings=settings,
+                moving_average_window=moving_average_window,
+            )
+            add_page_to_pdf(pdf, fig, settings)
+
     if settings.plot_slope_of_moving_average:
         fig = figure_slope(
             group=group,
@@ -1887,6 +3367,23 @@ def add_enabled_figures_for_group(
             slope_logy=settings.slope_logy,
         )
         add_page_to_pdf(pdf, fig, settings)
+
+    if settings.plot_cumulative_sum_of_moving_average_slope:
+        fig = figure_cumulative_slope_of_moving_average(
+            group=group,
+            settings=settings,
+            moving_average_window=moving_average_window,
+        )
+        add_page_to_pdf(pdf, fig, settings)
+
+    if settings.plot_slope_of_rms_average:
+        fig = figure_slope_of_rms_average(
+            group=group,
+            settings=settings,
+            moving_average_window=moving_average_window,
+        )
+        add_page_to_pdf(pdf, fig, settings)
+
 
         if settings.plot_slope_magnitude:
             fig = figure_slope(
@@ -1954,9 +3451,48 @@ def print_run_summary(settings: Settings) -> None:
     print(f"Output directory: {settings.output_dir}")
     print("Existing files in the output directory will not be deleted.")
 
+def normalize_pdf_output_name(output_base_name: str) -> str:
+    output_base_name = output_base_name.strip()
+
+    if output_base_name == "":
+        raise ValueError("Output base name cannot be empty.")
+
+    output_path = Path(output_base_name)
+
+    if output_path.suffix.lower() != ".pdf":
+        output_path = output_path.with_name(f"{output_path.name}.pdf")
+
+    return str(output_path)
+
+
+def parse_command_line_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Generate comparison PDF figures from the configured data files."
+        )
+    )
+
+    parser.add_argument(
+        "output_base_name",
+        help=(
+            "Base name for the output PDF. The .pdf extension is optional. "
+            "For example: run_01 or run_01.pdf"
+        ),
+    )
+
+    return parser.parse_args()
+
 
 def main() -> None:
-    settings = SETTINGS
+    args = parse_command_line_arguments()
+
+    pdf_output_file = normalize_pdf_output_name(args.output_base_name)
+
+    settings = replace(
+        SETTINGS,
+        pdf_output_file=pdf_output_file,
+    )
+
     figure_groups = FIGURE_GROUPS
 
     print_run_summary(settings)

@@ -470,7 +470,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             Q_cons_FOM_int = normalizor * (reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_cons_FOM) - q_ref)
             Q_cons_FOM_int_proj = denormalizor * (rom_param['basis'] @ (rom_param['basis'].T @ Q_cons_FOM_int)) + q_ref
             Q_cons_FOM_proj = reshape_func.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_cons_FOM_int_proj)
-            Q_cons_proj_error = np.abs(Q_cons_FOM_proj - Q_cons_FOM)
+            Q_cons_proj_error = np.abs(Q_cons_FOM - Q_cons_FOM_proj)
 
             # Save the ROM states
             Q_cons_save = state['Q_cons']
@@ -490,39 +490,47 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             # update the ghost cells
             state = bc_func.update_ghost_cell(solver_param,state)
 
-            Q_prim_proj_error = np.abs(state['Q_prim'] - Q_prim_FOM)
+            Q_prim_proj_error = np.abs(Q_prim_FOM - state['Q_prim'])
 
             # Reset the the ROM states
             state['Q_cons'] = Q_cons_save
             state['Q_prim'] = Q_prim_save
 
             # Reshape the error vectors to extract specific variables
-            # Variables could be normalized here
             Q_cons_interp_error_reshape = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons_interp_error)[:,2:-2]
             Q_cons_proj_error_reshape = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons_proj_error)[:,2:-2]
+            Q_cons_FOM_max = np.max(reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons_FOM)[:,2:-2], axis=1)
 
             # if solver_param['gas_model'] == 'Air':
             Q_prim_interp_error_reshape = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim_interp_error)[:,2:-2]
             Q_prim_proj_error_reshape = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim_proj_error)[:,2:-2]
+            Q_prim_FOM_max = np.max(reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim_FOM)[:,2:-2], axis=1)
 
             # Is heat release not stored in the state vector?    
             # else:
             #     state['prim_results_save'][:-1,:] = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],[state['Q_prim']])[:,2:-2]
             #     state['prim_results_save'][-1,:]  = state['heat_release'][2:-2]
 
+            # Normalize the errors by the maximum value in the field
+            Q_cons_interp_error_reshape = Q_cons_interp_error_reshape / Q_cons_FOM_max[:, np.newaxis]
+            Q_cons_proj_error_reshape = Q_cons_proj_error_reshape / Q_cons_FOM_max[:, np.newaxis]
+
+            Q_prim_interp_error_reshape = Q_prim_interp_error_reshape / Q_prim_FOM_max[:, np.newaxis]
+            Q_prim_proj_error_reshape = Q_prim_proj_error_reshape / Q_prim_FOM_max[:, np.newaxis]
+
             # Calculate QoIs per variable
             cons_interp_max = np.max(Q_cons_interp_error_reshape, axis=1)
-            cons_interp_min = np.min(Q_cons_interp_error_reshape, axis=1)
+            # cons_interp_min = np.min(Q_cons_interp_error_reshape, axis=1)
             cons_interp_avg = np.mean(Q_cons_interp_error_reshape, axis=1)
             cons_proj_max = np.max(Q_cons_proj_error_reshape, axis=1)
-            cons_proj_min = np.min(Q_cons_proj_error_reshape, axis=1)
+            # cons_proj_min = np.min(Q_cons_proj_error_reshape, axis=1)
             cons_proj_avg = np.mean(Q_cons_proj_error_reshape, axis=1)
 
             prim_interp_max = np.max(Q_prim_interp_error_reshape, axis=1)
-            prim_interp_min = np.min(Q_prim_interp_error_reshape, axis=1)
+            # prim_interp_min = np.min(Q_prim_interp_error_reshape, axis=1)
             prim_interp_avg = np.mean(Q_prim_interp_error_reshape, axis=1)
             prim_proj_max = np.max(Q_prim_proj_error_reshape, axis=1)
-            prim_proj_min = np.min(Q_prim_proj_error_reshape, axis=1)
+            # prim_proj_min = np.min(Q_prim_proj_error_reshape, axis=1)
             prim_proj_avg = np.mean(Q_prim_proj_error_reshape, axis=1)
 
             # Write the error values
@@ -551,32 +559,32 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             else:
                 mode = "a"
 
-                # Calculate the error gradient
-                grad_cons_interp = np.abs(Q_cons_interp_error_reshape - state['Q_cons_interp_error_save'])
-                grad_prim_interp = np.abs(Q_prim_interp_error_reshape - state['Q_prim_interp_error_save'])
-                grad_cons_proj = np.abs(Q_cons_proj_error_reshape - state['Q_cons_proj_error_save'])
-                grad_prim_proj = np.abs(Q_prim_proj_error_reshape - state['Q_prim_proj_error_save'])
+                # # Calculate the error gradient
+                # grad_cons_interp = np.abs(Q_cons_interp_error_reshape - state['Q_cons_interp_error_save'])
+                # grad_prim_interp = np.abs(Q_prim_interp_error_reshape - state['Q_prim_interp_error_save'])
+                # grad_cons_proj = np.abs(Q_cons_proj_error_reshape - state['Q_cons_proj_error_save'])
+                # grad_prim_proj = np.abs(Q_prim_proj_error_reshape - state['Q_prim_proj_error_save'])
             
-                # Calculate the gradient QoIs per variable
-                grad_cons_interp_max = np.max(grad_cons_interp, axis=1)
-                grad_cons_interp_min = np.min(grad_cons_interp, axis=1)
-                grad_cons_interp_avg = np.mean(grad_cons_interp, axis=1)
-                grad_cons_proj_max = np.max(grad_cons_proj, axis=1)
-                grad_cons_proj_min = np.min(grad_cons_proj, axis=1)
-                grad_cons_proj_avg = np.mean(grad_cons_proj, axis=1)
+                # # Calculate the gradient QoIs per variable
+                # grad_cons_interp_max = np.max(grad_cons_interp, axis=1)
+                # grad_cons_interp_min = np.min(grad_cons_interp, axis=1)
+                # grad_cons_interp_avg = np.mean(grad_cons_interp, axis=1)
+                # grad_cons_proj_max = np.max(grad_cons_proj, axis=1)
+                # grad_cons_proj_min = np.min(grad_cons_proj, axis=1)
+                # grad_cons_proj_avg = np.mean(grad_cons_proj, axis=1)
 
-                grad_prim_interp_max = np.max(grad_prim_interp, axis=1)
-                grad_prim_interp_min = np.min(grad_prim_interp, axis=1)
-                grad_prim_interp_avg = np.mean(grad_prim_interp, axis=1)
-                grad_prim_proj_max = np.max(grad_prim_proj, axis=1)
-                grad_prim_proj_min = np.min(grad_prim_proj, axis=1)
-                grad_prim_proj_avg = np.mean(grad_prim_proj, axis=1)
+                # grad_prim_interp_max = np.max(grad_prim_interp, axis=1)
+                # grad_prim_interp_min = np.min(grad_prim_interp, axis=1)
+                # grad_prim_interp_avg = np.mean(grad_prim_interp, axis=1)
+                # grad_prim_proj_max = np.max(grad_prim_proj, axis=1)
+                # grad_prim_proj_min = np.min(grad_prim_proj, axis=1)
+                # grad_prim_proj_avg = np.mean(grad_prim_proj, axis=1)
 
-            # Save the current errors for gradient calculation
-            state['Q_cons_interp_error_save'] = Q_cons_interp_error_reshape
-            state['Q_prim_interp_error_save'] = Q_prim_interp_error_reshape
-            state['Q_cons_proj_error_save'] = Q_cons_proj_error_reshape
-            state['Q_prim_proj_error_save'] = Q_prim_proj_error_reshape
+            # # Save the current errors for gradient calculation
+            # state['Q_cons_interp_error_save'] = Q_cons_interp_error_reshape
+            # state['Q_prim_interp_error_save'] = Q_prim_interp_error_reshape
+            # state['Q_cons_proj_error_save'] = Q_cons_proj_error_reshape
+            # state['Q_prim_proj_error_save'] = Q_prim_proj_error_reshape
 
             # Write the full error vectors
             # with open(dir_results/full_data/ + "cons_interp_error.txt", mode) as file:
@@ -595,8 +603,8 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             with open(dir_results + "prim_interp_max.txt", mode) as file:
                 file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_interp_max) + "\n")
                 
-            with open(dir_results + "prim_interp_min.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_interp_min) + "\n")
+            # with open(dir_results + "prim_interp_min.txt", mode) as file:
+            #     file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_interp_min) + "\n")
 
             with open(dir_results + "prim_interp_avg.txt", mode) as file:
                 file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_interp_avg) + "\n")
@@ -604,8 +612,8 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             with open(dir_results + "prim_proj_max.txt", mode) as file:
                 file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_proj_max) + "\n")
                 
-            with open(dir_results + "prim_proj_min.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_proj_min) + "\n")
+            # with open(dir_results + "prim_proj_min.txt", mode) as file:
+            #     file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_proj_min) + "\n")
 
             with open(dir_results + "prim_proj_avg.txt", mode) as file:
                 file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_proj_avg) + "\n")
@@ -613,8 +621,8 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             with open(dir_results + "cons_interp_max.txt", mode) as file:
                 file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_interp_max) + "\n")
                 
-            with open(dir_results + "cons_interp_min.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_interp_min) + "\n")
+            # with open(dir_results + "cons_interp_min.txt", mode) as file:
+            #     file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_interp_min) + "\n")
 
             with open(dir_results + "cons_interp_avg.txt", mode) as file:
                 file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_interp_avg) + "\n")
@@ -622,48 +630,48 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             with open(dir_results + "cons_proj_max.txt", mode) as file:
                 file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_proj_max) + "\n")
                 
-            with open(dir_results + "cons_proj_min.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_proj_min) + "\n")
+            # with open(dir_results + "cons_proj_min.txt", mode) as file:
+            #     file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_proj_min) + "\n")
 
             with open(dir_results + "cons_proj_avg.txt", mode) as file:
                 file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_proj_avg) + "\n")
             
-            if iter > int(solver_param['FOM2ROM_trans_iter']) + 1:
-                with open(dir_results + "grad_prim_interp_max.txt", mode) as file:
-                    file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_interp_max) + "\n")
+            # if iter > int(solver_param['FOM2ROM_trans_iter']) + 1:
+            #     with open(dir_results + "grad_prim_interp_max.txt", mode) as file:
+            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_interp_max) + "\n")
                     
-                with open(dir_results + "grad_prim_interp_min.txt", mode) as file:
-                    file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_interp_min) + "\n")
+            #     with open(dir_results + "grad_prim_interp_min.txt", mode) as file:
+            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_interp_min) + "\n")
 
-                with open(dir_results + "grad_prim_interp_avg.txt", mode) as file:
-                    file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_interp_avg) + "\n")
+            #     with open(dir_results + "grad_prim_interp_avg.txt", mode) as file:
+            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_interp_avg) + "\n")
 
-                with open(dir_results + "grad_prim_proj_max.txt", mode) as file:
-                    file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_proj_max) + "\n")
+            #     with open(dir_results + "grad_prim_proj_max.txt", mode) as file:
+            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_proj_max) + "\n")
                     
-                with open(dir_results + "grad_prim_proj_min.txt", mode) as file:
-                    file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_proj_min) + "\n")
+            #     with open(dir_results + "grad_prim_proj_min.txt", mode) as file:
+            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_proj_min) + "\n")
 
-                with open(dir_results + "grad_prim_proj_avg.txt", mode) as file:
-                    file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_proj_avg) + "\n")
+            #     with open(dir_results + "grad_prim_proj_avg.txt", mode) as file:
+            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_prim_proj_avg) + "\n")
 
-                with open(dir_results + "grad_cons_interp_max.txt", mode) as file:
-                    file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_interp_max) + "\n")
+            #     with open(dir_results + "grad_cons_interp_max.txt", mode) as file:
+            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_interp_max) + "\n")
                     
-                with open(dir_results + "grad_cons_interp_min.txt", mode) as file:
-                    file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_interp_min) + "\n")
+            #     with open(dir_results + "grad_cons_interp_min.txt", mode) as file:
+            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_interp_min) + "\n")
 
-                with open(dir_results + "grad_cons_interp_avg.txt", mode) as file:
-                    file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_interp_avg) + "\n")
+            #     with open(dir_results + "grad_cons_interp_avg.txt", mode) as file:
+            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_interp_avg) + "\n")
 
-                with open(dir_results + "grad_cons_proj_max.txt", mode) as file:
-                    file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_proj_max) + "\n")
+            #     with open(dir_results + "grad_cons_proj_max.txt", mode) as file:
+            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_proj_max) + "\n")
                     
-                with open(dir_results + "grad_cons_proj_min.txt", mode) as file:
-                    file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_proj_min) + "\n")
+            #     with open(dir_results + "grad_cons_proj_min.txt", mode) as file:
+            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_proj_min) + "\n")
 
-                with open(dir_results + "grad_cons_proj_avg.txt", mode) as file:
-                    file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_proj_avg) + "\n")
+            #     with open(dir_results + "grad_cons_proj_avg.txt", mode) as file:
+            #         file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in grad_cons_proj_avg) + "\n")
         # Update Samples
         # if (sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0) or (iter == int(solver_param['init_training_win'])+1):
         # if (sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0):

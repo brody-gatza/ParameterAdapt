@@ -34,7 +34,7 @@ class Settings:
     # Iteration filtering
     # ----------------------------
     min_iteration_to_include: float | None = None
-    max_iteration_to_include: float | None = 100
+    max_iteration_to_include: float | None = 14000
 
     # ----------------------------
     # Plot simplification

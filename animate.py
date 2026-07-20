@@ -243,57 +243,206 @@ def get_fom_y_limits(
     return y_min, y_max
 
 
-if __name__ == '__main__':
+def build_rom_case_paths(
+    base_directory,
+    rom_case_names,
+    rom_result_subdir,
+    animation_output_subdir
+):
+    """
+    Builds ROM case paths for an arbitrary case naming scheme.
 
-    # ============================================================
-    # Inputs
-    # ============================================================
+    Example case names:
+        s1_u1
+        s20_u5
+        ms1
+        ms2
+        my_custom_case_name
 
-    directory = '/kuhpc/scratch/capl/b323g408/1D_RDE_matrix/'
-
-    # Single FOM path
-    fom_result_dir = '/kuhpc/scratch/capl/b323g408/1D_RDE/old_results/FOM_results/'
-
-    # ------------------------------------------------------------
-    # ROM case list settings
-    # ------------------------------------------------------------
-
-    s_list = [5, 10]
-    u_list = [1, 2, 5, 10, 15, 20]
-
-    rom_label = os.path.join('AROM_results', 'cons_prim')
-
-    animation_output_subdir = os.path.join('AROM_results', 'error', 'figures')
+    Returns:
+        rom_names
+        rom_case_dirs
+        rom_result_dirs
+        rom_animation_base_dirs
+    """
 
     rom_names = []
     rom_case_dirs = []
     rom_result_dirs = []
     rom_animation_base_dirs = []
 
-    for s_num in s_list:
-        for u_num in u_list:
+    for rom_name in rom_case_names:
 
-            rom_name = f's{s_num}_u{u_num}'
+        rom_case_dir = os.path.join(
+            base_directory,
+            rom_name
+        )
 
-            rom_case_dir = os.path.join(
-                directory,
-                rom_name
-            )
+        rom_result_dir = os.path.join(
+            rom_case_dir,
+            rom_result_subdir
+        )
 
-            rom_result_dir = os.path.join(
-                rom_case_dir,
-                rom_label
-            )
+        rom_animation_base_dir = os.path.join(
+            rom_case_dir,
+            animation_output_subdir
+        )
 
-            rom_animation_base_dir = os.path.join(
-                rom_case_dir,
-                animation_output_subdir
-            )
+        rom_names.append(rom_name)
+        rom_case_dirs.append(rom_case_dir)
+        rom_result_dirs.append(rom_result_dir)
+        rom_animation_base_dirs.append(rom_animation_base_dir)
 
-            rom_names.append(rom_name)
-            rom_case_dirs.append(rom_case_dir)
-            rom_result_dirs.append(rom_result_dir)
-            rom_animation_base_dirs.append(rom_animation_base_dir)
+    return rom_names, rom_case_dirs, rom_result_dirs, rom_animation_base_dirs
+
+
+if __name__ == '__main__':
+
+    # ============================================================
+    # Inputs
+    # ============================================================
+
+    directory = '/kuhpc/scratch/capl/b323g408/1D_RDE_matrix'
+
+    # Single FOM path
+    fom_result_dir = '/kuhpc/scratch/capl/b323g408/1D_RDE/old_results/FOM_results/'
+
+    # ============================================================
+    # ROM case list settings
+    # ============================================================
+
+    # ------------------------------------------------------------
+    # Option 1: manually provide any case names you want.
+    #
+    # This is the most general option.
+    #
+    # Examples:
+    #     rom_case_names = ['s1_u1', 's1_u2', 's50_u5']
+    #     rom_case_names = ['ms1', 'ms2', 'ms3']
+    #     rom_case_names = ['caseA', 'caseB', 'some_other_name']
+    # ------------------------------------------------------------
+
+    # rom_case_names = [
+    #     's1_u1',
+    #     's1_u2',
+    #     's1_u5',
+    #     's1_u10',
+    #     's1_u15',
+    #     's1_u20',
+
+    #     's2_u1',
+    #     's2_u2',
+    #     's2_u5',
+    #     's2_u10',
+    #     's2_u15',
+    #     's2_u20',
+
+    #     's50_u1',
+    #     's50_u2',
+    #     's50_u5',
+    #     's50_u10',
+    #     's50_u15',
+    #     's50_u20',
+
+    #     's10_u1',
+    #     's10_u2',
+    #     's10_u5',
+    #     's10_u10',
+    #     's10_u15',
+    #     's10_u20',
+
+    #     's15_u1',
+    #     's15_u2',
+    #     's15_u5',
+    #     's15_u10',
+    #     's15_u15',
+    #     's15_u20',
+
+    #     's20_u1',
+    #     's20_u2',
+    #     's20_u5',
+    #     's20_u10',
+    #     's20_u15',
+    #     's20_u20',
+
+        # Add arbitrary cases here:
+        # 'ms1',
+        # 'ms2',
+        # 'ms3',
+    # ]
+
+    # ------------------------------------------------------------
+    # Option 2: generate s/u-style cases automatically.
+    #
+    # Uncomment this block if you want to generate s#_u# cases.
+    # ------------------------------------------------------------
+
+    s_list = [20]
+    u_list = [2, 5, 6, 7, 8, 9, 10, 15, 16, 17, 18, 19, 20]
+    rom_case_names = [f's{s_num}_u{u_num}' for s_num in s_list for u_num in u_list]
+
+    # ------------------------------------------------------------
+    # Option 3: generate ms-style cases automatically.
+    #
+    # Uncomment this block if your cases are ms1, ms2, ms3, etc.
+    # ------------------------------------------------------------
+
+    # ms_list = [2000, 4000, 6000, 8000, 5000, 25000, 75000, 100000]
+    # rom_case_names = [f'ms{ms_num}' for ms_num in ms_list]
+
+    # ------------------------------------------------------------
+    # Option 4: discover all cases in the base directory automatically.
+    #
+    # This will include every folder in directory that contains:
+    #     AROM_results/cons_prim
+    #
+    # Uncomment if you want automatic discovery.
+    # ------------------------------------------------------------
+
+    # candidate_case_names = sorted(
+    #     name for name in os.listdir(directory)
+    #     if os.path.isdir(os.path.join(directory, name))
+    # )
+    #
+    # rom_case_names = []
+    # for candidate_name in candidate_case_names:
+    #     candidate_result_dir = os.path.join(
+    #         directory,
+    #         candidate_name,
+    #         'AROM_results',
+    #         'cons_prim'
+    #     )
+    #
+    #     if os.path.isdir(candidate_result_dir):
+    #         rom_case_names.append(candidate_name)
+
+    # This is where the ROM iteration files are located inside each case.
+    #
+    # Example:
+    #     /.../1D_RDE_matrix/s20_u5/AROM_results/cons_prim/
+    #     /.../1D_RDE_matrix/ms1/AROM_results/cons_prim/
+    rom_result_subdir = os.path.join('AROM_results', 'cons_prim')
+
+    # This is where final GIF animations will be saved inside each ROM case.
+    #
+    # Example:
+    #     /.../1D_RDE_matrix/s20_u5/AROM_results/error/figures/
+    #     /.../1D_RDE_matrix/ms1/AROM_results/error/figures/
+    animation_output_subdir = os.path.join('AROM_results', 'error', 'movies')
+
+    rom_names, rom_case_dirs, rom_result_dirs, rom_animation_base_dirs = build_rom_case_paths(
+        base_directory=directory,
+        rom_case_names=rom_case_names,
+        rom_result_subdir=rom_result_subdir,
+        animation_output_subdir=animation_output_subdir
+    )
+
+    print("============================================================")
+    print("ROM cases to process:")
+    for rom_name in rom_names:
+        print(f"  {rom_name}")
+    print(f"Total ROM cases: {len(rom_names)}")
+    print("============================================================")
 
     # ============================================================
     # Iteration settings
@@ -315,12 +464,12 @@ if __name__ == '__main__':
 
     x_label = 'x [m]'
 
-    # ------------------------------------------------------------
+    # ============================================================
     # Variables to plot
     #
-    # y-limits are now automatically determined from FOM data.
+    # y-limits are automatically determined from FOM data.
     # No user-input y_min or y_max values are needed.
-    # ------------------------------------------------------------
+    # ============================================================
 
     variables_to_plot = [
         {
@@ -364,16 +513,32 @@ if __name__ == '__main__':
     # Output/control switches
     # ============================================================
 
+    # If True, read raw {iter}iteration_prim.npy files and gather them.
+    # If False, load existing prim_gathered.npy and iter_list_gathered.npy.
     gather_data = True
 
+    # If gather_data is True:
+    #     True  -> save prim_gathered.npy and iter_list_gathered.npy
+    #     False -> keep gathered data in memory only
     save_gathered_data = True
 
+    # Create final GIF animations.
     save_animation = True
 
+    # GIF frame rate.
+    # Duration is approximately:
+    #     len(common_iter_list) * frame_hold / fps_input
     fps_input = 30
 
+    # Optional: hold each plotted frame for multiple GIF frames.
+    #
+    # Example:
+    #     frame_hold = 1  -> normal
+    #     frame_hold = 5  -> GIF lasts 5 times longer
     frame_hold = 1
 
+    # If True, skip writing an animation if the final GIF already exists.
+    # If False, an existing GIF with the same name can be overwritten.
     skip_existing_animation = False
 
     # Y-axis padding based on FOM data range.
@@ -382,6 +547,8 @@ if __name__ == '__main__':
     #     y_padding_fraction = 0.05 gives 5 percent padding above and below.
     y_padding_fraction = 0.05
 
+    # FOM denominator tolerance used in relative percent error.
+    # If abs(FOM value) is below this, that cell's percent error is treated as 0.
     fom_zero_tol = 1.0e-12
 
     requested_iter_list = np.arange(start_iter, end_iter, step_iter, dtype=int)
@@ -485,12 +652,16 @@ if __name__ == '__main__':
 
             if len(common_iter_list) == 0:
                 print(f"Warning: no common iterations between FOM and {rom_name}. Skipping.")
+                del rom_data
+                del rom_iter_list
                 continue
 
             common_iter_list = common_iter_list[::step_plot]
 
             if len(common_iter_list) == 0:
                 print(f"Warning: no common iterations after applying step_plot for {rom_name}. Skipping.")
+                del rom_data
+                del rom_iter_list
                 continue
 
             estimated_duration = len(common_iter_list) * frame_hold / fps_input
@@ -548,6 +719,9 @@ if __name__ == '__main__':
 
                 # ------------------------------------------------
                 # Calculate percent relative error magnitude
+                #
+                # This is kept in memory only.
+                # No error .npy or .txt files are saved.
                 # ------------------------------------------------
 
                 error_percent_history = []
@@ -581,6 +755,10 @@ if __name__ == '__main__':
                     metadata=dict(artist='Ali')
                 )
 
+                # Save directly in:
+                #     case_name/AROM_results/error/figures/
+                #
+                # No variable-name subfolders are created.
                 animation_output_dir = rom_animation_base_dir
 
                 os.makedirs(animation_output_dir, exist_ok=True)
@@ -588,7 +766,7 @@ if __name__ == '__main__':
                 animation_filename = os.path.join(
                     animation_output_dir,
                     f'{rom_name}_{var_name}.gif'
-)
+                )
 
                 if skip_existing_animation and os.path.exists(animation_filename):
                     print("Animation already exists. Skipping to avoid overwrite:")
@@ -684,6 +862,8 @@ if __name__ == '__main__':
 
                         plt.tight_layout()
 
+                        # No snapshots are saved.
+                        # The frame is written directly into the final GIF.
                         for _ in range(frame_hold):
                             writer.grab_frame()
 
