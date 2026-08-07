@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from compflowlab.utils import init_func
 from compflowlab.visual import visual_func
 from compflowlab.utils import reshape_func
+from ..solver.AROM import close_error_output_files
 
 def run(solver_param):
 
@@ -59,53 +60,56 @@ def run(solver_param):
 
     iter = 0
 
-    while iter < iter_list[-1]:
+    try:
+        while iter < iter_list[-1]:
 
-        solver_param['iter'] = iter
+            solver_param['iter'] = iter
 
-        if solver_param['arom_restart']:
+            if solver_param['arom_restart']:
 
-            try:
+                try:
 
-                if iter % solver_param['save_interval'] == 0:
+                    if iter % solver_param['save_interval'] == 0:
 
-                    checkpoint = (
-                                solver_param.copy(), rom_param.copy(), state.copy(),
-                                fig, axs, visual_param.copy()
-                            )
+                        checkpoint = (
+                                    solver_param.copy(), rom_param.copy(), state.copy(),
+                                    fig, axs, visual_param.copy()
+                                )
+                        
+                        checkpoint_iter = iter
+
+                    solver_param, state, rom_param = solver.advance_one_time_step(solver_param,state,physics,time_integration,rom_param)
                     
-                    checkpoint_iter = iter
+                except:
+
+                    print('simulation failed, rolling back and restarting!')
+
+                    solver_param, rom_param, state, fig, axs, visual_param = checkpoint
+
+                    iter = checkpoint_iter
+                    solver_param['FOM2ROM_trans_iter'] = int(iter + solver_param['init_training_win'])
+
+                    state['Q_cons']           = checkpoint[2]['Q_cons']
+                    state['Q_prim']           = checkpoint[2]['Q_prim']
+                    solver_param['hyper']     = False
+
+
+            else:
 
                 solver_param, state, rom_param = solver.advance_one_time_step(solver_param,state,physics,time_integration,rom_param)
-                
-            except:
 
-                print('simulation failed, rolling back and restarting!')
+            # update the plot
+            if solver_param['visual'] and (iter % solver_param['vis_update_interval'] == 0):
 
-                solver_param, rom_param, state, fig, axs, visual_param = checkpoint
+                visual_func.in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param)
 
-                iter = checkpoint_iter
-                solver_param['FOM2ROM_trans_iter'] = int(iter + solver_param['init_training_win'])
+            print('Iteration: ' + str(iter))
 
-                state['Q_cons']           = checkpoint[2]['Q_cons']
-                state['Q_prim']           = checkpoint[2]['Q_prim']
-                solver_param['hyper']     = False
+            state['time'] = state['time'] + solver_param['dt']
 
-
-        else:
-
-            solver_param, state, rom_param = solver.advance_one_time_step(solver_param,state,physics,time_integration,rom_param)
-
-        # update the plot
-        if solver_param['visual'] and (iter % solver_param['vis_update_interval'] == 0):
-
-            visual_func.in_progress_plot(fig,axs,iter,solver_param,rom_param,state,visual_param)
-
-        print('Iteration: ' + str(iter))
-
-        state['time'] = state['time'] + solver_param['dt']
-
-        iter = iter + 1
+            iter = iter + 1
+    finally:
+        close_error_output_files(state)
 
     end_time = time.time()
 

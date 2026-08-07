@@ -1,0 +1,11 @@
+diff --git a/src/compflowlab/solver/AROM.py b/src/compflowlab/solver/AROM.py
+--- a/src/compflowlab/solver/AROM.py
++++ b/src/compflowlab/solver/AROM.py
+@@ -1,5 +1,8 @@
+ def _flush_error_output_files(state, force=False):
++    if "error_output_files" not in state:
++        return
++
+     flush_interval = state.get("error_output_flush_interval", 100)
+ 
+     state["error_output_flush_counter"] += 1

@@ -18,6 +18,111 @@ def slope_weight(n, nm1, slope):
     weight = np.ones_like(slope)
     return weight
 
+def _format_array_line(iter, arr):
+    return str(iter) + "," + ",".join(f"{x:.17e}" for x in arr) + "\n"
+
+
+def _open_error_output_files(state, dir_results, mode):
+    """
+    Opens error-output files once and stores file handles in state.
+
+    mode should be:
+        "w" on the first error-output iteration
+        "a" if restarting/appending
+    """
+
+    file_names = [
+        "prim_interp_max",
+        "prim_interp_avg",
+        "prim_proj_max",
+        "prim_proj_avg",
+
+        "cons_interp_max",
+        "cons_interp_avg",
+        "cons_proj_max",
+        "cons_proj_avg",
+
+        "cons_interp_max_slope_counter",
+        "cons_interp_avg_slope_counter",
+        "cons_proj_max_slope_counter",
+        "cons_proj_avg_slope_counter",
+
+        "prim_interp_max_slope_counter",
+        "prim_interp_avg_slope_counter",
+        "prim_proj_max_slope_counter",
+        "prim_proj_avg_slope_counter",
+
+        "cons_interp_max_slope_ratio",
+        "cons_interp_avg_slope_ratio",
+        "cons_proj_max_slope_ratio",
+        "cons_proj_avg_slope_ratio",
+
+        "prim_interp_max_slope_ratio",
+        "prim_interp_avg_slope_ratio",
+        "prim_proj_max_slope_ratio",
+        "prim_proj_avg_slope_ratio",
+
+        "sampling_freq",
+
+        # "full_data/cons_interp_error",
+        # "full_data/prim_interp_error",
+        # "full_data/cons_proj_error",
+        # "full_data/prim_proj_error",
+    ]
+
+    state["error_output_files"] = {}
+
+    for name in file_names:
+        file_path = os.path.join(dir_results, name + ".txt")
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+        state["error_output_files"][name] = open(
+            file_path,
+            mode,
+            buffering=1024 * 1024
+        )
+
+    state["error_output_flush_counter"] = 0
+
+
+def _write_error_output_line(state, name, line):
+    state["error_output_files"][name].write(line)
+
+
+def _flush_error_output_files(state, force=False):
+    flush_interval = state.get("error_output_flush_interval", 100)
+
+    state["error_output_flush_counter"] += 1
+
+    if force or state["error_output_flush_counter"] >= flush_interval:
+        for file in state["error_output_files"].values():
+            file.flush()
+
+            # Uncomment this if you want stronger crash protection, but it is slower.
+            # os.fsync(file.fileno())
+
+        state["error_output_flush_counter"] = 0
+
+
+def close_error_output_files(state):
+    """
+    Call this at the end of the run if possible.
+
+    This is safe to call even if files were never opened.
+    """
+
+    if "error_output_files" not in state:
+        return
+
+    for file in state["error_output_files"].values():
+        try:
+            file.flush()
+            file.close()
+        except Exception:
+            pass
+
+    del state["error_output_files"]
+
 def precomputer(solver_param):
 
     print('Initializing Adaptive ROM')
@@ -114,7 +219,7 @@ def results_recorder_FOM(solver_param,state,rom_param=None):
 def results_recorder_FOM_error(solver_param,state,rom_param=None):
 
     # Prepare the name for the files to be saved
-    dir_results = os.path.join(solver_param['dir_results'] + "/error/")
+    dir_results = os.path.join(solver_param["dir_results"], "error")
     iter = solver_param['iter']
     save_title = str(iter)+'iteration'
 
@@ -539,10 +644,15 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             prim_proj_avg = np.mean(Q_prim_proj_error_reshape, axis=1)
 
             # Write the error values
-            dir_results = os.path.join(solver_param['dir_results'] + "/error/")
+            dir_results = os.path.join(solver_param["dir_results"], "error")
             if iter == int(solver_param['FOM2ROM_trans_iter']) + 1:
-                # Creates a new file or clears an existing file
+                # Creates new files or clears existing files
                 mode = "w"
+
+                state["error_output_flush_interval"] = solver_param.get("error_output_flush_interval", 100)
+
+                if "error_output_files" not in state:
+                    _open_error_output_files(state, dir_results, mode)
 
                 state['cons_interp_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
                 state['cons_interp_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
@@ -554,9 +664,23 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 state['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
                 state['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
 
+                cons_interp_max_slope_ratio = np.zeros_like(cons_interp_max)
+                cons_interp_avg_slope_ratio = np.zeros_like(cons_interp_avg)
+                cons_proj_max_slope_ratio   = np.zeros_like(cons_proj_max)
+                cons_proj_avg_slope_ratio   = np.zeros_like(cons_proj_avg)
+
+                prim_interp_max_slope_ratio = np.zeros_like(prim_interp_max)
+                prim_interp_avg_slope_ratio = np.zeros_like(prim_interp_avg)
+                prim_proj_max_slope_ratio   = np.zeros_like(prim_proj_max)
+                prim_proj_avg_slope_ratio   = np.zeros_like(prim_proj_avg)
+
             else:
-                # Appends to an exisitng file
+                # Files should already be open. If they are not, open in append mode.
                 mode = "a"
+
+                if "error_output_files" not in state:
+                    state["error_output_flush_interval"] = solver_param.get("error_output_flush_interval", 100)
+                    _open_error_output_files(state, dir_results, mode)
 
                 # Compute the error slope
                 cons_interp_max_slope = cons_interp_max - state['cons_interp_max_store']
@@ -618,108 +742,166 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             # state['Q_prim_proj_error_save'] = Q_prim_proj_error_reshape
 
             # Write the full error vectors
-            # with open(dir_results/full_data/ + "cons_interp_error.txt", mode) as file:
-            #     file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in Q_cons_interp_error) + "\n")
+            # _write_error_output_line(
+            #     state,
+            #     "full_data/cons_interp_error",
+            #     _format_array_line(iter, Q_cons_interp_error)
+            # )
 
-            # with open(dir_results/full_data/ + "prim_interp_error.txt", mode) as file:
-            #     file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in Q_prim_interp_error) + "\n")
+            # _write_error_output_line(
+            #     state,
+            #     "full_data/prim_interp_error",
+            #     _format_array_line(iter, Q_prim_interp_error)
+            # )
 
-            # with open(dir_results/full_data/ + "cons_proj_error.txt", mode) as file:
-            #     file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in Q_cons_proj_error) + "\n")
+            # _write_error_output_line(
+            #     state,
+            #     "full_data/cons_proj_error",
+            #     _format_array_line(iter, Q_cons_proj_error)
+            # )
 
-            # with open(dir_results/full_data/ + "prim_proj_error.txt", mode) as file:
-            #     file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in Q_prim_proj_error) + "\n")
+            # _write_error_output_line(
+            #     state,
+            #     "full_data/prim_proj_error",
+            #     _format_array_line(iter, Q_prim_proj_error)
+            # )
+
 
             # Write the QoIs
-            with open(dir_results + "prim_interp_max.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_interp_max) + "\n")
-                
-            # with open(dir_results + "prim_interp_min.txt", mode) as file:
-            #     file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_interp_min) + "\n")
+            _write_error_output_line(state, "prim_interp_max", _format_array_line(iter, prim_interp_max))
 
-            with open(dir_results + "prim_interp_avg.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_interp_avg) + "\n")
+            # _write_error_output_line(state, "prim_interp_min", _format_array_line(iter, prim_interp_min))
 
-            with open(dir_results + "prim_proj_max.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_proj_max) + "\n")
-                
-            # with open(dir_results + "prim_proj_min.txt", mode) as file:
-            #     file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_proj_min) + "\n")
+            _write_error_output_line(state, "prim_interp_avg", _format_array_line(iter, prim_interp_avg))
 
-            with open(dir_results + "prim_proj_avg.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_proj_avg) + "\n")
+            _write_error_output_line(state, "prim_proj_max", _format_array_line(iter, prim_proj_max))
 
-            with open(dir_results + "cons_interp_max.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_interp_max) + "\n")
-                
-            # with open(dir_results + "cons_interp_min.txt", mode) as file:
-            #     file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_interp_min) + "\n")
+            # _write_error_output_line(state, "prim_proj_min", _format_array_line(iter, prim_proj_min))
 
-            with open(dir_results + "cons_interp_avg.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_interp_avg) + "\n")
+            _write_error_output_line(state, "prim_proj_avg", _format_array_line(iter, prim_proj_avg))
 
-            with open(dir_results + "cons_proj_max.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_proj_max) + "\n")
-                
-            # with open(dir_results + "cons_proj_min.txt", mode) as file:
-            #     file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_proj_min) + "\n")
+            _write_error_output_line(state, "cons_interp_max", _format_array_line(iter, cons_interp_max))
 
-            with open(dir_results + "cons_proj_avg.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_proj_avg) + "\n")
+            # _write_error_output_line(state, "cons_interp_min", _format_array_line(iter, cons_interp_min))
+
+            _write_error_output_line(state, "cons_interp_avg", _format_array_line(iter, cons_interp_avg))
+
+            _write_error_output_line(state, "cons_proj_max", _format_array_line(iter, cons_proj_max))
+
+            # _write_error_output_line(state, "cons_proj_min", _format_array_line(iter, cons_proj_min))
+
+            _write_error_output_line(state, "cons_proj_avg", _format_array_line(iter, cons_proj_avg))
 
 
-            with open(dir_results + "cons_interp_max_slope_counter.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['cons_interp_max_slope_counter']) + "\n")
+            # Write the slope counters
+            _write_error_output_line(
+                state,
+                "cons_interp_max_slope_counter",
+                _format_array_line(iter, state["cons_interp_max_slope_counter"])
+            )
 
-            with open(dir_results + "cons_interp_avg_slope_counter.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['cons_interp_avg_slope_counter']) + "\n")
+            _write_error_output_line(
+                state,
+                "cons_interp_avg_slope_counter",
+                _format_array_line(iter, state["cons_interp_avg_slope_counter"])
+            )
 
-            with open(dir_results + "cons_proj_max_slope_counter.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['cons_proj_max_slope_counter']) + "\n")
+            _write_error_output_line(
+                state,
+                "cons_proj_max_slope_counter",
+                _format_array_line(iter, state["cons_proj_max_slope_counter"])
+            )
 
-            with open(dir_results + "cons_proj_avg_slope_counter.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['cons_proj_avg_slope_counter']) + "\n")
+            _write_error_output_line(
+                state,
+                "cons_proj_avg_slope_counter",
+                _format_array_line(iter, state["cons_proj_avg_slope_counter"])
+            )
 
-            with open(dir_results + "prim_interp_max_slope_counter.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['prim_interp_max_slope_counter']) + "\n")
+            _write_error_output_line(
+                state,
+                "prim_interp_max_slope_counter",
+                _format_array_line(iter, state["prim_interp_max_slope_counter"])
+            )
 
-            with open(dir_results + "prim_interp_avg_slope_counter.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['prim_interp_avg_slope_counter']) + "\n")
+            _write_error_output_line(
+                state,
+                "prim_interp_avg_slope_counter",
+                _format_array_line(iter, state["prim_interp_avg_slope_counter"])
+            )
 
-            with open(dir_results + "prim_proj_max_slope_counter.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['prim_proj_max_slope_counter']) + "\n")
+            _write_error_output_line(
+                state,
+                "prim_proj_max_slope_counter",
+                _format_array_line(iter, state["prim_proj_max_slope_counter"])
+            )
 
-            with open(dir_results + "prim_proj_avg_slope_counter.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['prim_proj_avg_slope_counter']) + "\n")
-                
-
-            with open(dir_results + "cons_interp_max_slope_ratio.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_interp_max_slope_ratio) + "\n")
-
-            with open(dir_results + "cons_interp_avg_slope_ratio.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_interp_avg_slope_ratio) + "\n")
-
-            with open(dir_results + "cons_proj_max_slope_ratio.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_proj_max_slope_ratio) + "\n")
-
-            with open(dir_results + "cons_proj_avg_slope_ratio.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_proj_avg_slope_ratio) + "\n")
-
-            with open(dir_results + "prim_interp_max_slope_ratio.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_interp_max_slope_ratio) + "\n")
-
-            with open(dir_results + "prim_interp_avg_slope_ratio.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_interp_avg_slope_ratio) + "\n")
-
-            with open(dir_results + "prim_proj_max_slope_ratio.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_proj_max_slope_ratio) + "\n")
-
-            with open(dir_results + "prim_proj_avg_slope_ratio.txt", mode) as file:
-                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_proj_avg_slope_ratio) + "\n")
+            _write_error_output_line(
+                state,
+                "prim_proj_avg_slope_counter",
+                _format_array_line(iter, state["prim_proj_avg_slope_counter"])
+            )
 
 
-            with open(dir_results + "sampling_freq.txt", mode) as file:
-                file.write(str(iter) + "," + str(solver_param['unsampled_update_freq']) + "\n")
+            # Write the slope ratios
+            _write_error_output_line(
+                state,
+                "cons_interp_max_slope_ratio",
+                _format_array_line(iter, cons_interp_max_slope_ratio)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_interp_avg_slope_ratio",
+                _format_array_line(iter, cons_interp_avg_slope_ratio)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_max_slope_ratio",
+                _format_array_line(iter, cons_proj_max_slope_ratio)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_avg_slope_ratio",
+                _format_array_line(iter, cons_proj_avg_slope_ratio)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_max_slope_ratio",
+                _format_array_line(iter, prim_interp_max_slope_ratio)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_avg_slope_ratio",
+                _format_array_line(iter, prim_interp_avg_slope_ratio)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_max_slope_ratio",
+                _format_array_line(iter, prim_proj_max_slope_ratio)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_avg_slope_ratio",
+                _format_array_line(iter, prim_proj_avg_slope_ratio)
+            )
+
+
+            # Write sampling frequency
+            _write_error_output_line(
+                state,
+                "sampling_freq",
+                str(iter) + "," + str(solver_param["unsampled_update_freq"]) + "\n"
+            )
+
+            # Periodically flush the open file handles
+            _flush_error_output_files(state)
 
             # Check if the slope counter thresholds are exceeded
             if solver_param['parameter_adapt']:
@@ -734,17 +916,6 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                         solver_param['unsampled_update_freq'] += 1
 
                     print('Updated the sampling frequency to', solver_param['unsampled_update_freq'])
-
-                    # Reset the slope counter
-                    state['cons_interp_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
-                    state['cons_interp_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
-                    state['cons_proj_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
-                    state['cons_proj_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
-
-                    state['prim_interp_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
-                    state['prim_interp_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
-                    state['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
-                    state['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
 
                     # Update the sampling iterations
                     past_samples = solver_param['resample_iter_list'][solver_param['resample_iter_list'] <= iter]
@@ -766,6 +937,17 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                         )
 
                     solver_param['resample_iter_list'] = np.concatenate((past_samples, future_samples))
+
+                    # Reset the slope counter
+                    state['cons_interp_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                    state['cons_interp_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                    state['cons_proj_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                    state['cons_proj_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
+
+                    state['prim_interp_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                    state['prim_interp_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                    state['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                    state['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
 
 
         # Update Samples
