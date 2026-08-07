@@ -302,7 +302,7 @@ if __name__ == '__main__':
     # Inputs
     # ============================================================
 
-    directory = '/kuhpc/scratch/capl/b323g408/1D_RDE_matrix'
+    directory = '/kuhpc/scratch/capl/b323g408/1D_RDE_matrix/frequency_adapt'
 
     # Single FOM path
     fom_result_dir = '/kuhpc/scratch/capl/b323g408/1D_RDE/old_results/FOM_results/'

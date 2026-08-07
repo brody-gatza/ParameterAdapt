@@ -92,7 +92,7 @@ error_check             = True
 multi_samp              = False
 unsampled_update_freq_2 = 10
 multi_samp_iter         = 5000
-
+parameter_adapt         = True
 
 
 

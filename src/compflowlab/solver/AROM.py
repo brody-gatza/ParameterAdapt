@@ -7,6 +7,17 @@ from compflowlab.boundary_condition import bc_func
 from compflowlab.rom.basis_func import adapt_basis
 from compflowlab.rom.sampling_func import hyper_precompute
 
+def slope_weight(n, nm1, slope):
+    tol = 1.5
+    thresh = 50
+    weight = np.where(slope > 0, n/nm1,
+        np.where(slope < 0, nm1/n, 0.0)
+    )
+
+    # weight = np.where(np.abs(weight) < tol, 0, np.where(np.abs(weight) > thresh, 2, 1))
+    weight = np.ones_like(slope)
+    return weight
+
 def precomputer(solver_param):
 
     print('Initializing Adaptive ROM')
@@ -559,15 +570,35 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 prim_proj_avg_slope = prim_proj_avg - state['prim_proj_avg_store']
 
                 # Find the sign and add to the counter
-                state['cons_interp_max_slope_counter'] += np.sign(cons_interp_max_slope)
-                state['cons_interp_avg_slope_counter'] += np.sign(cons_interp_avg_slope)
-                state['cons_proj_max_slope_counter'] += np.sign(cons_proj_max_slope)
-                state['cons_proj_avg_slope_counter'] += np.sign(cons_proj_avg_slope)
+                # state['cons_interp_max_slope_counter'] += np.sign(cons_interp_max_slope)
+                # state['cons_interp_avg_slope_counter'] += np.sign(cons_interp_avg_slope)
+                # state['cons_proj_max_slope_counter'] += np.sign(cons_proj_max_slope)
+                # state['cons_proj_avg_slope_counter'] += np.sign(cons_proj_avg_slope)
 
-                state['prim_interp_max_slope_counter'] += np.sign(prim_interp_max_slope)
-                state['prim_interp_avg_slope_counter'] += np.sign(prim_interp_avg_slope)
-                state['prim_proj_max_slope_counter'] += np.sign(prim_proj_max_slope)
-                state['prim_proj_avg_slope_counter'] += np.sign(prim_proj_avg_slope)
+                # state['prim_interp_max_slope_counter'] += np.sign(prim_interp_max_slope)
+                # state['prim_interp_avg_slope_counter'] += np.sign(prim_interp_avg_slope)
+                # state['prim_proj_max_slope_counter'] += np.sign(prim_proj_max_slope)
+                # state['prim_proj_avg_slope_counter'] += np.sign(prim_proj_avg_slope)
+
+                state['cons_interp_max_slope_counter'] += np.sign(cons_interp_max_slope) * slope_weight(cons_interp_max, state['cons_interp_max_store'], cons_interp_max_slope)
+                state['cons_interp_avg_slope_counter'] += np.sign(cons_interp_avg_slope) * slope_weight(cons_interp_avg, state['cons_interp_avg_store'], cons_interp_avg_slope)
+                state['cons_proj_max_slope_counter']   += np.sign(cons_proj_max_slope)   * slope_weight(cons_proj_max,   state['cons_proj_max_store'],   cons_proj_max_slope)
+                state['cons_proj_avg_slope_counter']   += np.sign(cons_proj_avg_slope)   * slope_weight(cons_proj_avg,   state['cons_proj_avg_store'],   cons_proj_avg_slope)
+
+                state['prim_interp_max_slope_counter'] += np.sign(prim_interp_max_slope) * slope_weight(prim_interp_max, state['prim_interp_max_store'], prim_interp_max_slope)
+                state['prim_interp_avg_slope_counter'] += np.sign(prim_interp_avg_slope) * slope_weight(prim_interp_avg, state['prim_interp_avg_store'], prim_interp_avg_slope)
+                state['prim_proj_max_slope_counter']   += np.sign(prim_proj_max_slope)   * slope_weight(prim_proj_max,   state['prim_proj_max_store'],   prim_proj_max_slope)
+                state['prim_proj_avg_slope_counter']   += np.sign(prim_proj_avg_slope)   * slope_weight(prim_proj_avg,   state['prim_proj_avg_store'],   prim_proj_avg_slope)
+
+                cons_interp_max_slope_ratio = np.where(cons_interp_max_slope > 0, cons_interp_max/state['cons_interp_max_store'], np.where(cons_interp_max_slope < 0, state['cons_interp_max_store']/cons_interp_max, 0))
+                cons_interp_avg_slope_ratio = np.where(cons_interp_avg_slope > 0, cons_interp_avg/state['cons_interp_avg_store'], np.where(cons_interp_avg_slope < 0, state['cons_interp_avg_store']/cons_interp_avg, 0))
+                cons_proj_max_slope_ratio   = np.where(cons_proj_max_slope   > 0, cons_proj_max/state['cons_proj_max_store'],     np.where(cons_proj_max_slope   < 0, state['cons_proj_max_store']/cons_proj_max,     0))
+                cons_proj_avg_slope_ratio   = np.where(cons_proj_avg_slope   > 0, cons_proj_avg/state['cons_proj_avg_store'],     np.where(cons_proj_avg_slope   < 0, state['cons_proj_avg_store']/cons_proj_avg,     0))
+
+                prim_interp_max_slope_ratio = np.where(prim_interp_max_slope > 0, prim_interp_max/state['prim_interp_max_store'], np.where(prim_interp_max_slope < 0, state['prim_interp_max_store']/prim_interp_max, 0))
+                prim_interp_avg_slope_ratio = np.where(prim_interp_avg_slope > 0, prim_interp_avg/state['prim_interp_avg_store'], np.where(prim_interp_avg_slope < 0, state['prim_interp_avg_store']/prim_interp_avg, 0))
+                prim_proj_max_slope_ratio   = np.where(prim_proj_max_slope   > 0, prim_proj_max/state['prim_proj_max_store'],     np.where(prim_proj_max_slope   < 0, state['prim_proj_max_store']/prim_proj_max,     0))
+                prim_proj_avg_slope_ratio   = np.where(prim_proj_avg_slope   > 0, prim_proj_avg/state['prim_proj_avg_store'],     np.where(prim_proj_avg_slope   < 0, state['prim_proj_avg_store']/prim_proj_avg,     0))
 
             # Store the current error QoIs
             state['cons_interp_max_store'] = cons_interp_max
@@ -660,18 +691,46 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
             with open(dir_results + "prim_proj_avg_slope_counter.txt", mode) as file:
                 file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in state['prim_proj_avg_slope_counter']) + "\n")
+                
+
+            with open(dir_results + "cons_interp_max_slope_ratio.txt", mode) as file:
+                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_interp_max_slope_ratio) + "\n")
+
+            with open(dir_results + "cons_interp_avg_slope_ratio.txt", mode) as file:
+                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_interp_avg_slope_ratio) + "\n")
+
+            with open(dir_results + "cons_proj_max_slope_ratio.txt", mode) as file:
+                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_proj_max_slope_ratio) + "\n")
+
+            with open(dir_results + "cons_proj_avg_slope_ratio.txt", mode) as file:
+                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in cons_proj_avg_slope_ratio) + "\n")
+
+            with open(dir_results + "prim_interp_max_slope_ratio.txt", mode) as file:
+                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_interp_max_slope_ratio) + "\n")
+
+            with open(dir_results + "prim_interp_avg_slope_ratio.txt", mode) as file:
+                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_interp_avg_slope_ratio) + "\n")
+
+            with open(dir_results + "prim_proj_max_slope_ratio.txt", mode) as file:
+                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_proj_max_slope_ratio) + "\n")
+
+            with open(dir_results + "prim_proj_avg_slope_ratio.txt", mode) as file:
+                file.write(str(iter) + "," + ",".join(f"{x:.17e}" for x in prim_proj_avg_slope_ratio) + "\n")
 
 
             with open(dir_results + "sampling_freq.txt", mode) as file:
-                file.write(str(iter) + "," + str(solver_param['unsamped_update_freq']))
+                file.write(str(iter) + "," + str(solver_param['unsampled_update_freq']) + "\n")
 
             # Check if the slope counter thresholds are exceeded
             if solver_param['parameter_adapt']:
-                if np.any(np.abs(state['prim_interp_max_slope_counter']) >= 100):
+                if np.any((state['prim_interp_max_slope_counter'] >= 100) | (state['prim_interp_max_slope_counter'] <= -100)):
 
                     if np.any(state['prim_interp_max_slope_counter'] >= 100):
-                        solver_param['unsampled_update_freq'] -= 1
-                    elif np.any(state['prim_interp_max_slope_counter'] <= -100):
+                        if solver_param['unsampled_update_freq'] == 2:
+                            print('Update frequency is already at max')
+                        else:
+                            solver_param['unsampled_update_freq'] -= 1
+                    else:
                         solver_param['unsampled_update_freq'] += 1
 
                     print('Updated the sampling frequency to', solver_param['unsampled_update_freq'])
@@ -690,12 +749,21 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                     # Update the sampling iterations
                     past_samples = solver_param['resample_iter_list'][solver_param['resample_iter_list'] <= iter]
 
-                    future_samples = np.arange(
-                        iter + 1,
-                        solver_param['num_step'],
-                        solver_param['unsampled_update_freq'],
-                        dtype=int
-                    )
+                    if np.any(state['prim_interp_max_slope_counter'] >= 100):
+                        # Set a sampling update at the next iteration
+                        future_samples = np.arange(
+                            iter + 1,
+                            solver_param['num_step'],
+                            solver_param['unsampled_update_freq'],
+                            dtype=int
+                        )
+                    else:
+                        future_samples = np.arange(
+                            iter + solver_param['unsampled_update_freq'],
+                            solver_param['num_step'],
+                            solver_param['unsampled_update_freq'],
+                            dtype=int
+                        )
 
                     solver_param['resample_iter_list'] = np.concatenate((past_samples, future_samples))
 

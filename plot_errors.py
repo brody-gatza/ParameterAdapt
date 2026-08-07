@@ -33,13 +33,31 @@ class Settings:
     # ----------------------------
     # Iteration filtering
     # ----------------------------
+    # These are the currently active limits used by the loader.
     min_iteration_to_include: float | None = None
     max_iteration_to_include: float | None = None
+
+    # Multiple ranges to generate.
+    # Each pair is:
+    #     (min_iteration_to_include, max_iteration_to_include)
+    #
+    # Examples:
+    #     (None, None)     -> include all iterations
+    #     (None, 100)      -> include iterations <= 100
+    #     (None, 14000)    -> include iterations <= 14000
+    #     (100, 14000)     -> include 100 <= iterations <= 14000
+    iteration_ranges_to_include: list[tuple[float | None, float | None]] = field(
+        default_factory=lambda: [
+            (None, None),
+            (None, 100),
+            (None, 14000),
+        ]
+    )
 
     # ----------------------------
     # Plot simplification
     # ----------------------------
-    plot_every_nth_point: int | None = 33
+    plot_every_nth_point: int | None = 3
 
     # ----------------------------
     # Moving/running averages
@@ -49,6 +67,21 @@ class Settings:
     baseline_moving_average_window: int = 5000
 
     plot_running_average: bool = True
+
+    # ----------------------------
+    # Rolling coefficient of variation
+    # ----------------------------
+    plot_rolling_coefficient_of_variation: bool = True
+    rolling_coefficient_of_variation_windows: list[int] = field(
+        default_factory=lambda: [1000]
+    )
+
+    # If the rolling mean magnitude is smaller than this value,
+    # the rolling coefficient of variation is set to NaN.
+    rolling_coefficient_of_variation_min_mean_magnitude: float = 1.0e-30
+
+    # CV is usually easier to read on a log scale.
+    rolling_coefficient_of_variation_logy: bool = True
 
     # ----------------------------
     # Main derived figure toggles
@@ -77,9 +110,9 @@ class Settings:
     plot_raw_slope_moving_average_only: bool = False
     plot_positive_raw_slopes_only: bool = False
 
-    plot_cumulative_sum_of_error_slope: bool = False
-    plot_cumulative_sum_of_moving_average_slope: bool = False
-    plot_moving_average_of_cumulative_sum: bool = False
+    plot_cumulative_sum_of_error_slope: bool = True
+    plot_cumulative_sum_of_moving_average_slope: bool = True
+    plot_moving_average_of_cumulative_sum: bool = True
 
     plot_raw_slope_sign_running_total: bool = True
     plot_raw_slope_sign_indicator: bool = False
@@ -563,6 +596,45 @@ def compute_moving_average(
             y_avg[i] = cumulative_sum / (i + 1)
 
     return x, y_avg
+
+
+def compute_rolling_coefficient_of_variation(
+    x: np.ndarray,
+    y: np.ndarray,
+    window: int,
+    min_mean_magnitude: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    if window <= 0:
+        raise ValueError("Rolling coefficient-of-variation window must be positive.")
+
+    if min_mean_magnitude < 0.0:
+        raise ValueError(
+            "rolling_coefficient_of_variation_min_mean_magnitude must be nonnegative."
+        )
+
+    rolling_cv = np.full(len(y), np.nan)
+
+    for i in range(len(y)):
+        window_start = max(0, i - window + 1)
+        window_values = y[window_start : i + 1]
+
+        window_values = window_values[np.isfinite(window_values)]
+
+        if len(window_values) == 0:
+            continue
+
+        window_mean = np.mean(window_values)
+        window_std = np.std(window_values, ddof=0)
+
+        if abs(window_mean) < min_mean_magnitude:
+            rolling_cv[i] = np.nan
+        else:
+            rolling_cv[i] = window_std / abs(window_mean)
+
+    return x, rolling_cv
 
 
 def compute_moving_average_ignore_nan(
@@ -1373,6 +1445,85 @@ def figure_main_data(
     title = group.title
 
     if group.logy:
+        title += " [log-y]"
+
+    finalize_figure(fig, axes, title)
+
+    return fig
+
+
+# ============================================================
+# FIGURE 1B: ROLLING COEFFICIENT OF VARIATION
+# ============================================================
+
+def figure_rolling_coefficient_of_variation(
+    group: FigureGroup,
+    settings: Settings,
+    rolling_coefficient_of_variation_window: int,
+):
+    loaded_group = load_group_data(group, settings)
+
+    fig, axes = create_figure(loaded_group.variable_indices)
+
+    for ax, var_index in zip(axes, loaded_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
+        for dataset_index, dataset in enumerate(loaded_group.datasets):
+            x = dataset.iterations
+            y = dataset.variables[:, var_index]
+
+            x_cv, y_cv = compute_rolling_coefficient_of_variation(
+                x=x,
+                y=y,
+                window=rolling_coefficient_of_variation_window,
+                min_mean_magnitude=(
+                    settings.rolling_coefficient_of_variation_min_mean_magnitude
+                ),
+            )
+
+            x_cv_plot, y_cv_plot = downsample_for_plotting(
+                x_cv,
+                y_cv,
+                settings,
+            )
+
+            ax.plot(
+                x_cv_plot,
+                y_cv_plot,
+                color=get_plot_color(dataset_index, settings, "primary"),
+                linewidth=2.0,
+                alpha=0.9,
+                label=(
+                    f"{dataset.filename.stem} rolling CV-"
+                    f"{rolling_coefficient_of_variation_window}"
+                ),
+                zorder=4,
+            )
+
+        format_axis(
+            ax,
+            ylabel=f"rolling CV ({variable_label})",
+            settings=settings,
+            logy=settings.rolling_coefficient_of_variation_logy,
+        )
+
+        # apply_limits_if_enabled(
+        #     ax,
+        #     settings=settings,
+        #     logy=settings.rolling_coefficient_of_variation_logy,
+        #     keep_zero_visible=False,
+        # )
+
+    title = (
+        f"{group.title} Rolling Coefficient of Variation "
+        f"[window={rolling_coefficient_of_variation_window}]"
+    )
+
+    if settings.rolling_coefficient_of_variation_logy:
         title += " [log-y]"
 
     finalize_figure(fig, axes, title)
@@ -2495,20 +2646,9 @@ def figure_cumulative_slope(
             slope_x, raw_slope = compute_slope(x, y)
             cumulative_raw_slope = compute_cumulative_sum(raw_slope)
 
-            normalized_cumulative_raw_slope = compute_cumsum_normalized_by_iteration(
-                slope_x,
-                cumulative_raw_slope,
-            )
-
             x_plot, cumulative_raw_slope_plot = downsample_for_plotting(
                 slope_x,
                 cumulative_raw_slope,
-                settings,
-            )
-
-            x_norm_plot, normalized_cumulative_raw_slope_plot = downsample_for_plotting(
-                slope_x,
-                normalized_cumulative_raw_slope,
                 settings,
             )
 
@@ -2520,17 +2660,6 @@ def figure_cumulative_slope(
                 alpha=0.85,
                 label=f"{dataset.filename.stem} cumulative raw slope",
                 zorder=3,
-            )
-
-            ax_right.plot(
-                x_norm_plot,
-                normalized_cumulative_raw_slope_plot,
-                color=get_plot_color(dataset_index, settings, "secondary"),
-                linewidth=2.2,
-                linestyle="-.",
-                alpha=1.0,
-                label=f"{dataset.filename.stem} cumulative raw slope / iteration",
-                zorder=6,
             )
 
             if (
@@ -2549,7 +2678,7 @@ def figure_cumulative_slope(
                     settings,
                 )
 
-                ax_left.plot(
+                ax_right.plot(
                     x_avg_plot,
                     cumulative_avg_plot,
                     color=get_plot_color(dataset_index, settings, "tertiary"),
@@ -2586,7 +2715,7 @@ def figure_cumulative_slope(
         )
 
         ax_right.set_ylabel(
-            f"cumsum d({variable_label})/dIteration / iteration",
+            f"moving average of cumsum d({variable_label})/dIteration",
             fontsize=12,
         )
 
@@ -2632,9 +2761,7 @@ def figure_cumulative_slope(
     title = f"{group.title} Cumulative Sum of Raw Data Slope"
 
     if settings.plot_moving_average_of_cumulative_sum:
-        title += f" [cumsum CFD MA window = {moving_average_window}]"
-
-    title += " [normalized cumsum on right axis]"
+        title += f" [cumsum CFD MA window = {moving_average_window} on right axis]"
 
     finalize_figure(fig, axes, title)
 
@@ -3169,23 +3296,15 @@ def make_pdf_name(
 ) -> Path:
     base_name = Path(base_name)
 
-    suffix_parts = []
+    iteration_suffix = get_iteration_range_suffix(settings)
 
-    iteration_range_suffix = get_iteration_range_suffix(settings)
-
-    if iteration_range_suffix:
-        suffix_parts.append(iteration_range_suffix)
-
-    if moving_average_window is not None:
-        suffix_parts.append(f"_MA_{moving_average_window}")
-
-    if not suffix_parts:
-        return base_name
-
-    combined_suffix = "".join(suffix_parts)
+    if moving_average_window is None:
+        moving_average_suffix = ""
+    else:
+        moving_average_suffix = f"_MA_{moving_average_window}"
 
     return base_name.with_name(
-        f"{base_name.stem}{combined_suffix}{base_name.suffix}"
+        f"{base_name.stem}{iteration_suffix}{moving_average_suffix}{base_name.suffix}"
     )
 
 
@@ -3205,6 +3324,20 @@ def add_enabled_figures_for_group(
         plot_moving_average=plot_moving_average,
     )
     add_page_to_pdf(pdf, fig, settings)
+
+    if settings.plot_rolling_coefficient_of_variation:
+        for rolling_cv_window in settings.rolling_coefficient_of_variation_windows:
+            print(
+                "Adding rolling coefficient of variation figure "
+                f"for window = {rolling_cv_window}"
+            )
+
+            fig = figure_rolling_coefficient_of_variation(
+                group=group,
+                settings=settings,
+                rolling_coefficient_of_variation_window=rolling_cv_window,
+            )
+            add_page_to_pdf(pdf, fig, settings)
 
     if not plot_moving_average:
         return
@@ -3465,10 +3598,63 @@ def normalize_pdf_output_name(output_base_name: str) -> str:
     return str(output_path)
 
 
+def parse_iteration_limit_text(value_text: str) -> float | None:
+    value_text = value_text.strip().lower()
+
+    none_values = {
+        "none",
+        "null",
+        "na",
+        "n/a",
+        "start",
+        "end",
+        "",
+    }
+
+    if value_text in none_values:
+        return None
+
+    return float(value_text)
+
+
+def parse_iteration_range_tokens(
+    tokens: list[str],
+) -> list[tuple[float | None, float | None]]:
+    if len(tokens) == 0:
+        raise ValueError("At least one iteration-range token is required.")
+
+    if len(tokens) % 2 != 0:
+        raise ValueError(
+            "Iteration ranges must be supplied as min/max pairs. "
+            "Example: --iteration-ranges none none none 100 none 14000"
+        )
+
+    iteration_ranges: list[tuple[float | None, float | None]] = []
+
+    for i in range(0, len(tokens), 2):
+        min_iteration = parse_iteration_limit_text(tokens[i])
+        max_iteration = parse_iteration_limit_text(tokens[i + 1])
+
+        if (
+            min_iteration is not None
+            and max_iteration is not None
+            and min_iteration > max_iteration
+        ):
+            raise ValueError(
+                f"Invalid iteration range: min {min_iteration} is greater "
+                f"than max {max_iteration}."
+            )
+
+        iteration_ranges.append((min_iteration, max_iteration))
+
+    return iteration_ranges
+
+
 def parse_command_line_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Generate comparison PDF figures from the configured data files."
+            "Generate lightweight comparison PDF figures from the "
+            "configured data files."
         )
     )
 
@@ -3480,6 +3666,18 @@ def parse_command_line_arguments() -> argparse.Namespace:
         ),
     )
 
+    parser.add_argument(
+        "--iteration-ranges",
+        nargs="+",
+        default=None,
+        metavar=("MIN", "MAX"),
+        help=(
+            "Optional min/max iteration pairs to include. "
+            "Use 'none' for an open bound. "
+            "Example: --iteration-ranges none none none 100 none 14000"
+        ),
+    )
+
     return parser.parse_args()
 
 
@@ -3488,21 +3686,47 @@ def main() -> None:
 
     pdf_output_file = normalize_pdf_output_name(args.output_base_name)
 
-    settings = replace(
-        SETTINGS,
-        pdf_output_file=pdf_output_file,
-    )
+    if args.iteration_ranges is None:
+        iteration_ranges = SETTINGS.iteration_ranges_to_include
+    else:
+        iteration_ranges = parse_iteration_range_tokens(args.iteration_ranges)
 
     figure_groups = FIGURE_GROUPS
 
-    print_run_summary(settings)
+    for min_iteration, max_iteration in iteration_ranges:
+        settings = replace(
+            SETTINGS,
+            pdf_output_file=pdf_output_file,
+            min_iteration_to_include=min_iteration,
+            max_iteration_to_include=max_iteration,
+            iteration_ranges_to_include=iteration_ranges,
+        )
 
-    if settings.plot_moving_average:
-        for moving_average_window in settings.moving_average_windows:
+        print_run_summary(settings)
+
+        if settings.plot_moving_average:
+            for moving_average_window in settings.moving_average_windows:
+                pdf_name = make_pdf_name(
+                    settings.pdf_output_file,
+                    settings=settings,
+                    moving_average_window=moving_average_window,
+                )
+
+                pdf_path = settings.output_dir / pdf_name
+
+                write_pdf(
+                    pdf_path=pdf_path,
+                    settings=settings,
+                    figure_groups=figure_groups,
+                    moving_average_window=moving_average_window,
+                    plot_moving_average=True,
+                )
+
+        else:
             pdf_name = make_pdf_name(
                 settings.pdf_output_file,
                 settings=settings,
-                moving_average_window=moving_average_window,
+                moving_average_window=None,
             )
 
             pdf_path = settings.output_dir / pdf_name
@@ -3511,28 +3735,11 @@ def main() -> None:
                 pdf_path=pdf_path,
                 settings=settings,
                 figure_groups=figure_groups,
-                moving_average_window=moving_average_window,
-                plot_moving_average=True,
+                moving_average_window=None,
+                plot_moving_average=False,
             )
 
-    else:
-        pdf_name = make_pdf_name(
-            settings.pdf_output_file,
-            settings=settings,
-            moving_average_window=None,
-        )
-
-        pdf_path = settings.output_dir / pdf_name
-
-        write_pdf(
-            pdf_path=pdf_path,
-            settings=settings,
-            figure_groups=figure_groups,
-            moving_average_window=None,
-            plot_moving_average=False,
-        )
-
-    if settings.show_figures:
+    if SETTINGS.show_figures:
         plt.show()
     else:
         plt.close("all")

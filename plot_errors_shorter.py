@@ -34,12 +34,12 @@ class Settings:
     # Iteration filtering
     # ----------------------------
     min_iteration_to_include: float | None = None
-    max_iteration_to_include: float | None = 14000
+    max_iteration_to_include: float | None = 100
 
     # ----------------------------
     # Plot simplification
     # ----------------------------
-    plot_every_nth_point: int | None = 33
+    plot_every_nth_point: int | None = None
 
     # ----------------------------
     # Moving/running averages
@@ -77,9 +77,9 @@ class Settings:
     plot_raw_slope_moving_average_only: bool = False
     plot_positive_raw_slopes_only: bool = False
 
-    plot_cumulative_sum_of_error_slope: bool = False
-    plot_cumulative_sum_of_moving_average_slope: bool = False
-    plot_moving_average_of_cumulative_sum: bool = False
+    plot_cumulative_sum_of_error_slope: bool = True
+    plot_cumulative_sum_of_moving_average_slope: bool = True
+    plot_moving_average_of_cumulative_sum: bool = True
 
     plot_raw_slope_sign_running_total: bool = True
     plot_raw_slope_sign_indicator: bool = False
@@ -2495,20 +2495,9 @@ def figure_cumulative_slope(
             slope_x, raw_slope = compute_slope(x, y)
             cumulative_raw_slope = compute_cumulative_sum(raw_slope)
 
-            normalized_cumulative_raw_slope = compute_cumsum_normalized_by_iteration(
-                slope_x,
-                cumulative_raw_slope,
-            )
-
             x_plot, cumulative_raw_slope_plot = downsample_for_plotting(
                 slope_x,
                 cumulative_raw_slope,
-                settings,
-            )
-
-            x_norm_plot, normalized_cumulative_raw_slope_plot = downsample_for_plotting(
-                slope_x,
-                normalized_cumulative_raw_slope,
                 settings,
             )
 
@@ -2520,17 +2509,6 @@ def figure_cumulative_slope(
                 alpha=0.85,
                 label=f"{dataset.filename.stem} cumulative raw slope",
                 zorder=3,
-            )
-
-            ax_right.plot(
-                x_norm_plot,
-                normalized_cumulative_raw_slope_plot,
-                color=get_plot_color(dataset_index, settings, "secondary"),
-                linewidth=2.2,
-                linestyle="-.",
-                alpha=1.0,
-                label=f"{dataset.filename.stem} cumulative raw slope / iteration",
-                zorder=6,
             )
 
             if (
@@ -2549,7 +2527,7 @@ def figure_cumulative_slope(
                     settings,
                 )
 
-                ax_left.plot(
+                ax_right.plot(
                     x_avg_plot,
                     cumulative_avg_plot,
                     color=get_plot_color(dataset_index, settings, "tertiary"),
@@ -2586,7 +2564,7 @@ def figure_cumulative_slope(
         )
 
         ax_right.set_ylabel(
-            f"cumsum d({variable_label})/dIteration / iteration",
+            f"moving average of cumsum d({variable_label})/dIteration",
             fontsize=12,
         )
 
@@ -2632,9 +2610,7 @@ def figure_cumulative_slope(
     title = f"{group.title} Cumulative Sum of Raw Data Slope"
 
     if settings.plot_moving_average_of_cumulative_sum:
-        title += f" [cumsum CFD MA window = {moving_average_window}]"
-
-    title += " [normalized cumsum on right axis]"
+        title += f" [cumsum CFD MA window = {moving_average_window} on right axis]"
 
     finalize_figure(fig, axes, title)
 
