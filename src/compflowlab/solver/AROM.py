@@ -90,6 +90,9 @@ def _write_error_output_line(state, name, line):
 
 
 def _flush_error_output_files(state, force=False):
+    if "error_output_files" not in state:
+        return
+
     flush_interval = state.get("error_output_flush_interval", 100)
 
     state["error_output_flush_counter"] += 1
@@ -122,6 +125,7 @@ def close_error_output_files(state):
             pass
 
     del state["error_output_files"]
+    state.pop("error_output_flush_counter", None)
 
 def precomputer(solver_param):
 
