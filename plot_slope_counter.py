@@ -62,6 +62,17 @@ class Settings:
     slope_counter_suffix: str = "_slope_counter"
 
     # ----------------------------
+    # Slope-ratio figure
+    # ----------------------------
+    plot_slope_ratio_data: bool = True
+    slope_ratio_suffix: str = "_slope_ratio"
+
+    # ----------------------------
+    # Slope-counter / slope-ratio overlay figure
+    # ----------------------------
+    plot_slope_counter_ratio_overlay_data: bool = True
+
+    # ----------------------------
     # Y-axis limits
     # ----------------------------
     apply_auto_y_limits: bool = True
@@ -387,6 +398,12 @@ def load_group_data(
 def get_slope_counter_filename(filename: Path, settings: Settings) -> Path:
     return filename.with_name(
         f"{filename.stem}{settings.slope_counter_suffix}{filename.suffix}"
+    )
+
+
+def get_slope_ratio_filename(filename: Path, settings: Settings) -> Path:
+    return filename.with_name(
+        f"{filename.stem}{settings.slope_ratio_suffix}{filename.suffix}"
     )
 
 
@@ -976,7 +993,235 @@ def figure_slope_counter_data(
 
 
 # ============================================================
-# FIGURE 3: SAMPLING FREQUENCY (raw + moving average)
+# FIGURE 3: SLOPE-RATIO RAW DATA
+# (same variable layout as the group, loaded from
+#  "<original_filename>_slope_ratio.txt")
+# ============================================================
+
+def figure_slope_ratio_data(
+    group: FigureGroup,
+    settings: Settings,
+):
+    slope_ratio_filenames = [
+        str(get_slope_ratio_filename(Path(filename_text), settings))
+        for filename_text in group.filenames
+    ]
+
+    loaded_group = load_group_data(
+        group,
+        settings,
+        filenames_override=slope_ratio_filenames,
+    )
+
+    fig, axes = create_figure(loaded_group.variable_indices)
+
+    for ax, var_index in zip(axes, loaded_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
+        ax.axhline(
+            1.0,
+            color="black",
+            linewidth=1.0,
+            linestyle="--",
+            alpha=0.65,
+            label="ratio = 1",
+            zorder=2,
+        )
+
+        for dataset_index, dataset in enumerate(loaded_group.datasets):
+            x = dataset.iterations
+            y = dataset.variables[:, var_index]
+
+            x_plot, y_plot = downsample_for_plotting(x, y, settings)
+
+            ax.plot(
+                x_plot,
+                y_plot,
+                color=get_plot_color(dataset_index, settings, "primary"),
+                linewidth=1.6,
+                alpha=0.9,
+                label=f"{dataset.filename.stem}",
+                zorder=3,
+            )
+
+        format_axis(
+            ax,
+            ylabel=f"slope ratio ({variable_label})",
+            settings=settings,
+            logy=False,
+        )
+
+        apply_limits_if_enabled(
+            ax,
+            settings=settings,
+            logy=False,
+            keep_zero_visible=False,
+        )
+
+    title = f"{group.title} Slope Ratio Raw Data"
+
+    finalize_figure(fig, axes, title)
+
+    return fig
+
+
+# ============================================================
+# FIGURE 4: SLOPE-COUNTER / SLOPE-RATIO OVERLAY DATA
+# (same variable layout as the group; slope counter on left axis,
+#  slope ratio on right axis)
+# ============================================================
+
+def figure_slope_counter_ratio_overlay_data(
+    group: FigureGroup,
+    settings: Settings,
+):
+    slope_counter_filenames = [
+        str(get_slope_counter_filename(Path(filename_text), settings))
+        for filename_text in group.filenames
+    ]
+
+    slope_ratio_filenames = [
+        str(get_slope_ratio_filename(Path(filename_text), settings))
+        for filename_text in group.filenames
+    ]
+
+    counter_group = load_group_data(
+        group,
+        settings,
+        filenames_override=slope_counter_filenames,
+    )
+
+    ratio_group = load_group_data(
+        group,
+        settings,
+        filenames_override=slope_ratio_filenames,
+    )
+
+    fig, axes = create_figure(counter_group.variable_indices)
+
+    for ax_counter, var_index in zip(axes, counter_group.variable_indices):
+        variable_label = get_variable_label_for_group(
+            group=group,
+            settings=settings,
+            var_index=var_index,
+        )
+
+        ax_ratio = ax_counter.twinx()
+
+        for dataset_index, counter_dataset in enumerate(counter_group.datasets):
+            ratio_dataset = ratio_group.datasets[dataset_index]
+
+            x_counter = counter_dataset.iterations
+            y_counter = counter_dataset.variables[:, var_index]
+
+            x_ratio = ratio_dataset.iterations
+            y_ratio = ratio_dataset.variables[:, var_index]
+
+            x_counter_plot, y_counter_plot = downsample_for_plotting(
+                x_counter,
+                y_counter,
+                settings,
+            )
+
+            x_ratio_plot, y_ratio_plot = downsample_for_plotting(
+                x_ratio,
+                y_ratio,
+                settings,
+            )
+
+            ax_counter.plot(
+                x_counter_plot,
+                y_counter_plot,
+                color=get_plot_color(dataset_index, settings, "primary"),
+                linewidth=1.6,
+                alpha=0.9,
+                label=f"{counter_dataset.filename.stem}",
+                zorder=3,
+            )
+
+            ax_ratio.plot(
+                x_ratio_plot,
+                y_ratio_plot,
+                color=get_plot_color(dataset_index, settings, "secondary"),
+                linewidth=1.6,
+                linestyle="--",
+                alpha=0.9,
+                label=f"{ratio_dataset.filename.stem}",
+                zorder=4,
+            )
+
+        ax_ratio.axhline(
+            1.0,
+            color="black",
+            linewidth=1.0,
+            linestyle=":",
+            alpha=0.65,
+            label="ratio = 1",
+            zorder=2,
+        )
+
+        ax_counter.set_ylabel(
+            f"slope counter ({variable_label})",
+            fontsize=12,
+        )
+
+        ax_ratio.set_ylabel(
+            f"slope ratio ({variable_label})",
+            fontsize=12,
+        )
+
+        ax_counter.set_axisbelow(True)
+
+        if settings.show_grid:
+            ax_counter.grid(
+                True,
+                which="both",
+                linestyle="--",
+                linewidth=0.7,
+                alpha=0.6,
+                zorder=0,
+            )
+
+        counter_handles, counter_labels = ax_counter.get_legend_handles_labels()
+        ratio_handles, ratio_labels = ax_ratio.get_legend_handles_labels()
+
+        ax_counter.legend(
+            counter_handles + ratio_handles,
+            counter_labels + ratio_labels,
+            fontsize=10,
+            frameon=True,
+        )
+
+        ax_counter.tick_params(axis="both", labelsize=11)
+        ax_ratio.tick_params(axis="both", labelsize=11)
+
+        apply_limits_if_enabled(
+            ax_counter,
+            settings=settings,
+            logy=False,
+            keep_zero_visible=False,
+        )
+
+        apply_limits_if_enabled(
+            ax_ratio,
+            settings=settings,
+            logy=False,
+            keep_zero_visible=False,
+        )
+
+    title = f"{group.title} Slope Counter and Slope Ratio Overlay"
+
+    finalize_figure(fig, axes, title)
+
+    return fig
+
+
+# ============================================================
+# FIGURE 5: SAMPLING FREQUENCY (raw + moving average)
 # ============================================================
 
 def figure_sampling_frequency(
@@ -1108,6 +1353,13 @@ def add_enabled_figures_for_group(
 
     if settings.plot_slope_counter_data:
         fig = figure_slope_counter_data(
+            group=group,
+            settings=settings,
+        )
+        add_page_to_pdf(pdf, fig, settings)
+
+    if settings.plot_slope_ratio_data:
+        fig = figure_slope_ratio_data(
             group=group,
             settings=settings,
         )
