@@ -1358,6 +1358,13 @@ def add_enabled_figures_for_group(
         )
         add_page_to_pdf(pdf, fig, settings)
 
+    if settings.plot_slope_counter_ratio_overlay_data:
+        fig = figure_slope_counter_ratio_overlay_data(
+            group=group,
+            settings=settings,
+        )
+        add_page_to_pdf(pdf, fig, settings)
+
     if settings.plot_slope_ratio_data:
         fig = figure_slope_ratio_data(
             group=group,
