@@ -29,89 +29,6 @@ def _format_array_line(iter, arr):
     return str(iter) + "," + ",".join(f"{x:.17e}" for x in arr) + "\n"
 
 
-
-def _get_error_output_base_names():
-    """
-    Base error-output names.
-
-    Every base name gets:
-        raw output
-        _short_ma
-        _long_ma
-        _ma_counter
-        _slope_counter
-        _slope_ratio
-    """
-    return [
-        "prim_interp_max",
-        "prim_interp_avg",
-        "prim_proj_max",
-        "prim_proj_avg",
-
-        "cons_interp_max",
-        "cons_interp_avg",
-        "cons_proj_max",
-        "cons_proj_avg",
-    ]
-
-
-def _get_error_output_file_names(include_sampling_freq=True):
-    """
-    Returns the complete list of error-output file keys.
-
-    This is the single source of truth used by:
-        _open_error_output_files(...)
-        _write_error_output_array_map(...)
-    """
-    base_names = _get_error_output_base_names()
-
-    file_names = []
-
-    file_names.extend(base_names)
-
-    for suffix in [
-        "_short_ma",
-        "_long_ma",
-        "_ma_counter",
-        "_ma_counter_sum",
-    ]:
-        for name in base_names:
-            file_names.append(f"{name}{suffix}")
-
-    for suffix in [
-        "_slope_counter",
-        "_slope_ratio",
-    ]:
-        for name in base_names:
-            file_names.append(f"{name}{suffix}")
-
-    if include_sampling_freq:
-        file_names.append("sampling_freq")
-
-    return file_names
-
-
-def _write_error_output_array_map(state, iter, output_array_map):
-    """
-    Write all array-based error outputs using the centralized file list.
-
-    sampling_freq is intentionally excluded because it is scalar-formatted
-    separately.
-    """
-    for name in _get_error_output_file_names(include_sampling_freq=False):
-        if name not in output_array_map:
-            raise KeyError(
-                f"Missing output array for '{name}'. "
-                "Check _get_error_output_file_names() and output_array_map."
-            )
-
-        _write_error_output_line(
-            state,
-            name,
-            _format_array_line(iter, output_array_map[name])
-        )
-
-
 def _open_error_output_files(state, dir_results, mode):
     """
     Opens error-output files once and stores file handles in state.
@@ -121,7 +38,74 @@ def _open_error_output_files(state, dir_results, mode):
         "a" if restarting/appending
     """
 
-    file_names = _get_error_output_file_names()
+    file_names = [
+        "prim_interp_max",
+        "prim_interp_avg",
+        "prim_proj_max",
+        "prim_proj_avg",
+
+        "cons_interp_max",
+        "cons_interp_avg",
+        "cons_proj_max",
+        "cons_proj_avg",
+
+        "cons_interp_max_slope_counter",
+        "cons_interp_avg_slope_counter",
+        "cons_proj_max_slope_counter",
+        "cons_proj_avg_slope_counter",
+
+        "prim_interp_max_slope_counter",
+        "prim_interp_avg_slope_counter",
+        "prim_proj_max_slope_counter",
+        "prim_proj_avg_slope_counter",
+
+        "cons_interp_max_slope_ratio",
+        "cons_interp_avg_slope_ratio",
+        "cons_proj_max_slope_ratio",
+        "cons_proj_avg_slope_ratio",
+
+        "prim_interp_max_slope_ratio",
+        "prim_interp_avg_slope_ratio",
+        "prim_proj_max_slope_ratio",
+        "prim_proj_avg_slope_ratio",
+
+        "cons_interp_max_short_ma",
+        "cons_interp_avg_short_ma",
+        "cons_proj_max_short_ma",
+        "cons_proj_avg_short_ma",
+
+        "prim_interp_max_short_ma",
+        "prim_interp_avg_short_ma",
+        "prim_proj_max_short_ma",
+        "prim_proj_avg_short_ma",
+
+        "cons_interp_max_long_ma",
+        "cons_interp_avg_long_ma",
+        "cons_proj_max_long_ma",
+        "cons_proj_avg_long_ma",
+
+        "prim_interp_max_long_ma",
+        "prim_interp_avg_long_ma",
+        "prim_proj_max_long_ma",
+        "prim_proj_avg_long_ma",
+
+        "cons_interp_max_ma_counter",
+        "cons_interp_avg_ma_counter",
+        "cons_proj_max_ma_counter",
+        "cons_proj_avg_ma_counter",
+
+        "prim_interp_max_ma_counter",
+        "prim_interp_avg_ma_counter",
+        "prim_proj_max_ma_counter",
+        "prim_proj_avg_ma_counter",
+
+        "sampling_freq",
+
+        # "full_data/cons_interp_error",
+        # "full_data/prim_interp_error",
+        # "full_data/cons_proj_error",
+        # "full_data/prim_proj_error",
+    ]
 
     state["error_output_files"] = {}
 
@@ -867,16 +851,6 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             state['prim_proj_max_ma_counter']   += np.sign(state['prim_proj_max_short_ma'].avg   - state['prim_proj_max_long_ma'].avg)
             state['prim_proj_avg_ma_counter']   += np.sign(state['prim_proj_avg_short_ma'].avg   - state['prim_proj_avg_long_ma'].avg)
 
-            state['cons_interp_max_ma_counter_sum'] = np.sum(state['cons_interp_max_ma_counter'])
-            state['cons_interp_avg_ma_counter_sum'] = np.sum(state['cons_interp_avg_ma_counter'])
-            state['cons_proj_max_ma_counter_sum']   = np.sum(state['cons_proj_max_ma_counter'])
-            state['cons_proj_avg_ma_counter_sum']   = np.sum(state['cons_proj_avg_ma_counter'])
-
-            state['prim_interp_max_ma_counter_sum'] = np.sum(state['prim_interp_max_ma_counter'])
-            state['prim_interp_avg_ma_counter_sum'] = np.sum(state['prim_interp_avg_ma_counter'])
-            state['prim_proj_max_ma_counter_sum']   = np.sum(state['prim_proj_max_ma_counter'])
-            state['prim_proj_avg_ma_counter_sum']   = np.sum(state['prim_proj_avg_ma_counter'])
-
             # # Save the current errors for gradient calculation
             # state['Q_cons_interp_error_save'] = Q_cons_interp_error_reshape
             # state['Q_prim_interp_error_save'] = Q_prim_interp_error_reshape
@@ -909,63 +883,281 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             # )
 
 
-            # Write error-output arrays using the centralized output registry
-            qoi_data = {
-                "prim_interp_max": prim_interp_max,
-                "prim_interp_avg": prim_interp_avg,
-                "prim_proj_max":   prim_proj_max,
-                "prim_proj_avg":   prim_proj_avg,
+            # Write the QoIs
+            _write_error_output_line(state, "prim_interp_max", _format_array_line(iter, prim_interp_max))
 
-                "cons_interp_max": cons_interp_max,
-                "cons_interp_avg": cons_interp_avg,
-                "cons_proj_max":   cons_proj_max,
-                "cons_proj_avg":   cons_proj_avg,
-            }
+            # _write_error_output_line(state, "prim_interp_min", _format_array_line(iter, prim_interp_min))
 
-            slope_counter_data = {
-                "cons_interp_max_slope_counter": state["cons_interp_max_slope_counter"],
-                "cons_interp_avg_slope_counter": state["cons_interp_avg_slope_counter"],
-                "cons_proj_max_slope_counter":   state["cons_proj_max_slope_counter"],
-                "cons_proj_avg_slope_counter":   state["cons_proj_avg_slope_counter"],
+            _write_error_output_line(state, "prim_interp_avg", _format_array_line(iter, prim_interp_avg))
 
-                "prim_interp_max_slope_counter": state["prim_interp_max_slope_counter"],
-                "prim_interp_avg_slope_counter": state["prim_interp_avg_slope_counter"],
-                "prim_proj_max_slope_counter":   state["prim_proj_max_slope_counter"],
-                "prim_proj_avg_slope_counter":   state["prim_proj_avg_slope_counter"],
-            }
+            _write_error_output_line(state, "prim_proj_max", _format_array_line(iter, prim_proj_max))
 
-            slope_ratio_data = {
-                "cons_interp_max_slope_ratio": cons_interp_max_slope_ratio,
-                "cons_interp_avg_slope_ratio": cons_interp_avg_slope_ratio,
-                "cons_proj_max_slope_ratio":   cons_proj_max_slope_ratio,
-                "cons_proj_avg_slope_ratio":   cons_proj_avg_slope_ratio,
+            # _write_error_output_line(state, "prim_proj_min", _format_array_line(iter, prim_proj_min))
 
-                "prim_interp_max_slope_ratio": prim_interp_max_slope_ratio,
-                "prim_interp_avg_slope_ratio": prim_interp_avg_slope_ratio,
-                "prim_proj_max_slope_ratio":   prim_proj_max_slope_ratio,
-                "prim_proj_avg_slope_ratio":   prim_proj_avg_slope_ratio,
-            }
+            _write_error_output_line(state, "prim_proj_avg", _format_array_line(iter, prim_proj_avg))
 
-            output_array_map = {}
+            _write_error_output_line(state, "cons_interp_max", _format_array_line(iter, cons_interp_max))
 
-            output_array_map.update(qoi_data)
+            # _write_error_output_line(state, "cons_interp_min", _format_array_line(iter, cons_interp_min))
 
-            for name in qoi_data:
-                output_array_map[f"{name}_short_ma"]   = state[f"{name}_short_ma"].avg
-                output_array_map[f"{name}_long_ma"]    = state[f"{name}_long_ma"].avg
-                output_array_map[f"{name}_ma_counter"] = state[f"{name}_ma_counter"]
-                output_array_map[f"{name}_ma_counter_sum"] = state[f"{name}_ma_counter_sum"]
+            _write_error_output_line(state, "cons_interp_avg", _format_array_line(iter, cons_interp_avg))
 
-            output_array_map.update(slope_counter_data)
-            output_array_map.update(slope_ratio_data)
+            _write_error_output_line(state, "cons_proj_max", _format_array_line(iter, cons_proj_max))
 
-            _write_error_output_array_map(
+            # _write_error_output_line(state, "cons_proj_min", _format_array_line(iter, cons_proj_min))
+
+            _write_error_output_line(state, "cons_proj_avg", _format_array_line(iter, cons_proj_avg))
+
+            # Write the short moving averages
+            _write_error_output_line(
                 state,
-                iter,
-                output_array_map,
+                "cons_interp_max_short_ma",
+                _format_array_line(iter, state["cons_interp_max_short_ma"].avg)
             )
 
-            # Write sampling frequency separately because it is scalar data
+            _write_error_output_line(
+                state,
+                "cons_interp_avg_short_ma",
+                _format_array_line(iter, state["cons_interp_avg_short_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_max_short_ma",
+                _format_array_line(iter, state["cons_proj_max_short_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_avg_short_ma",
+                _format_array_line(iter, state["cons_proj_avg_short_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_max_short_ma",
+                _format_array_line(iter, state["prim_interp_max_short_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_avg_short_ma",
+                _format_array_line(iter, state["prim_interp_avg_short_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_max_short_ma",
+                _format_array_line(iter, state["prim_proj_max_short_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_avg_short_ma",
+                _format_array_line(iter, state["prim_proj_avg_short_ma"].avg)
+            )
+
+
+            # Write the long moving averages
+            _write_error_output_line(
+                state,
+                "cons_interp_max_long_ma",
+                _format_array_line(iter, state["cons_interp_max_long_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_interp_avg_long_ma",
+                _format_array_line(iter, state["cons_interp_avg_long_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_max_long_ma",
+                _format_array_line(iter, state["cons_proj_max_long_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_avg_long_ma",
+                _format_array_line(iter, state["cons_proj_avg_long_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_max_long_ma",
+                _format_array_line(iter, state["prim_interp_max_long_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_avg_long_ma",
+                _format_array_line(iter, state["prim_interp_avg_long_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_max_long_ma",
+                _format_array_line(iter, state["prim_proj_max_long_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_avg_long_ma",
+                _format_array_line(iter, state["prim_proj_avg_long_ma"].avg)
+            )
+
+
+            # Write the moving average counters
+            _write_error_output_line(
+                state,
+                "cons_interp_max_ma_counter",
+                _format_array_line(iter, state["cons_interp_max_ma_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_interp_avg_ma_counter",
+                _format_array_line(iter, state["cons_interp_avg_ma_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_max_ma_counter",
+                _format_array_line(iter, state["cons_proj_max_ma_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_avg_ma_counter",
+                _format_array_line(iter, state["cons_proj_avg_ma_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_max_ma_counter",
+                _format_array_line(iter, state["prim_interp_max_ma_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_avg_ma_counter",
+                _format_array_line(iter, state["prim_interp_avg_ma_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_max_ma_counter",
+                _format_array_line(iter, state["prim_proj_max_ma_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_avg_ma_counter",
+                _format_array_line(iter, state["prim_proj_avg_ma_counter"])
+            )
+
+            # Write the slope counters
+            _write_error_output_line(
+                state,
+                "cons_interp_max_slope_counter",
+                _format_array_line(iter, state["cons_interp_max_slope_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_interp_avg_slope_counter",
+                _format_array_line(iter, state["cons_interp_avg_slope_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_max_slope_counter",
+                _format_array_line(iter, state["cons_proj_max_slope_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_avg_slope_counter",
+                _format_array_line(iter, state["cons_proj_avg_slope_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_max_slope_counter",
+                _format_array_line(iter, state["prim_interp_max_slope_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_avg_slope_counter",
+                _format_array_line(iter, state["prim_interp_avg_slope_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_max_slope_counter",
+                _format_array_line(iter, state["prim_proj_max_slope_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_avg_slope_counter",
+                _format_array_line(iter, state["prim_proj_avg_slope_counter"])
+            )
+
+
+            # Write the slope ratios
+            _write_error_output_line(
+                state,
+                "cons_interp_max_slope_ratio",
+                _format_array_line(iter, cons_interp_max_slope_ratio)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_interp_avg_slope_ratio",
+                _format_array_line(iter, cons_interp_avg_slope_ratio)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_max_slope_ratio",
+                _format_array_line(iter, cons_proj_max_slope_ratio)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_avg_slope_ratio",
+                _format_array_line(iter, cons_proj_avg_slope_ratio)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_max_slope_ratio",
+                _format_array_line(iter, prim_interp_max_slope_ratio)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_avg_slope_ratio",
+                _format_array_line(iter, prim_interp_avg_slope_ratio)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_max_slope_ratio",
+                _format_array_line(iter, prim_proj_max_slope_ratio)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_avg_slope_ratio",
+                _format_array_line(iter, prim_proj_avg_slope_ratio)
+            )
+
+
+            # Write sampling frequency
             _write_error_output_line(
                 state,
                 "sampling_freq",

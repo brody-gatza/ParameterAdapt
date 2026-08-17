@@ -44,7 +44,7 @@ class Settings:
     # ----------------------------
     # Moving/running averages
     # ----------------------------
-    plot_moving_average: bool = True
+    plot_moving_average: bool = False
     moving_average_windows: list[int] = field(default_factory=lambda: [1000])
 
     plot_running_average: bool = True
@@ -58,29 +58,31 @@ class Settings:
     # ----------------------------
     # Slope-counter figure
     # ----------------------------
-    plot_slope_counter_data: bool = True
+    plot_slope_counter_data: bool = False
     slope_counter_suffix: str = "_slope_counter"
 
     # ----------------------------
     # Slope-ratio figure
     # ----------------------------
-    plot_slope_ratio_data: bool = True
+    plot_slope_ratio_data: bool = False
     slope_ratio_suffix: str = "_slope_ratio"
 
     # ----------------------------
     # Slope-counter / slope-ratio overlay figure
     # ----------------------------
-    plot_slope_counter_ratio_overlay_data: bool = True
+    plot_slope_counter_ratio_overlay_data: bool = False
 
     # ----------------------------
     # Saved moving-average figures
     # ----------------------------
     plot_saved_moving_average_overlay_data: bool = True
     plot_moving_average_counter_data: bool = True
+    plot_moving_average_counter_sum_data: bool = True
 
     short_ma_suffix: str = "_short_ma"
     long_ma_suffix: str = "_long_ma"
     ma_counter_suffix: str = "_ma_counter"
+    ma_counter_sum_suffix: str = "_ma_counter_sum"
 
     # ----------------------------
     # Y-axis limits
@@ -432,6 +434,12 @@ def get_long_ma_filename(filename: Path, settings: Settings) -> Path:
 def get_ma_counter_filename(filename: Path, settings: Settings) -> Path:
     return filename.with_name(
         f"{filename.stem}{settings.ma_counter_suffix}{filename.suffix}"
+    )
+
+
+def get_ma_counter_sum_filename(filename: Path, settings: Settings) -> Path:
+    return filename.with_name(
+        f"{filename.stem}{settings.ma_counter_sum_suffix}{filename.suffix}"
     )
 
 
@@ -1157,6 +1165,79 @@ def figure_moving_average_counter_data(
 
 
 # ============================================================
+# FIGURE: MOVING-AVERAGE COUNTER SUM
+# ============================================================
+
+def figure_moving_average_counter_sum_data(
+    group: FigureGroup,
+    settings: Settings,
+):
+    ma_counter_sum_filenames = [
+        str(get_ma_counter_sum_filename(Path(filename_text), settings))
+        for filename_text in group.filenames
+    ]
+
+    loaded_group = load_group_data(
+        group,
+        settings,
+        filenames_override=ma_counter_sum_filenames,
+    )
+
+    fig, axes = create_figure([0])
+    ax = axes[0]
+
+    ax.axhline(
+        0.0,
+        color="black",
+        linewidth=1.0,
+        linestyle="--",
+        alpha=0.65,
+        label="sum = 0",
+        zorder=2,
+    )
+
+    for dataset_index, dataset in enumerate(loaded_group.datasets):
+        x = dataset.iterations
+        y = dataset.variables[:, 0]
+
+        x_plot, y_plot = downsample_for_plotting(
+            x,
+            y,
+            settings,
+        )
+
+        ax.plot(
+            x_plot,
+            y_plot,
+            color=get_plot_color(dataset_index, settings, "primary"),
+            linewidth=1.8,
+            alpha=0.9,
+            label=f"{dataset.filename.stem}",
+            zorder=3,
+        )
+
+    format_axis(
+        ax,
+        ylabel="MA counter sum",
+        settings=settings,
+        logy=False,
+    )
+
+    apply_limits_if_enabled(
+        ax,
+        settings=settings,
+        logy=False,
+        keep_zero_visible=True,
+    )
+
+    title = f"{group.title} Moving-Average Counter Sum"
+
+    finalize_figure(fig, axes, title)
+
+    return fig
+
+
+# ============================================================
 # FIGURE 2: SLOPE-COUNTER RAW DATA
 # (same variable layout as the group, loaded from
 #  "<original_filename>_slope_counter.txt")
@@ -1583,6 +1664,13 @@ def add_enabled_figures_for_group(
 
     if settings.plot_moving_average_counter_data:
         fig = figure_moving_average_counter_data(
+            group=group,
+            settings=settings,
+        )
+        add_page_to_pdf(pdf, fig, settings)
+
+    if settings.plot_moving_average_counter_sum_data:
+        fig = figure_moving_average_counter_sum_data(
             group=group,
             settings=settings,
         )
