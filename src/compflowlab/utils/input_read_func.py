@@ -179,6 +179,7 @@ def init_solver_param(args,input_param):
     solver_param['sarom_moving_avg_tol'  ]= float(input_param['sarom_moving_avg_tol'  ])
 
     solver_param['arom_restart']          = eval(input_param['arom_restart'])
+
     solver_param['error_check']           = eval(input_param['error_check'])
     solver_param['multi_samp']            = eval(input_param['multi_samp'])
     solver_param['unsampled_update_freq_2'] = float(input_param['unsampled_update_freq_2'])

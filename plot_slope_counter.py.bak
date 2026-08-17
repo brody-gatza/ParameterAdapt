@@ -73,16 +73,6 @@ class Settings:
     plot_slope_counter_ratio_overlay_data: bool = True
 
     # ----------------------------
-    # Saved moving-average figures
-    # ----------------------------
-    plot_saved_moving_average_overlay_data: bool = True
-    plot_moving_average_counter_data: bool = True
-
-    short_ma_suffix: str = "_short_ma"
-    long_ma_suffix: str = "_long_ma"
-    ma_counter_suffix: str = "_ma_counter"
-
-    # ----------------------------
     # Y-axis limits
     # ----------------------------
     apply_auto_y_limits: bool = True
@@ -414,24 +404,6 @@ def get_slope_counter_filename(filename: Path, settings: Settings) -> Path:
 def get_slope_ratio_filename(filename: Path, settings: Settings) -> Path:
     return filename.with_name(
         f"{filename.stem}{settings.slope_ratio_suffix}{filename.suffix}"
-    )
-
-
-def get_short_ma_filename(filename: Path, settings: Settings) -> Path:
-    return filename.with_name(
-        f"{filename.stem}{settings.short_ma_suffix}{filename.suffix}"
-    )
-
-
-def get_long_ma_filename(filename: Path, settings: Settings) -> Path:
-    return filename.with_name(
-        f"{filename.stem}{settings.long_ma_suffix}{filename.suffix}"
-    )
-
-
-def get_ma_counter_filename(filename: Path, settings: Settings) -> Path:
-    return filename.with_name(
-        f"{filename.stem}{settings.ma_counter_suffix}{filename.suffix}"
     )
 
 
@@ -954,209 +926,6 @@ def figure_main_data(
 
 
 # ============================================================
-# FIGURE: RAW DATA + SAVED SHORT/LONG MOVING AVERAGES
-# ============================================================
-
-def figure_saved_moving_average_overlay_data(
-    group: FigureGroup,
-    settings: Settings,
-):
-    raw_group = load_group_data(group, settings)
-
-    short_ma_filenames = [
-        str(get_short_ma_filename(Path(filename_text), settings))
-        for filename_text in group.filenames
-    ]
-
-    long_ma_filenames = [
-        str(get_long_ma_filename(Path(filename_text), settings))
-        for filename_text in group.filenames
-    ]
-
-    short_ma_group = load_group_data(
-        group,
-        settings,
-        filenames_override=short_ma_filenames,
-    )
-
-    long_ma_group = load_group_data(
-        group,
-        settings,
-        filenames_override=long_ma_filenames,
-    )
-
-    fig, axes = create_figure(raw_group.variable_indices)
-
-    for ax, var_index in zip(axes, raw_group.variable_indices):
-        variable_label = get_variable_label_for_group(
-            group=group,
-            settings=settings,
-            var_index=var_index,
-        )
-
-        for dataset_index, raw_dataset in enumerate(raw_group.datasets):
-            short_ma_dataset = short_ma_group.datasets[dataset_index]
-            long_ma_dataset = long_ma_group.datasets[dataset_index]
-
-            x_raw = raw_dataset.iterations
-            y_raw = raw_dataset.variables[:, var_index]
-
-            x_short = short_ma_dataset.iterations
-            y_short = short_ma_dataset.variables[:, var_index]
-
-            x_long = long_ma_dataset.iterations
-            y_long = long_ma_dataset.variables[:, var_index]
-
-            x_raw_plot, y_raw_plot = downsample_for_plotting(
-                x_raw,
-                y_raw,
-                settings,
-            )
-
-            x_short_plot, y_short_plot = downsample_for_plotting(
-                x_short,
-                y_short,
-                settings,
-            )
-
-            x_long_plot, y_long_plot = downsample_for_plotting(
-                x_long,
-                y_long,
-                settings,
-            )
-
-            ax.plot(
-                x_raw_plot,
-                y_raw_plot,
-                color=get_plot_color(dataset_index, settings, "primary"),
-                linewidth=1.0,
-                alpha=0.55,
-                label=f"{raw_dataset.filename.stem} raw",
-                zorder=3,
-            )
-
-            ax.plot(
-                x_short_plot,
-                y_short_plot,
-                color=get_plot_color(dataset_index, settings, "secondary"),
-                linewidth=2.4,
-                alpha=0.95,
-                linestyle="-",
-                label=f"{raw_dataset.filename.stem} short MA",
-                zorder=5,
-            )
-
-            ax.plot(
-                x_long_plot,
-                y_long_plot,
-                color=get_plot_color(dataset_index, settings, "tertiary"),
-                linewidth=2.4,
-                alpha=0.95,
-                linestyle="--",
-                label=f"{raw_dataset.filename.stem} long MA",
-                zorder=6,
-            )
-
-        format_axis(
-            ax,
-            ylabel=variable_label,
-            settings=settings,
-            logy=group.logy,
-        )
-
-        apply_limits_if_enabled(
-            ax,
-            settings=settings,
-            logy=group.logy,
-            keep_zero_visible=False,
-        )
-
-    title = f"{group.title} Raw Data with Saved Moving Averages"
-
-    if group.logy:
-        title += " [log-y]"
-
-    finalize_figure(fig, axes, title)
-
-    return fig
-
-
-# ============================================================
-# FIGURE: MOVING-AVERAGE COUNTER
-# ============================================================
-
-def figure_moving_average_counter_data(
-    group: FigureGroup,
-    settings: Settings,
-):
-    ma_counter_filenames = [
-        str(get_ma_counter_filename(Path(filename_text), settings))
-        for filename_text in group.filenames
-    ]
-
-    loaded_group = load_group_data(
-        group,
-        settings,
-        filenames_override=ma_counter_filenames,
-    )
-
-    fig, axes = create_figure(loaded_group.variable_indices)
-
-    for ax, var_index in zip(axes, loaded_group.variable_indices):
-        variable_label = get_variable_label_for_group(
-            group=group,
-            settings=settings,
-            var_index=var_index,
-        )
-
-        ax.axhline(
-            0.0,
-            color="black",
-            linewidth=1.0,
-            linestyle="--",
-            alpha=0.65,
-            label="counter = 0",
-            zorder=2,
-        )
-
-        for dataset_index, dataset in enumerate(loaded_group.datasets):
-            x = dataset.iterations
-            y = dataset.variables[:, var_index]
-
-            x_plot, y_plot = downsample_for_plotting(x, y, settings)
-
-            ax.plot(
-                x_plot,
-                y_plot,
-                color=get_plot_color(dataset_index, settings, "primary"),
-                linewidth=1.6,
-                alpha=0.9,
-                label=f"{dataset.filename.stem}",
-                zorder=3,
-            )
-
-        format_axis(
-            ax,
-            ylabel=f"MA counter ({variable_label})",
-            settings=settings,
-            logy=False,
-        )
-
-        apply_limits_if_enabled(
-            ax,
-            settings=settings,
-            logy=False,
-            keep_zero_visible=True,
-        )
-
-    title = f"{group.title} Moving-Average Counter"
-
-    finalize_figure(fig, axes, title)
-
-    return fig
-
-
-# ============================================================
 # FIGURE 2: SLOPE-COUNTER RAW DATA
 # (same variable layout as the group, loaded from
 #  "<original_filename>_slope_counter.txt")
@@ -1573,20 +1342,6 @@ def add_enabled_figures_for_group(
     plot_moving_average: bool,
 ) -> None:
     print(f"Adding group: {group.title}")
-
-    if settings.plot_saved_moving_average_overlay_data:
-        fig = figure_saved_moving_average_overlay_data(
-            group=group,
-            settings=settings,
-        )
-        add_page_to_pdf(pdf, fig, settings)
-
-    if settings.plot_moving_average_counter_data:
-        fig = figure_moving_average_counter_data(
-            group=group,
-            settings=settings,
-        )
-        add_page_to_pdf(pdf, fig, settings)
 
     fig = figure_main_data(
         group=group,

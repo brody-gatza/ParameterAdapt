@@ -7,15 +7,22 @@ from compflowlab.boundary_condition import bc_func
 from compflowlab.rom.basis_func import adapt_basis
 from compflowlab.rom.sampling_func import hyper_precompute
 
-def slope_weight(n, nm1, slope):
-    tol = 1.5
+from ..utils.classes import MovingAverage
+
+def slope_weight(n, nm1, slope, ):
+    tol = 5 # 10
     thresh = 50
     weight = np.where(slope > 0, n/nm1,
         np.where(slope < 0, nm1/n, 0.0)
     )
 
-    # weight = np.where(np.abs(weight) < tol, 0, np.where(np.abs(weight) > thresh, 2, 1))
-    weight = np.ones_like(slope)
+    # I would like to negate, but it wont work like this bc the sign is applied outside this function
+    # weight = np.where(np.abs(weight) < tol, -1, np.where(np.abs(weight) > thresh, 2, 1))
+    weight = np.where(np.abs(weight) < tol, 0, np.where(np.abs(weight) > thresh, 2, 1))
+
+    
+    # weight = np.ones_like(slope)
+    
     return weight
 
 def _format_array_line(iter, arr):
@@ -61,6 +68,36 @@ def _open_error_output_files(state, dir_results, mode):
         "prim_interp_avg_slope_ratio",
         "prim_proj_max_slope_ratio",
         "prim_proj_avg_slope_ratio",
+
+        "cons_interp_max_short_ma",
+        "cons_interp_avg_short_ma",
+        "cons_proj_max_short_ma",
+        "cons_proj_avg_short_ma",
+
+        "prim_interp_max_short_ma",
+        "prim_interp_avg_short_ma",
+        "prim_proj_max_short_ma",
+        "prim_proj_avg_short_ma",
+
+        "cons_interp_max_long_ma",
+        "cons_interp_avg_long_ma",
+        "cons_proj_max_long_ma",
+        "cons_proj_avg_long_ma",
+
+        "prim_interp_max_long_ma",
+        "prim_interp_avg_long_ma",
+        "prim_proj_max_long_ma",
+        "prim_proj_avg_long_ma",
+
+        "cons_interp_max_ma_counter",
+        "cons_interp_avg_ma_counter",
+        "cons_proj_max_ma_counter",
+        "cons_proj_avg_ma_counter",
+
+        "prim_interp_max_ma_counter",
+        "prim_interp_avg_ma_counter",
+        "prim_proj_max_ma_counter",
+        "prim_proj_avg_ma_counter",
 
         "sampling_freq",
 
@@ -647,6 +684,9 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             # prim_proj_min = np.min(Q_prim_proj_error_reshape, axis=1)
             prim_proj_avg = np.mean(Q_prim_proj_error_reshape, axis=1)
 
+            # Compute moving averages
+
+
             # Write the error values
             dir_results = os.path.join(solver_param["dir_results"], "error")
             if iter == int(solver_param['FOM2ROM_trans_iter']) + 1:
@@ -677,6 +717,42 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 prim_interp_avg_slope_ratio = np.zeros_like(prim_interp_avg)
                 prim_proj_max_slope_ratio   = np.zeros_like(prim_proj_max)
                 prim_proj_avg_slope_ratio   = np.zeros_like(prim_proj_avg)
+
+                # HARDCODED FOR NOW
+                short_ma_window = 25
+                long_ma_window = 100
+
+                state['cons_interp_max_short_ma']   = MovingAverage(short_ma_window, solver_param['num_state_var'])
+                state['cons_interp_max_long_ma']    = MovingAverage(long_ma_window,  solver_param['num_state_var'])
+                state['cons_interp_max_ma_counter'] = np.zeros(solver_param['num_state_var'])
+
+                state['cons_interp_avg_short_ma']   = MovingAverage(short_ma_window, solver_param['num_state_var'])
+                state['cons_interp_avg_long_ma']    = MovingAverage(long_ma_window,  solver_param['num_state_var'])
+                state['cons_interp_avg_ma_counter'] = np.zeros(solver_param['num_state_var'])
+
+                state['cons_proj_max_short_ma']     = MovingAverage(short_ma_window, solver_param['num_state_var'])
+                state['cons_proj_max_long_ma']      = MovingAverage(long_ma_window,  solver_param['num_state_var'])
+                state['cons_proj_max_ma_counter']   = np.zeros(solver_param['num_state_var'])
+
+                state['cons_proj_avg_short_ma']     = MovingAverage(short_ma_window, solver_param['num_state_var'])
+                state['cons_proj_avg_long_ma']      = MovingAverage(long_ma_window,  solver_param['num_state_var'])
+                state['cons_proj_avg_ma_counter']   = np.zeros(solver_param['num_state_var'])
+
+                state['prim_interp_max_short_ma']   = MovingAverage(short_ma_window, solver_param['num_prim_var'])
+                state['prim_interp_max_long_ma']    = MovingAverage(long_ma_window,  solver_param['num_prim_var'])
+                state['prim_interp_max_ma_counter'] = np.zeros(solver_param['num_prim_var'])
+
+                state['prim_interp_avg_short_ma']   = MovingAverage(short_ma_window, solver_param['num_prim_var'])
+                state['prim_interp_avg_long_ma']    = MovingAverage(long_ma_window,  solver_param['num_prim_var'])
+                state['prim_interp_avg_ma_counter'] = np.zeros(solver_param['num_prim_var'])
+
+                state['prim_proj_max_short_ma']     = MovingAverage(short_ma_window, solver_param['num_prim_var'])
+                state['prim_proj_max_long_ma']      = MovingAverage(long_ma_window,  solver_param['num_prim_var'])
+                state['prim_proj_max_ma_counter']   = np.zeros(solver_param['num_prim_var'])
+
+                state['prim_proj_avg_short_ma']     = MovingAverage(short_ma_window, solver_param['num_prim_var'])
+                state['prim_proj_avg_long_ma']      = MovingAverage(long_ma_window,  solver_param['num_prim_var'])
+                state['prim_proj_avg_ma_counter']   = np.zeros(solver_param['num_prim_var'])
 
             else:
                 # Files should already be open. If they are not, open in append mode.
@@ -739,6 +815,42 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             state['prim_proj_max_store'] = prim_proj_max
             state['prim_proj_avg_store'] = prim_proj_avg
 
+            ## Update the moving averages
+            state['cons_interp_max_short_ma'].update(cons_interp_max)
+            state['cons_interp_max_long_ma'].update(cons_interp_max)
+
+            state['cons_interp_avg_short_ma'].update(cons_interp_avg)
+            state['cons_interp_avg_long_ma'].update(cons_interp_avg)
+
+            state['cons_proj_max_short_ma'].update(cons_proj_max)
+            state['cons_proj_max_long_ma'].update(cons_proj_max)
+
+            state['cons_proj_avg_short_ma'].update(cons_proj_avg)
+            state['cons_proj_avg_long_ma'].update(cons_proj_avg)
+
+            state['prim_interp_max_short_ma'].update(prim_interp_max)
+            state['prim_interp_max_long_ma'].update(prim_interp_max)
+
+            state['prim_interp_avg_short_ma'].update(prim_interp_avg)
+            state['prim_interp_avg_long_ma'].update(prim_interp_avg)
+
+            state['prim_proj_max_short_ma'].update(prim_proj_max)
+            state['prim_proj_max_long_ma'].update(prim_proj_max)
+
+            state['prim_proj_avg_short_ma'].update(prim_proj_avg)
+            state['prim_proj_avg_long_ma'].update(prim_proj_avg)
+
+            ## Update the moving average counter
+            state['cons_interp_max_ma_counter'] += np.sign(state['cons_interp_max_short_ma'].avg - state['cons_interp_max_long_ma'].avg)
+            state['cons_interp_avg_ma_counter'] += np.sign(state['cons_interp_avg_short_ma'].avg - state['cons_interp_avg_long_ma'].avg)
+            state['cons_proj_max_ma_counter']   += np.sign(state['cons_proj_max_short_ma'].avg   - state['cons_proj_max_long_ma'].avg)
+            state['cons_proj_avg_ma_counter']   += np.sign(state['cons_proj_avg_short_ma'].avg   - state['cons_proj_avg_long_ma'].avg)
+
+            state['prim_interp_max_ma_counter'] += np.sign(state['prim_interp_max_short_ma'].avg - state['prim_interp_max_long_ma'].avg)
+            state['prim_interp_avg_ma_counter'] += np.sign(state['prim_interp_avg_short_ma'].avg - state['prim_interp_avg_long_ma'].avg)
+            state['prim_proj_max_ma_counter']   += np.sign(state['prim_proj_max_short_ma'].avg   - state['prim_proj_max_long_ma'].avg)
+            state['prim_proj_avg_ma_counter']   += np.sign(state['prim_proj_avg_short_ma'].avg   - state['prim_proj_avg_long_ma'].avg)
+
             # # Save the current errors for gradient calculation
             # state['Q_cons_interp_error_save'] = Q_cons_interp_error_reshape
             # state['Q_prim_interp_error_save'] = Q_prim_interp_error_reshape
@@ -796,6 +908,154 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
             _write_error_output_line(state, "cons_proj_avg", _format_array_line(iter, cons_proj_avg))
 
+            # Write the short moving averages
+            _write_error_output_line(
+                state,
+                "cons_interp_max_short_ma",
+                _format_array_line(iter, state["cons_interp_max_short_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_interp_avg_short_ma",
+                _format_array_line(iter, state["cons_interp_avg_short_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_max_short_ma",
+                _format_array_line(iter, state["cons_proj_max_short_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_avg_short_ma",
+                _format_array_line(iter, state["cons_proj_avg_short_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_max_short_ma",
+                _format_array_line(iter, state["prim_interp_max_short_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_avg_short_ma",
+                _format_array_line(iter, state["prim_interp_avg_short_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_max_short_ma",
+                _format_array_line(iter, state["prim_proj_max_short_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_avg_short_ma",
+                _format_array_line(iter, state["prim_proj_avg_short_ma"].avg)
+            )
+
+
+            # Write the long moving averages
+            _write_error_output_line(
+                state,
+                "cons_interp_max_long_ma",
+                _format_array_line(iter, state["cons_interp_max_long_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_interp_avg_long_ma",
+                _format_array_line(iter, state["cons_interp_avg_long_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_max_long_ma",
+                _format_array_line(iter, state["cons_proj_max_long_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_avg_long_ma",
+                _format_array_line(iter, state["cons_proj_avg_long_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_max_long_ma",
+                _format_array_line(iter, state["prim_interp_max_long_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_avg_long_ma",
+                _format_array_line(iter, state["prim_interp_avg_long_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_max_long_ma",
+                _format_array_line(iter, state["prim_proj_max_long_ma"].avg)
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_avg_long_ma",
+                _format_array_line(iter, state["prim_proj_avg_long_ma"].avg)
+            )
+
+
+            # Write the moving average counters
+            _write_error_output_line(
+                state,
+                "cons_interp_max_ma_counter",
+                _format_array_line(iter, state["cons_interp_max_ma_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_interp_avg_ma_counter",
+                _format_array_line(iter, state["cons_interp_avg_ma_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_max_ma_counter",
+                _format_array_line(iter, state["cons_proj_max_ma_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "cons_proj_avg_ma_counter",
+                _format_array_line(iter, state["cons_proj_avg_ma_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_max_ma_counter",
+                _format_array_line(iter, state["prim_interp_max_ma_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_interp_avg_ma_counter",
+                _format_array_line(iter, state["prim_interp_avg_ma_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_max_ma_counter",
+                _format_array_line(iter, state["prim_proj_max_ma_counter"])
+            )
+
+            _write_error_output_line(
+                state,
+                "prim_proj_avg_ma_counter",
+                _format_array_line(iter, state["prim_proj_avg_ma_counter"])
+            )
 
             # Write the slope counters
             _write_error_output_line(
@@ -908,50 +1168,50 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             _flush_error_output_files(state)
 
             # Check if the slope counter thresholds are exceeded
-            if solver_param['parameter_adapt']:
-                if np.any((state['prim_interp_max_slope_counter'] >= 100) | (state['prim_interp_max_slope_counter'] <= -100)):
+            # if solver_param['parameter_adapt']:
+            #     if np.any((state['prim_interp_max_slope_counter'] >= 100) | (state['prim_interp_max_slope_counter'] <= -100)):
 
-                    if np.any(state['prim_interp_max_slope_counter'] >= 100):
-                        if solver_param['unsampled_update_freq'] == 2:
-                            print('Update frequency is already at max')
-                        else:
-                            solver_param['unsampled_update_freq'] -= 1
-                    else:
-                        solver_param['unsampled_update_freq'] += 1
+            #         if np.any(state['prim_interp_max_slope_counter'] >= 100):
+            #             if solver_param['unsampled_update_freq'] == 2:
+            #                 print('Update frequency is already at max')
+            #             else:
+            #                 solver_param['unsampled_update_freq'] -= 1
+            #         else:
+            #             solver_param['unsampled_update_freq'] += 1
 
-                    print('Updated the sampling frequency to', solver_param['unsampled_update_freq'])
+            #         print('Updated the sampling frequency to', solver_param['unsampled_update_freq'])
 
-                    # Update the sampling iterations
-                    past_samples = solver_param['resample_iter_list'][solver_param['resample_iter_list'] <= iter]
+            #         # Update the sampling iterations
+            #         past_samples = solver_param['resample_iter_list'][solver_param['resample_iter_list'] <= iter]
 
-                    if np.any(state['prim_interp_max_slope_counter'] >= 100):
-                        # Set a sampling update at the next iteration
-                        future_samples = np.arange(
-                            iter + 1,
-                            solver_param['num_step'],
-                            solver_param['unsampled_update_freq'],
-                            dtype=int
-                        )
-                    else:
-                        future_samples = np.arange(
-                            iter + solver_param['unsampled_update_freq'],
-                            solver_param['num_step'],
-                            solver_param['unsampled_update_freq'],
-                            dtype=int
-                        )
+            #         if np.any(state['prim_interp_max_slope_counter'] >= 100):
+            #             # Set a sampling update at the next iteration
+            #             future_samples = np.arange(
+            #                 iter + 1,
+            #                 solver_param['num_step'],
+            #                 solver_param['unsampled_update_freq'],
+            #                 dtype=int
+            #             )
+            #         else:
+            #             future_samples = np.arange(
+            #                 iter + solver_param['unsampled_update_freq'],
+            #                 solver_param['num_step'],
+            #                 solver_param['unsampled_update_freq'],
+            #                 dtype=int
+            #             )
 
-                    solver_param['resample_iter_list'] = np.concatenate((past_samples, future_samples))
+            #         solver_param['resample_iter_list'] = np.concatenate((past_samples, future_samples))
 
-                    # Reset the slope counter
-                    state['cons_interp_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
-                    state['cons_interp_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
-                    state['cons_proj_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
-                    state['cons_proj_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
+            #         # Reset the slope counter
+            #         state['cons_interp_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
+            #         state['cons_interp_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
+            #         state['cons_proj_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
+            #         state['cons_proj_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
 
-                    state['prim_interp_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
-                    state['prim_interp_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
-                    state['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
-                    state['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+            #         state['prim_interp_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+            #         state['prim_interp_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+            #         state['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+            #         state['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
 
 
         # Update Samples
