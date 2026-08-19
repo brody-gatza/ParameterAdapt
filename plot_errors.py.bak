@@ -57,21 +57,21 @@ class Settings:
     # ----------------------------
     # Plot simplification
     # ----------------------------
-    plot_every_nth_point: int | None = None
+    plot_every_nth_point: int | None = 3
 
     # ----------------------------
     # Moving/running averages
     # ----------------------------
     plot_moving_average: bool = True
-    moving_average_windows: list[int] = field(default_factory=lambda: [1000])
-    baseline_moving_average_window: int = 5000
+    moving_average_windows: list[int] = field(default_factory=lambda: [50])
+    baseline_moving_average_window: int = 500
 
     plot_running_average: bool = True
 
     # ----------------------------
     # Rolling coefficient of variation
     # ----------------------------
-    plot_rolling_coefficient_of_variation: bool = False
+    plot_rolling_coefficient_of_variation: bool = True
     rolling_coefficient_of_variation_windows: list[int] = field(
         default_factory=lambda: [1000]
     )
@@ -81,7 +81,7 @@ class Settings:
     rolling_coefficient_of_variation_min_mean_magnitude: float = 1.0e-30
 
     # CV is usually easier to read on a log scale.
-    rolling_coefficient_of_variation_logy: bool = False
+    rolling_coefficient_of_variation_logy: bool = True
 
     # ----------------------------
     # Main derived figure toggles
@@ -95,7 +95,7 @@ class Settings:
 
     plot_moving_average_ratio: bool = False
     plot_rms_ratio: bool = False
-    plot_lag1_autocorrelation: bool = False
+    plot_lag1_autocorrelation: bool = True
     plot_short_long_rms: bool = False
 
     # ----------------------------
@@ -116,7 +116,7 @@ class Settings:
     plot_moving_average_of_cumulative_sum: bool = True
 
     plot_raw_slope_sign_running_total: bool = True
-    plot_raw_slope_sign_indicator: bool = True
+    plot_raw_slope_sign_indicator: bool = False
     plot_moving_average_of_raw_slope_sign_indicator: bool = False
 
 
@@ -1426,29 +1426,22 @@ def figure_main_data(
                 )
 
             if settings.plot_running_average:
-                x_long_ma, y_long_ma = compute_moving_average(
-                    x,
-                    y,
-                    settings.baseline_moving_average_window,
-                )
+                x_running, y_running = compute_running_average(x, y)
 
-                x_long_ma_plot, y_long_ma_plot = downsample_for_plotting(
-                    x_long_ma,
-                    y_long_ma,
+                x_running_plot, y_running_plot = downsample_for_plotting(
+                    x_running,
+                    y_running,
                     settings,
                 )
 
                 ax.plot(
-                    x_long_ma_plot,
-                    y_long_ma_plot,
+                    x_running_plot,
+                    y_running_plot,
                     color=get_plot_color(dataset_index, settings, "tertiary"),
                     linewidth=2.4,
                     linestyle="-.",
                     alpha=0.95,
-                    label=(
-                        f"{dataset.filename.stem} CFD MA-"
-                        f"{settings.baseline_moving_average_window}"
-                    ),
+                    label=f"{dataset.filename.stem} running avg",
                     zorder=6,
                 )
 
@@ -1553,6 +1546,7 @@ def figure_rolling_coefficient_of_variation(
     finalize_figure(fig, axes, title)
 
     return fig
+
 
 # ============================================================
 # FIGURE 2: CUMULATIVE MOVING-AVERAGE COMPARISON

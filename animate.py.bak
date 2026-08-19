@@ -16,42 +16,6 @@ def read_prim_data(args):
     return np.load(filename)
 
 
-def load_samples_solver_cells(samples_solver_dir, iter_num, cell_num):
-    """
-    Loads sampled solver cell numbers for one iteration.
-
-    Expected file format:
-        {iter_num}iteration_samples_solver.npy
-
-    The file is expected to contain a 1D array of integer cell numbers.
-    Only values satisfying:
-        0 <= cell_number < cell_num
-    are returned.
-
-    Returned values are valid indices into:
-        x[cell_number]
-        state_vector[cell_number]
-    """
-
-    filename = os.path.join(
-        samples_solver_dir,
-        f"{iter_num}iteration_samples_solver.npy"
-    )
-
-    if not os.path.exists(filename):
-        return np.array([], dtype=int)
-
-    sample_cells = np.load(filename)
-    sample_cells = np.asarray(sample_cells).ravel().astype(int)
-
-    sample_cells = sample_cells[
-        (sample_cells >= 0) &
-        (sample_cells < cell_num)
-    ]
-
-    return sample_cells
-
-
 def get_existing_iter_list(result_dir, requested_iter_list, case_name="case"):
     """
     Returns only the iterations whose files actually exist.
@@ -283,7 +247,6 @@ def build_rom_case_paths(
     base_directory,
     rom_case_names,
     rom_result_subdir,
-    samples_solver_subdir,
     animation_output_subdir
 ):
     """
@@ -300,14 +263,12 @@ def build_rom_case_paths(
         rom_names
         rom_case_dirs
         rom_result_dirs
-        rom_samples_solver_dirs
         rom_animation_base_dirs
     """
 
     rom_names = []
     rom_case_dirs = []
     rom_result_dirs = []
-    rom_samples_solver_dirs = []
     rom_animation_base_dirs = []
 
     for rom_name in rom_case_names:
@@ -322,11 +283,6 @@ def build_rom_case_paths(
             rom_result_subdir
         )
 
-        rom_samples_solver_dir = os.path.join(
-            rom_case_dir,
-            samples_solver_subdir
-        )
-
         rom_animation_base_dir = os.path.join(
             rom_case_dir,
             animation_output_subdir
@@ -335,16 +291,9 @@ def build_rom_case_paths(
         rom_names.append(rom_name)
         rom_case_dirs.append(rom_case_dir)
         rom_result_dirs.append(rom_result_dir)
-        rom_samples_solver_dirs.append(rom_samples_solver_dir)
         rom_animation_base_dirs.append(rom_animation_base_dir)
 
-    return (
-        rom_names,
-        rom_case_dirs,
-        rom_result_dirs,
-        rom_samples_solver_dirs,
-        rom_animation_base_dirs
-    )
+    return rom_names, rom_case_dirs, rom_result_dirs, rom_animation_base_dirs
 
 
 if __name__ == '__main__':
@@ -353,11 +302,10 @@ if __name__ == '__main__':
     # Inputs
     # ============================================================
 
-    directory = '/kuhpc/scratch/capl/b323g408/1D_RDE_matrix/every'
+    directory = '/kuhpc/scratch/capl/b323g408/1D_RDE_matrix/frequency_adapt'
 
     # Single FOM path
-    fom_result_dir = '/kuhpc/scratch/capl/b323g408/1D_RDE/FOM_results_every'
-    # fom_result_dir = '/kuhpc/scratch/capl/b323g408/1D_RDE/old_results/FOM_results/'
+    fom_result_dir = '/kuhpc/scratch/capl/b323g408/1D_RDE/old_results/FOM_results/'
 
     # ============================================================
     # ROM case list settings
@@ -374,7 +322,6 @@ if __name__ == '__main__':
     #     rom_case_names = ['caseA', 'caseB', 'some_other_name']
     # ------------------------------------------------------------
 
-    rom_case_names = ['FGS', 'FFGS']
     # rom_case_names = [
     #     's1_u1',
     #     's1_u2',
@@ -430,9 +377,9 @@ if __name__ == '__main__':
     # Uncomment this block if you want to generate s#_u# cases.
     # ------------------------------------------------------------
 
-    # s_list = [0.5, 1, 2]
-    # u_list = [2, 5, 10, 20]
-    # rom_case_names = [f's{s_num}_u{u_num}' for s_num in s_list for u_num in u_list]
+    s_list = [20]
+    u_list = [2, 5, 6, 7, 8, 9, 10, 15, 16, 17, 18, 19, 20]
+    rom_case_names = [f's{s_num}_u{u_num}' for s_num in s_list for u_num in u_list]
 
     # ------------------------------------------------------------
     # Option 3: generate ms-style cases automatically.
@@ -476,14 +423,6 @@ if __name__ == '__main__':
     #     /.../1D_RDE_matrix/ms1/AROM_results/cons_prim/
     rom_result_subdir = os.path.join('AROM_results', 'cons_prim')
 
-    # This is where the sampled solver cell files are located inside each case.
-    #
-    # Expected file format:
-    #     /.../case_name/AROM_results/samples_solver/{iter}iteration_samples_solver.npy
-    #
-    # Each file should contain a 1D integer array of cell numbers.
-    samples_solver_subdir = os.path.join('AROM_results', 'samples_solver')
-
     # This is where final GIF animations will be saved inside each ROM case.
     #
     # Example:
@@ -491,17 +430,10 @@ if __name__ == '__main__':
     #     /.../1D_RDE_matrix/ms1/AROM_results/error/figures/
     animation_output_subdir = os.path.join('AROM_results', 'error', 'movies')
 
-    (
-        rom_names,
-        rom_case_dirs,
-        rom_result_dirs,
-        rom_samples_solver_dirs,
-        rom_animation_base_dirs
-    ) = build_rom_case_paths(
+    rom_names, rom_case_dirs, rom_result_dirs, rom_animation_base_dirs = build_rom_case_paths(
         base_directory=directory,
         rom_case_names=rom_case_names,
         rom_result_subdir=rom_result_subdir,
-        samples_solver_subdir=samples_solver_subdir,
         animation_output_subdir=animation_output_subdir
     )
 
@@ -517,7 +449,7 @@ if __name__ == '__main__':
     # ============================================================
 
     start_iter = 0
-    step_iter  = 1
+    step_iter  = 100
     end_iter   = 200000
 
     step_plot  = 1
@@ -665,15 +597,9 @@ if __name__ == '__main__':
 
         x = np.linspace(x_0, x_f, cell_num)
 
-        for (
-            rom_name,
-            rom_result_dir,
-            rom_samples_solver_dir,
-            rom_animation_base_dir
-        ) in zip(
+        for rom_name, rom_result_dir, rom_animation_base_dir in zip(
             rom_names,
             rom_result_dirs,
-            rom_samples_solver_dirs,
             rom_animation_base_dirs
         ):
 
@@ -684,11 +610,6 @@ if __name__ == '__main__':
                 print(f"Warning: ROM directory does not exist. Skipping {rom_name}.")
                 print(f"  Missing directory: {rom_result_dir}")
                 continue
-
-            if not os.path.isdir(rom_samples_solver_dir):
-                print(f"Warning: samples_solver directory does not exist for {rom_name}.")
-                print("Sample markers will be omitted for this case.")
-                print(f"  Missing directory: {rom_samples_solver_dir}")
 
             # ----------------------------------------------------
             # Gather or load this ROM case
@@ -870,15 +791,6 @@ if __name__ == '__main__':
 
                         error_percent_norm = error_percent_history[plot_indx]
 
-                        sample_cells = load_samples_solver_cells(
-                            samples_solver_dir=rom_samples_solver_dir,
-                            iter_num=actual_iter,
-                            cell_num=cell_num
-                        )
-
-                        sample_x = x[sample_cells]
-                        sample_y = rom_state_vector[sample_cells]
-
                         if plot_indx == 0:
 
                             p1, = ax.plot(
@@ -897,19 +809,6 @@ if __name__ == '__main__':
                                 c='tab:red',
                                 lw=2,
                                 label=f'{rom_legend}: {rom_name}'
-                            )
-
-                            p3, = ax.plot(
-                                sample_x,
-                                sample_y,
-                                marker='o',
-                                ls='None',
-                                markerfacecolor='none',
-                                markeredgecolor='green',
-                                markeredgewidth=1.8,
-                                ms=7,
-                                zorder=10,
-                                label='sampled solver cells'
                             )
 
                             ax.set_ylabel(y_label)
@@ -951,7 +850,6 @@ if __name__ == '__main__':
 
                             p1.set_ydata(fom_state_vector)
                             p2.set_ydata(rom_state_vector)
-                            p3.set_data(sample_x, sample_y)
 
                             text_box.set_text(
                                 (

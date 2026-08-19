@@ -32,7 +32,7 @@ def hyper_precompute(solver_param,rom_param,static_basis=True,):
 
         S_indx_user = ECSW_sample_point_finder(solver_param,rom_param)
 
-    elif solver_param['sampling_method'] == 'FGS':
+    elif ( solver_param['sampling_method'] == 'FGS' or solver_param['sampling_method'] == 'FFGS'):
 
         ref_state   = rom_param['Q_bar']
 

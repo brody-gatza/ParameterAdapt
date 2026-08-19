@@ -26,7 +26,6 @@ def slope_weight(n, nm1, slope, ):
     return weight
 
 def _format_array_line(iter, arr):
-    arr = np.atleast_1d(arr)
     return str(iter) + "," + ",".join(f"{x:.17e}" for x in arr) + "\n"
 
 
@@ -322,20 +321,24 @@ def results_recorder_ROM(solver_param,state,rom_param=None):
     np.save(os.path.join(dir_results,'samples_user'  ,f"{save_title}_samples_user.npy")   , rom_param['S_indx_user'])
     np.save(os.path.join(dir_results,'samples_solver',f"{save_title}_samples_solver.npy") , rom_param['S_indx_solver'])
 
-def update_sampling_points(solver_param,state,physics,time_integration,rom_param,sampling_adapt_freq):
-    # Compute a time step in the future if using future FGS
-    if solver_param['sampling_method'] == 'FFGS':
+def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=None):
 
-        # adjust the solver parameters for taking large time step FOM
-        solver_param['hyper'] = False
-        solver_param['dt']    = sampling_adapt_freq * solver_param['dt']
+    #############################################
+    # This function is taking one time step     #
+    # using adaptive ROM algorithm. It will run #
+    # FOM initially but then will turn into ROM #
+    # with evolving basis and sample adaptation #
+    #############################################
 
-        # Load the previous future state and export as the field solution
-        if ( not ( solver_param['iter'] == int(solver_param['FOM2ROM_trans_iter']) ) ):
+    iter = solver_param['iter']
 
-            # Load the stored future state
-            state['Q_cons'] = state['Q_bar'].copy()
-            state['d_flux_dx'] = state['flux_save'] 
+    if iter <= int(solver_param['FOM2ROM_trans_iter']):
+
+        if iter != int(solver_param['FOM2ROM_trans_iter']):
+
+            # take FOM step for initial training
+            state = physics.residual_calculator(solver_param,rom_param,state)
+            state = time_integration.advance_time(solver_param,rom_param,state,physics)
 
             # post process part
             if solver_param['injection']:
@@ -354,166 +357,31 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
             # prepare results to save
             state = prepare_to_store_FOM(solver_param,state,rom_param)
 
-            # save the data 
-            if solver_param['iter'] % solver_param['save_interval'] == 0:
-
-                results_recorder_ROM(solver_param,state,rom_param)
-
-        # Save the flow field to resume the ROM after the large time step FOM
-        Q_cons_save = state['Q_cons'].copy()
-        Q_prim_save = state['Q_prim'].copy()
-
-        # take one FOM step
-        state = physics.residual_calculator(solver_param,rom_param,state)
-        state = time_integration.advance_time(solver_param,rom_param,state,physics)
-
-        if solver_param['injection']: 
-
-            state = physics.injection_correction(solver_param,state)
-
-        Q_bar_star_new = state['Q_cons']
-        Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
-        
-        # update the large time step state 
-        state['Q_bar'] = Q_bar_star_new.copy()
-
-        # some sampling methods (ex. FGS) need this for sampling
-        rom_param['Q_bar'] = state['Q_bar'].copy()
-
-        # reset solver parameters to samller time step setup (user defined setup)
-        Q_bar_new_solver_int    = Q_bar_star_new_solver_int
-        solver_param['hyper']   = True
-        solver_param['dt']      = solver_param['dt'] / sampling_adapt_freq
-
-        # adapt basis with newly found sanpshot
-        rom_param = adapt_basis(solver_param,rom_param,Q_bar_new_solver_int)
-    
-        # find corrected qr (projected with new basis)
-        new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
-
-        # update states 
-        corrected_cent_norm = rom_param['basis'] @ new_qr
-        rom_param['F'][:,-1]   = corrected_cent_norm
-        rom_param['Q_R'][:,-1] = new_qr
-
-        # Not sure if this is needed, we are already computing the true solution with FOM (Maybe useful for future prediction but not for regular time step)
-        # # find new solution 
-        # Q_tilda_correct_solver_int = q_ref + (denormalizor * corrected_cent_norm)
-        # Q_tilda_correct_solver_full= reshape_func.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int)
-        # state['Q_cons'] = Q_tilda_correct_solver_full
-
-        # Revert to the current flow field for the current time step
-        state['Q_cons'] = Q_cons_save
-        state['Q_prim'] = Q_prim_save
-
-        # Save the flux for writing later
-        state['flux_save'] = state['d_flux_dx']
-
-    # Otherwise, compute the next time step
-    else:
-
-        # adjust the solver parameters for regular time step FOM
-        solver_param['hyper'] = False
-
-        # take one FOM step
-        state = physics.residual_calculator(solver_param,rom_param,state)
-        state = time_integration.advance_time(solver_param,rom_param,state,physics)
-
-        if solver_param['injection']: 
-
-            state = physics.injection_correction(solver_param,state)
-
-        Q_bar_star_new = state['Q_cons'].copy()
-        Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
-        
-        # update the large time step state 
-        state['Q_bar'] = Q_bar_star_new.copy()
-
-        # some sampling methods (ex. FGS) need this for sampling
-        rom_param['Q_bar'] = state['Q_bar'].copy()
-
-        # reset solver parameters to samller time step setup (user defined setup)
-        Q_bar_new_solver_int    = Q_bar_star_new_solver_int
-        solver_param['hyper']   = True
-
-        # adapt basis with newly found sanpshot
-        rom_param = adapt_basis(solver_param,rom_param,Q_bar_new_solver_int)
-    
-        # find corrected qr (projected with new basis)
-        new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
-
-        # update states 
-        corrected_cent_norm = rom_param['basis'] @ new_qr
-        rom_param['F'][:,-1]   = corrected_cent_norm
-        rom_param['Q_R'][:,-1] = new_qr
-
-        # post process part
-        if solver_param['injection']:
-
-            state = physics.injection_correction(solver_param,state)
-
-        # update prim state
-        state = physics.cons2prim_converter(solver_param,state)
-
-        # update the ghost cells
-        state = bc_func.update_ghost_cell(solver_param,state)
-
-        # update prim state
-        state = physics.prim2cons_converter(solver_param,state)
-
-        # prepare results to save
-        state = prepare_to_store_FOM(solver_param,state,rom_param)
-
-        # save the data 
-        if solver_param['iter'] % solver_param['save_interval'] == 0:
-
-            results_recorder_ROM(solver_param,state,rom_param)
-
-    # Update Samples
-    rom_param = hyper_precompute(solver_param,rom_param,static_basis=False)
-
-    return state, rom_param
-
-def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=None):
-
-    #############################################
-    # This function is taking one time step     #
-    # using adaptive ROM algorithm. It will run #
-    # FOM initially but then will turn into ROM #
-    # with evolving basis and sample adaptation #
-    #############################################
-
-    iter = solver_param['iter']
-
-    if iter <= int(solver_param['FOM2ROM_trans_iter']):
-
-        # take FOM step for initial training
-        state = physics.residual_calculator(solver_param,rom_param,state)
-        state = time_integration.advance_time(solver_param,rom_param,state,physics)
-
-        # post process part
-        if solver_param['injection']:
-
-            state = physics.injection_correction(solver_param,state)
-
-        # update prim state
-        state = physics.cons2prim_converter(solver_param,state)
-
-        # update the ghost cells
-        state = bc_func.update_ghost_cell(solver_param,state)
-
-        # update prim state
-        state = physics.prim2cons_converter(solver_param,state)
-
-        # prepare results to save
-        state = prepare_to_store_FOM(solver_param,state,rom_param)
-
-        if iter != int(solver_param['FOM2ROM_trans_iter']):
-
             # save solution
             results_recorder_FOM(solver_param,state,rom_param)
 
         elif iter == int(solver_param['FOM2ROM_trans_iter']):
+
+            # take one more FOM step and prepare basis and samples based on that
+            state = physics.residual_calculator(solver_param,rom_param,state)
+            state = time_integration.advance_time(solver_param,rom_param,state,physics)
+
+            # post process part
+            if solver_param['injection']:
+
+                state = physics.injection_correction(solver_param,state)
+
+            # update prim state
+            state = physics.cons2prim_converter(solver_param,state)
+
+            # update the ghost cells
+            state = bc_func.update_ghost_cell(solver_param,state)
+
+            # update prim state
+            state = physics.prim2cons_converter(solver_param,state)
+
+            # prepare results to save
+            state = prepare_to_store_FOM(solver_param,state,rom_param)
 
             # adjust the training range
             solver_param['training_start_iter'] = int(iter-solver_param['init_training_win'])
@@ -525,72 +393,40 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             rom_param = precomputer(solver_param)
 
             # create a full-state copy
-            state['Q_bar']     = state['Q_cons'].copy()
-            rom_param['Q_bar'] = state['Q_bar'].copy() 
+            state['Q_bar']     = state['Q_cons']
+            rom_param['Q_bar'] = state['Q_bar'] 
 
             # adjust sampling configuration
             solver_param['hyper'] = True
 
-            # manually specify resampling time steps
+            # find initial samples
+            rom_param = hyper_precompute(solver_param,rom_param,static_basis=False)
+
+            # create list of resampling time steps
             if solver_param['multi_samp']:
-
-                block_size = 5000
-
-                for i in range(2, 20):
-                    if i == 2:
-                        block_start = solver_param['FOM2ROM_trans_iter']
-                    else:
-                        block_start = actual_block_end
-                    nominal_block_end = (i - 1) * block_size
-
-                    # Move nominal_block_end forward until it lands on the sampling schedule
-                    remainder = (nominal_block_end - block_start) % i
-
-                    if remainder == 0:
-                        actual_block_end = nominal_block_end
-                    else:
-                        actual_block_end = nominal_block_end + (i - remainder)
-
-                    # Optional but recommended: do not go past num_step
-                    actual_block_end = min(actual_block_end, solver_param['num_step'])
-
-                    sampling_list = np.arange(
-                        block_start,
-                        actual_block_end,
-                        i,
-                        dtype=int
-                    )
-
-                    if i == 2:
-                        solver_param['resample_iter_list'] = sampling_list
-                    else:
-                        solver_param['resample_iter_list'] = np.append(
-                            solver_param['resample_iter_list'],
-                            sampling_list
-                        )
-
-                    if actual_block_end >= solver_param['num_step']:
-                        break
-
-                solver_param['resample_iter_list'] = np.unique(solver_param['resample_iter_list'])
-                sampling_adapt_freq = 2
-
+                solver_param['resample_iter_list'] = np.unique(np.concatenate((
+                                                     np.arange(
+                                                         solver_param['FOM2ROM_trans_iter'],
+                                                         solver_param['multi_samp_iter'],
+                                                         solver_param['unsampled_update_freq'],
+                                                         dtype=int
+                                                     ),
+                                                     np.arange(
+                                                         solver_param['multi_samp_iter'],
+                                                         solver_param['num_step'],
+                                                         solver_param['unsampled_update_freq_2'],
+                                                         dtype=int
+                                                     ))))
             else:
                 solver_param['resample_iter_list'] = np.arange(solver_param['FOM2ROM_trans_iter'],
                                                                solver_param['num_step'],
                                                                solver_param['unsampled_update_freq'],dtype=int)
-                sampling_adapt_freq = solver_param['unsampled_update_freq']
-
-            # find initial samples
-            if solver_param['sampling_method'] == 'FFGS':
-                state, rom_param = update_sampling_points(solver_param,state,physics,time_integration,rom_param,sampling_adapt_freq)
-            else:
-                rom_param = hyper_precompute(solver_param,rom_param,static_basis=False)
 
             # save ROM related param
             results_recorder_trans(solver_param,state,rom_param)
 
     else:
+
         # read basic parameters
         q_ref                  = rom_param['q_ref']
         normalizor             = rom_param['norm']
@@ -601,11 +437,11 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
         Q_tilda_old_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_old)
 
         # This routine evalutes the FOM based on the current time step to calculate ROM errors
-        if ( solver_param['error_check'] and not ( np.any(solver_param['iter'] == solver_param['resample_iter_list']) ) ):
+        if solver_param['error_check']:
 
             # disable hyper-reduction so the FOM is fully evaluated
-            Q_cons_save = state['Q_cons'].copy()
-            Q_prim_save = state['Q_prim'].copy()
+            Q_cons_save = state['Q_cons']
+            Q_prim_save = state['Q_prim']
             hyper_save = solver_param['hyper']
             solver_param['hyper'] = False
 
@@ -637,25 +473,96 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 results_recorder_FOM_error(solver_param,state,rom_param)
 
             # reset solver parameters and store the FOM solution
-            Q_cons_FOM = state['Q_cons'].copy()
-            Q_prim_FOM = state['Q_prim'].copy()
+            Q_cons_FOM = state['Q_cons']
+            Q_prim_FOM = state['Q_prim']
             state['Q_cons'] = Q_cons_save
             state['Q_prim'] = Q_prim_save
             solver_param['hyper'] = hyper_save
 
-        # Update the sampling frequency to reflect the current value if using multi_samp
+        # it must be decided to whether to a large time step FOM to update whole domain or 
+        # perform a normal time step ROM
         if solver_param['multi_samp']:
-            iter_ind = np.where(solver_param['resample_iter_list'] == iter)[0]
-            if iter_ind.size > 0:
-                sampling_adapt_freq = solver_param['resample_iter_list'][iter_ind + 1] - solver_param['resample_iter_list'][iter_ind]
-                sampling_adapt_freq = int(sampling_adapt_freq[0])
-                solver_param['unsampled_update_freq'] = sampling_adapt_freq
+            if solver_param['iter'] >= solver_param['multi_samp_iter']:
+                sampling_adapt_freq = solver_param['unsampled_update_freq_2']
+            else:
+                sampling_adapt_freq = solver_param['unsampled_update_freq']
         else:
             sampling_adapt_freq = solver_param['unsampled_update_freq']
 
-        # Compute FOM a time step to update the sampling points and ROM basis
+        # condition for large time step FOM
+        # if (sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0):
         if np.any(solver_param['iter'] == solver_param['resample_iter_list']):
-            state, rom_param = update_sampling_points(solver_param,state,physics,time_integration,rom_param,sampling_adapt_freq)
+
+            # adjust the solver parameters for taking large time step FOM
+            Q_bar_star_old        = state['Q_bar']
+            solver_param['hyper'] = False
+            solver_param['dt']    = sampling_adapt_freq * solver_param['dt']
+            state['Q_cons']       = Q_bar_star_old
+
+            # take one FOM step
+            state = physics.residual_calculator(solver_param,rom_param,state)
+            state = time_integration.advance_time(solver_param,rom_param,state,physics)
+
+            if solver_param['injection']: 
+
+                state = physics.injection_correction(solver_param,state)
+
+            Q_bar_star_new = state['Q_cons']
+            Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
+            
+            # update the large time step state 
+            state['Q_bar'] = Q_bar_star_new
+
+            # some sampling methods (ex. FGS) need this for sampling
+            rom_param['Q_bar'] = state['Q_bar']
+
+            # hold new solution
+            Q_bar_star_new            = state['Q_cons']
+            Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
+
+            # reset solver parameters to samller time step setup (user defined setup)
+            # Q_bar_new_sampling      = Q_bar_star_new_solver_int[rom_param['S_indx_solver']]
+            Q_bar_new_solver_int    = Q_bar_star_new_solver_int
+            solver_param['hyper']   = True
+            solver_param['dt']      = solver_param['dt'] / sampling_adapt_freq
+
+            # adapt basis with newly found sanpshot
+            rom_param = adapt_basis(solver_param,rom_param,Q_bar_new_solver_int)
+        
+            # find corrected qr (projected with new basis)
+            new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
+
+            # update states 
+            corrected_cent_norm = rom_param['basis'] @ new_qr
+            rom_param['F'][:,-1]   = corrected_cent_norm
+            rom_param['Q_R'][:,-1] = new_qr
+
+            # find new solution 
+            Q_tilda_correct_solver_int = q_ref + (denormalizor * corrected_cent_norm)
+            Q_tilda_correct_solver_full= reshape_func.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int)
+            state['Q_cons'] = Q_tilda_correct_solver_full
+
+            # post process part
+            if solver_param['injection']:
+
+                state = physics.injection_correction(solver_param,state)
+
+            # update prim state
+            state = physics.cons2prim_converter(solver_param,state)
+
+            # update the ghost cells
+            state = bc_func.update_ghost_cell(solver_param,state)
+
+            # update prim state
+            state = physics.prim2cons_converter(solver_param,state)
+
+            # prepare results to save
+            state = prepare_to_store_FOM(solver_param,state,rom_param)
+
+            # save the data 
+            if solver_param['iter'] % solver_param['save_interval'] == 0:
+
+                results_recorder_ROM(solver_param,state,rom_param)
 
         # Run ROM at small time step (user defined dt)
         else:
@@ -725,7 +632,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 results_recorder_ROM(solver_param,state,rom_param)
 
         # Error checking routines
-        if ( solver_param['error_check'] and not ( np.any(solver_param['iter'] == solver_param['resample_iter_list']) ) ):
+        if solver_param['error_check']:
 
             # Calculate the interpolation error
             # Crude, inclues FOM evaluations at sampled points but should be good enough
@@ -739,8 +646,8 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             Q_cons_proj_error = np.abs(Q_cons_FOM - Q_cons_FOM_proj)
 
             # Save the ROM states
-            Q_cons_save = state['Q_cons'].copy()
-            Q_prim_save = state['Q_prim'].copy()
+            Q_cons_save = state['Q_cons']
+            Q_prim_save = state['Q_prim']
 
             # Convert the projected FOM to primitive variables
             state['Q_cons'] = Q_cons_FOM_proj
@@ -792,6 +699,9 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             prim_proj_max = np.max(Q_prim_proj_error_reshape, axis=1)
             # prim_proj_min = np.min(Q_prim_proj_error_reshape, axis=1)
             prim_proj_avg = np.mean(Q_prim_proj_error_reshape, axis=1)
+
+            # Compute moving averages
+
 
             # Write the error values
             dir_results = os.path.join(solver_param["dir_results"], "error")
@@ -1111,5 +1021,12 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             #         state['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
             #         state['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
 
+
+        # Update Samples
+        # if (sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0) or (iter == int(solver_param['init_training_win'])+1):
+        # if (sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0):
+        if np.any(solver_param['iter'] == solver_param['resample_iter_list']):
+
+            rom_param = hyper_precompute(solver_param,rom_param,static_basis=False)
 
     return solver_param, state, rom_param

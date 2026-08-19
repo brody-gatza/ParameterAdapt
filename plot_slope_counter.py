@@ -44,7 +44,7 @@ class Settings:
     # ----------------------------
     # Moving/running averages
     # ----------------------------
-    plot_moving_average: bool = False
+    plot_moving_average: bool = True
     moving_average_windows: list[int] = field(default_factory=lambda: [1000])
 
     plot_running_average: bool = True
