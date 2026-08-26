@@ -50,7 +50,8 @@ class Settings:
         default_factory=lambda: [
             (None, None),
             (None, 1000),
-            (None, 14000),
+            (None, 200),
+            (99500, 99700),
         ]
     )
 

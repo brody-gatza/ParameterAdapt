@@ -353,11 +353,11 @@ if __name__ == '__main__':
     # Inputs
     # ============================================================
 
-    directory = '/kuhpc/scratch/capl/b323g408/1D_RDE_matrix/every'
+    directory = '/kuhpc/scratch/capl/b323g408/1D_RDE_matrix'
 
     # Single FOM path
-    fom_result_dir = '/kuhpc/scratch/capl/b323g408/1D_RDE/FOM_results_every'
-    # fom_result_dir = '/kuhpc/scratch/capl/b323g408/1D_RDE/old_results/FOM_results/'
+    # fom_result_dir = '/kuhpc/scratch/capl/b323g408/1D_RDE/FOM_results_every'
+    fom_result_dir = '/kuhpc/scratch/capl/b323g408/1D_RDE/FOM_results/'
 
     # ============================================================
     # ROM case list settings
@@ -374,7 +374,6 @@ if __name__ == '__main__':
     #     rom_case_names = ['caseA', 'caseB', 'some_other_name']
     # ------------------------------------------------------------
 
-    rom_case_names = ['FGS', 'FFGS']
     # rom_case_names = [
     #     's1_u1',
     #     's1_u2',
@@ -430,9 +429,9 @@ if __name__ == '__main__':
     # Uncomment this block if you want to generate s#_u# cases.
     # ------------------------------------------------------------
 
-    # s_list = [0.5, 1, 2]
-    # u_list = [2, 5, 10, 20]
-    # rom_case_names = [f's{s_num}_u{u_num}' for s_num in s_list for u_num in u_list]
+    s_list = [0.5, 1, 2]
+    u_list = [2, 5, 10, 20, 40]
+    rom_case_names = [f's{s_num}_u{u_num}' for s_num in s_list for u_num in u_list]
 
     # ------------------------------------------------------------
     # Option 3: generate ms-style cases automatically.
@@ -517,8 +516,8 @@ if __name__ == '__main__':
     # ============================================================
 
     start_iter = 0
-    step_iter  = 1
-    end_iter   = 200000
+    step_iter  = 100
+    end_iter   = 500000
 
     step_plot  = 1
 
@@ -596,7 +595,7 @@ if __name__ == '__main__':
     # GIF frame rate.
     # Duration is approximately:
     #     len(common_iter_list) * frame_hold / fps_input
-    fps_input = 30
+    fps_input = 60
 
     # Optional: hold each plotted frame for multiple GIF frames.
     #
