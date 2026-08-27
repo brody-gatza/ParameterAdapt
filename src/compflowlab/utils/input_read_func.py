@@ -183,5 +183,6 @@ def init_solver_param(args,input_param):
     solver_param['error_check']           = eval(input_param['error_check'])
     solver_param['multi_samp']            = eval(input_param['multi_samp'])
     solver_param['parameter_adapt']       = eval(input_param['parameter_adapt'])
+    solver_param['force_FOM']             = eval(input_param['force_FOM'])
 
     return solver_param

@@ -1,6 +1,8 @@
 import argparse
 import os
 import re
+from contextlib import nullcontext
+from pathlib import Path
 
 import numpy as np
 
@@ -197,7 +199,8 @@ def plot_histories_to_pdf(
     relative_l2,
     correlation,
     field_names,
-    pdf_filename
+    pdf_filename,
+    pdf=None
 ):
     """
     Save all variable histories to one multipage PDF.
@@ -239,7 +242,7 @@ def plot_histories_to_pdf(
     print(f"Output PDF: {os.path.abspath(pdf_filename)}")
     print("============================================================")
 
-    with PdfPages(pdf_filename) as pdf:
+    with (PdfPages(pdf_filename) if pdf is None else nullcontext(pdf)) as pdf:
 
         for variable_index, field_name in enumerate(field_names):
 
@@ -341,8 +344,8 @@ def plot_histories_to_pdf(
             )
 
             correlation_axis.set_ylim(
-                -1.05,
-                1.05
+                1.00,
+                0.00
             )
 
             correlation_axis.axhline(
@@ -400,6 +403,220 @@ def plot_histories_to_pdf(
     print("============================================================")
 
 
+
+ERROR_SIGNAL_GROUPS = (
+    ("Primitive Variables - Maximum Error", "prim_interp_max.txt", "primitive"),
+    ("Conservative Variables - Maximum Error", "cons_interp_max.txt", "conservative"),
+    ("Primitive Variables - Average Error", "prim_interp_avg.txt", "primitive"),
+    ("Conservative Variables - Average Error", "cons_interp_avg.txt", "conservative"),
+)
+
+
+def compute_moving_average_ignore_nan(values, window):
+    """Compute a trailing moving average, ignoring non-finite samples."""
+    values = np.asarray(values, dtype=float)
+    if window <= 0:
+        raise ValueError("Moving-average windows must be positive integers.")
+
+    finite = np.isfinite(values)
+    sums = np.concatenate(([0.0], np.cumsum(np.where(finite, values, 0.0))))
+    counts = np.concatenate(([0], np.cumsum(finite.astype(int))))
+    end = np.arange(1, len(values) + 1)
+    start = np.maximum(0, end - window)
+    window_sums = sums[end] - sums[start]
+    window_counts = counts[end] - counts[start]
+
+    average = np.full(len(values), np.nan)
+    valid = window_counts > 0
+    average[valid] = window_sums[valid] / window_counts[valid]
+    return average
+
+
+def load_error_signal_file(filename, delimiter=","):
+    """Load iteration from column zero and error signals from later columns."""
+    filename = Path(filename)
+    if not filename.is_file():
+        raise FileNotFoundError(f"Error-signal file does not exist:\n{filename}")
+
+    data = np.loadtxt(filename, delimiter=delimiter, ndmin=2)
+    if data.ndim != 2 or data.shape[1] < 2:
+        raise ValueError(
+            f"Expected iteration plus at least one signal column in {filename}."
+        )
+
+    iterations = np.asarray(data[:, 0], dtype=float)
+    signals = np.asarray(data[:, 1:], dtype=float)
+    order = np.argsort(iterations, kind="stable")
+    iterations = iterations[order]
+    signals = signals[order]
+
+    if np.any(np.diff(iterations) == 0.0):
+        raise ValueError(f"Duplicate iterations were found in {filename}.")
+    return iterations, signals
+
+
+def interpolate_metric_to_iterations(source_iterations, values, target_iterations):
+    """Interpolate a metric to signal iterations without extrapolation."""
+    source_iterations = np.asarray(source_iterations, dtype=float)
+    values = np.asarray(values, dtype=float)
+    target_iterations = np.asarray(target_iterations, dtype=float)
+    valid = np.isfinite(source_iterations) & np.isfinite(values)
+
+    if np.count_nonzero(valid) == 0:
+        return np.full(target_iterations.shape, np.nan)
+
+    x = source_iterations[valid]
+    y = values[valid]
+    order = np.argsort(x, kind="stable")
+    x = x[order]
+    y = y[order]
+    x, indices = np.unique(x, return_index=True)
+    y = y[indices]
+
+    if len(x) == 1:
+        result = np.full(target_iterations.shape, np.nan)
+        result[np.isclose(target_iterations, x[0])] = y[0]
+        return result
+    return np.interp(target_iterations, x, y, left=np.nan, right=np.nan)
+
+
+def get_error_signal_field_names(kind, count, primitive_field_names):
+    if kind == "primitive" and len(primitive_field_names) == count:
+        return list(primitive_field_names)
+    prefix = "Primitive" if kind == "primitive" else "Conservative"
+    return [f"{prefix} field {index + 1}" for index in range(count)]
+
+
+def plot_error_signals_to_pdf(
+    metric_iterations,
+    relative_l2,
+    correlation,
+    primitive_field_names,
+    error_directory,
+    pdf,
+    short_window=1000,
+    long_window=5000,
+    delimiter=",",
+):
+    """Append raw signals, two moving averages, L2 error, and correlation."""
+    error_directory = Path(error_directory)
+    if short_window <= 0 or long_window <= 0:
+        raise ValueError("Moving-average windows must be positive integers.")
+
+    available = []
+    for title, basename, kind in ERROR_SIGNAL_GROUPS:
+        filename = error_directory / basename
+        if filename.is_file():
+            available.append((title, filename, kind))
+        else:
+            print(f"Warning: missing error-signal file: {filename}")
+
+    if not available:
+        print("No error-signal pages were created.")
+        return
+
+    print("============================================================")
+    print("Appending error-signal plots")
+    print(f"Error directory: {error_directory.resolve()}")
+    print(f"Moving-average windows: {short_window}, {long_window}")
+    print("============================================================")
+
+    with nullcontext(pdf) as pdf:
+        for title, filename, kind in available:
+            signal_iterations, signals = load_error_signal_file(
+                filename, delimiter=delimiter
+            )
+            names = get_error_signal_field_names(
+                kind, signals.shape[1], primitive_field_names
+            )
+
+            for variable_index, field_name in enumerate(names):
+                raw = signals[:, variable_index]
+                short_average = compute_moving_average_ignore_nan(raw, short_window)
+                long_average = compute_moving_average_ignore_nan(raw, long_window)
+
+                fig, signal_axis = plt.subplots(figsize=(12, 7))
+                l2_axis = signal_axis.twinx()
+                correlation_axis = signal_axis.twinx()
+                correlation_axis.spines["right"].set_position(("axes", 1.13))
+                correlation_axis.patch.set_visible(False)
+
+                lines = []
+                lines += signal_axis.plot(
+                    signal_iterations, raw, color="0.55", linewidth=0.8,
+                    alpha=0.55, label="Raw error signal", zorder=2
+                )
+                lines += signal_axis.plot(
+                    signal_iterations, short_average, color="tab:orange",
+                    linewidth=2.0, label=f"Moving average ({short_window})", zorder=4
+                )
+                lines += signal_axis.plot(
+                    signal_iterations, long_average, color="tab:green",
+                    linewidth=2.2, linestyle="-.",
+                    label=f"Moving average ({long_window})", zorder=5
+                )
+
+                if variable_index < relative_l2.shape[0]:
+                    aligned_l2 = interpolate_metric_to_iterations(
+                        metric_iterations,
+                        100.0 * relative_l2[variable_index],
+                        signal_iterations,
+                    )
+                    aligned_correlation = interpolate_metric_to_iterations(
+                        metric_iterations,
+                        correlation[variable_index],
+                        signal_iterations,
+                    )
+                    lines += l2_axis.plot(
+                        signal_iterations, aligned_l2, color="tab:red",
+                        linewidth=1.5, alpha=0.90,
+                        label=r"Relative $L_2$ error [%]", zorder=7
+                    )
+                    lines += correlation_axis.plot(
+                        signal_iterations, aligned_correlation, color="tab:blue",
+                        linewidth=1.5, alpha=0.90,
+                        label="Pearson correlation", zorder=8
+                    )
+                else:
+                    print(
+                        f"Warning: no FOM/ROM metric field {variable_index + 1} "
+                        f"for {filename.name}."
+                    )
+
+                finite_raw = raw[np.isfinite(raw)]
+                if len(finite_raw) and np.all(finite_raw > 0.0):
+                    signal_axis.set_yscale("log")
+
+                signal_axis.set_xlabel("Iteration")
+                signal_axis.set_ylabel("Error signal")
+                l2_axis.set_ylabel(r"Relative $L_2$ error [%]", color="tab:red")
+                correlation_axis.set_ylabel(
+                    "Pearson correlation", color="tab:blue", labelpad=12
+                )
+                l2_axis.tick_params(axis="y", labelcolor="tab:red")
+                correlation_axis.tick_params(axis="y", labelcolor="tab:blue")
+                correlation_axis.set_ylim(1.00, 0.00)
+                signal_axis.minorticks_on()
+                signal_axis.grid(which="major", axis="both", linestyle="-", alpha=0.30)
+                signal_axis.grid(which="minor", axis="x", linestyle=":", alpha=0.18)
+                correlation_axis.axhline(
+                    1.0, color="tab:blue", linestyle="--", linewidth=0.8, alpha=0.4
+                )
+                correlation_axis.axhline(
+                    0.0, color="tab:blue", linestyle=":", linewidth=0.8, alpha=0.4
+                )
+                signal_axis.legend(
+                    lines, [line.get_label() for line in lines],
+                    loc="best", fontsize=9
+                )
+                signal_axis.set_title(f"{title}: {field_name}")
+                fig.subplots_adjust(right=0.80)
+                pdf.savefig(fig, bbox_inches="tight")
+                plt.close(fig)
+                print(f"Added: {title}: {field_name}")
+
+    print("Finished appending error-signal plots.")
+
 def parse_arguments():
     """
     Read command-line arguments.
@@ -436,6 +653,20 @@ def parse_arguments():
             "Output PDF filename. By default, "
             "FOM_ROM_metrics.pdf is saved in the ROM directory."
         )
+    )
+
+
+    parser.add_argument(
+        "--error-short-window", type=int, default=1000,
+        help="Short error-signal moving-average window (default: 1000)."
+    )
+    parser.add_argument(
+        "--error-long-window", type=int, default=5000,
+        help="Long error-signal moving-average window (default: 5000)."
+    )
+    parser.add_argument(
+        "--error-delimiter", default=",",
+        help="Error-signal file delimiter (default: comma)."
     )
 
     return parser.parse_args()
@@ -494,13 +725,31 @@ def main():
         rom_data=rom_data
     )
 
-    plot_histories_to_pdf(
-        iterations=iterations,
-        relative_l2=relative_l2,
-        correlation=correlation,
-        field_names=field_names,
-        pdf_filename=pdf_filename
-    )
+    # The error directory is the ROM directory's sibling: <rom_dir>/../error.
+    error_directory = Path(rom_dir).parent / "error"
+
+    # Open the output PDF exactly once so every figure is written to the same file.
+    with PdfPages(pdf_filename) as pdf:
+        plot_histories_to_pdf(
+            iterations=iterations,
+            relative_l2=relative_l2,
+            correlation=correlation,
+            field_names=field_names,
+            pdf_filename=pdf_filename,
+            pdf=pdf,
+        )
+
+        plot_error_signals_to_pdf(
+            metric_iterations=iterations,
+            relative_l2=relative_l2,
+            correlation=correlation,
+            primitive_field_names=field_names,
+            error_directory=error_directory,
+            pdf=pdf,
+            short_window=args.error_short_window,
+            long_window=args.error_long_window,
+            delimiter=args.error_delimiter,
+        )
 
 
 if __name__ == "__main__":

@@ -632,6 +632,25 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 solver_param['resample_iter_list'] = np.unique(solver_param['resample_iter_list'])
                 sampling_adapt_freq = 2
 
+            elif solver_param['force_FOM']:
+                start_FOM = 86000
+                end_FOM =   96000
+                solver_param['resample_iter_list'] = np.arange(solver_param['FOM2ROM_trans_iter'],
+                                                               start_FOM,
+                                                               solver_param['unsampled_update_freq'],dtype=int)
+                sampling_adapt_freq = solver_param['unsampled_update_freq']
+
+                solver_param['resample_iter_list'] = np.append(solver_param['resample_iter_list'],np.arange(start_FOM,
+                                                               end_FOM,
+                                                               1,dtype=int))
+                sampling_adapt_freq = solver_param['unsampled_update_freq']
+
+                solver_param['resample_iter_list'] = np.append(solver_param['resample_iter_list'],np.arange(end_FOM,
+                                                               solver_param['num_step'],
+                                                               solver_param['unsampled_update_freq'],dtype=int))
+                sampling_adapt_freq = solver_param['unsampled_update_freq']
+
+
             else:
                 solver_param['resample_iter_list'] = np.arange(solver_param['FOM2ROM_trans_iter'],
                                                                solver_param['num_step'],
@@ -713,7 +732,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             # solver_param['hyper'] = hyper_save
 
         # Update the sampling frequency to reflect the current value if using multi_samp
-        if solver_param['multi_samp']:
+        if solver_param['multi_samp'] or solver_param['force_FOM']:
             iter_ind = np.where(solver_param['resample_iter_list'] == iter)[0]
             if iter_ind.size > 0:
                 sampling_adapt_freq = solver_param['resample_iter_list'][iter_ind + 1] - solver_param['resample_iter_list'][iter_ind]
