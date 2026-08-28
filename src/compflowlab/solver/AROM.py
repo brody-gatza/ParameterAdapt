@@ -10,9 +10,6 @@ from compflowlab.rom.sampling_func import hyper_precompute
 from ..utils.classes import MovingAverage
 import copy
 
-import copy
-
-
 def snapshot_state(state):
     """
     Create an independent snapshot of the complete mutable solver state.
@@ -361,71 +358,77 @@ def results_recorder_ROM(solver_param,state,rom_param=None):
 
 def update_sampling_points(solver_param,state,physics,time_integration,rom_param,sampling_adapt_freq):
     # Compute a time step in the future if using future FGS
-    if solver_param['sampling_method'] == 'FFGS':
+    breakpoint()
+    if solver_param['sampling_method'] == 'FFGS' or solver_param['sampling_method'] == 'FFGSR':
 
         # Save the state to restore to
-        restore_solver = solver_param.copy()
+        restore_solver = snapshot_state(solver_param)
+
+        # Load the previous future state and export as the field solution
+        if ( not ( solver_param['iter'] == int(solver_param['FOM2ROM_trans_iter'])) ):
+            if solver_param['sampling_method'] == 'FFGS':
+                # Load the stored future state
+                state = snapshot_state(rom_param['future_state'])
+
+                # BUG? Why is this called twice??
+                # # post process part
+                # if solver_param['injection']:
+
+                #     state = physics.injection_correction(solver_param,state)
+
+                # update prim state
+                state = physics.cons2prim_converter(solver_param,state)
+
+                # update the ghost cells
+                state = bc_func.update_ghost_cell(solver_param,state)
+
+                # update prim state
+                state = physics.prim2cons_converter(solver_param,state)
+
+                # prepare results to save
+                state = prepare_to_store_FOM(solver_param,state,rom_param)
+
+                # save the data 
+                if solver_param['iter'] % solver_param['save_interval'] == 0:
+
+                    results_recorder_ROM(solver_param,state,rom_param)
+
+            elif solver_param['sampling_method'] == 'FFGSR':
+                # Evaluate the full field
+                solver_param['hyper'] = False
+
+                # take FOM step for initial training
+                state = physics.residual_calculator(solver_param,rom_param,state)
+                state = time_integration.advance_time(solver_param,rom_param,state,physics)
+
+                # post process part
+                if solver_param['injection']:
+
+                    state = physics.injection_correction(solver_param,state)
+
+                # update prim state
+                state = physics.cons2prim_converter(solver_param,state)
+
+                # update the ghost cells
+                state = bc_func.update_ghost_cell(solver_param,state)
+
+                # update prim state
+                state = physics.prim2cons_converter(solver_param,state)
+
+                # prepare results to save
+                state = prepare_to_store_FOM(solver_param,state,rom_param)
+
+                # save the data 
+                if solver_param['iter'] % solver_param['save_interval'] == 0:
+
+                    results_recorder_ROM(solver_param,state,rom_param)
+
+        # Save the state to restore to
+        restore_state = snapshot_state(state)
 
         # adjust the solver parameters for taking large time step FOM
         solver_param['hyper'] = False
         solver_param['dt']    = sampling_adapt_freq * solver_param['dt']
-
-        # Load the previous future state and export as the field solution
-        if ( not ( solver_param['iter'] == int(solver_param['FOM2ROM_trans_iter']) ) ):
-
-            # Load the stored future state
-            state = snapshot_state(rom_param['future_state'])
-
-            # post process part
-            if solver_param['injection']:
-
-                state = physics.injection_correction(solver_param,state)
-
-            # update prim state
-            state = physics.cons2prim_converter(solver_param,state)
-
-            # update the ghost cells
-            state = bc_func.update_ghost_cell(solver_param,state)
-
-            # update prim state
-            state = physics.prim2cons_converter(solver_param,state)
-
-            # prepare results to save
-            state = prepare_to_store_FOM(solver_param,state,rom_param)
-
-            # save the data 
-            if solver_param['iter'] % solver_param['save_interval'] == 0:
-
-                results_recorder_ROM(solver_param,state,rom_param)
-
-            # # take FOM step for initial training
-            # state = physics.residual_calculator(solver_param,rom_param,state)
-            # state = time_integration.advance_time(solver_param,rom_param,state,physics)
-
-            # # post process part
-            # if solver_param['injection']:
-
-            #     state = physics.injection_correction(solver_param,state)
-
-            # # update prim state
-            # state = physics.cons2prim_converter(solver_param,state)
-
-            # # update the ghost cells
-            # state = bc_func.update_ghost_cell(solver_param,state)
-
-            # # update prim state
-            # state = physics.prim2cons_converter(solver_param,state)
-
-            # # prepare results to save
-            # state = prepare_to_store_FOM(solver_param,state,rom_param)
-
-            # if iter != int(solver_param['FOM2ROM_trans_iter']):
-
-            #     # save solution
-            #     results_recorder_FOM(solver_param,state,rom_param)
-
-        # Save the state to restore to
-        restore_state = state.copy()
 
         # take one FOM step
         state = physics.residual_calculator(solver_param,rom_param,state)
@@ -464,12 +467,14 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
         # state['Q_cons'] = Q_tilda_correct_solver_full
 
         # Save the future predicted state for writing later
-        rom_param['future_state'] = snapshot_state(state)
+        if solver_param['sampling_method'] == 'FFGS':
+            rom_param['future_state'] = snapshot_state(state)
 
         # Restore to the saved states and update only future values
         state = restore_state
-        solver_param = restore_solver
-
+        solver_param.clear()
+        solver_param.update(restore_solver)
+    
     # Otherwise, compute the next time step
     else:
 
@@ -505,10 +510,11 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
         rom_param['F'][:,-1]   = corrected_cent_norm
         rom_param['Q_R'][:,-1] = new_qr
 
-        # post process part
-        if solver_param['injection']:
+        # BUG? Why is this called twice??
+        # # post process part
+        # if solver_param['injection']:
 
-            state = physics.injection_correction(solver_param,state)
+        #     state = physics.injection_correction(solver_param,state)
 
         # update prim state
         state = physics.cons2prim_converter(solver_param,state)
@@ -658,7 +664,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 sampling_adapt_freq = solver_param['unsampled_update_freq']
 
             # find initial samples
-            if solver_param['sampling_method'] == 'FFGS':
+            if solver_param['sampling_method'] == 'FFGS' or solver_param['sampling_method'] == 'FFGSR':
                 state, rom_param = update_sampling_points(solver_param,state,physics,time_integration,rom_param,sampling_adapt_freq)
             else:
                 rom_param = hyper_precompute(solver_param,rom_param,static_basis=False)
