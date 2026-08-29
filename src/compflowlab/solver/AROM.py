@@ -358,7 +358,6 @@ def results_recorder_ROM(solver_param,state,rom_param=None):
 
 def update_sampling_points(solver_param,state,physics,time_integration,rom_param,sampling_adapt_freq):
     # Compute a time step in the future if using future FGS
-    breakpoint()
     if solver_param['sampling_method'] == 'FFGS' or solver_param['sampling_method'] == 'FFGSR':
 
         # Save the state to restore to
@@ -369,29 +368,6 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
             if solver_param['sampling_method'] == 'FFGS':
                 # Load the stored future state
                 state = snapshot_state(rom_param['future_state'])
-
-                # BUG? Why is this called twice??
-                # # post process part
-                # if solver_param['injection']:
-
-                #     state = physics.injection_correction(solver_param,state)
-
-                # update prim state
-                state = physics.cons2prim_converter(solver_param,state)
-
-                # update the ghost cells
-                state = bc_func.update_ghost_cell(solver_param,state)
-
-                # update prim state
-                state = physics.prim2cons_converter(solver_param,state)
-
-                # prepare results to save
-                state = prepare_to_store_FOM(solver_param,state,rom_param)
-
-                # save the data 
-                if solver_param['iter'] % solver_param['save_interval'] == 0:
-
-                    results_recorder_ROM(solver_param,state,rom_param)
 
             elif solver_param['sampling_method'] == 'FFGSR':
                 # Evaluate the full field
@@ -406,22 +382,36 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
 
                     state = physics.injection_correction(solver_param,state)
 
-                # update prim state
-                state = physics.cons2prim_converter(solver_param,state)
+            Q_bar_star_new = state['Q_cons']
+            Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
 
-                # update the ghost cells
-                state = bc_func.update_ghost_cell(solver_param,state)
+            # adapt basis with newly found sanpshot
+            rom_param = adapt_basis(solver_param,rom_param,Q_bar_star_new_solver_int)
+        
+            # find corrected qr (projected with new basis)
+            new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
 
-                # update prim state
-                state = physics.prim2cons_converter(solver_param,state)
+            # update states 
+            corrected_cent_norm = rom_param['basis'] @ new_qr
+            rom_param['F'][:,-1]   = corrected_cent_norm
+            rom_param['Q_R'][:,-1] = new_qr
 
-                # prepare results to save
-                state = prepare_to_store_FOM(solver_param,state,rom_param)
+            # update prim state
+            state = physics.cons2prim_converter(solver_param,state)
 
-                # save the data 
-                if solver_param['iter'] % solver_param['save_interval'] == 0:
+            # update the ghost cells
+            state = bc_func.update_ghost_cell(solver_param,state)
 
-                    results_recorder_ROM(solver_param,state,rom_param)
+            # update prim state
+            state = physics.prim2cons_converter(solver_param,state)
+
+            # prepare results to save
+            state = prepare_to_store_FOM(solver_param,state,rom_param)
+
+            # save the data 
+            if solver_param['iter'] % solver_param['save_interval'] == 0:
+
+                results_recorder_ROM(solver_param,state,rom_param)
 
         # Save the state to restore to
         restore_state = snapshot_state(state)
@@ -445,20 +435,21 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
         rom_param['Q_bar'] = Q_bar_star_new.copy()
 
         # reset solver parameters to samller time step setup (user defined setup)
-        Q_bar_new_solver_int    = Q_bar_star_new_solver_int
+        # Q_bar_new_solver_int    = Q_bar_star_new_solver_int
         solver_param['hyper']   = True
         solver_param['dt']      = solver_param['dt'] / sampling_adapt_freq
 
-        # adapt basis with newly found sanpshot
-        rom_param = adapt_basis(solver_param,rom_param,Q_bar_new_solver_int)
+        # Disabling basis update based on prediction
+        # # adapt basis with newly found sanpshot
+        # rom_param = adapt_basis(solver_param,rom_param,Q_bar_new_solver_int)
     
-        # find corrected qr (projected with new basis)
-        new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
+        # # find corrected qr (projected with new basis)
+        # new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
 
-        # update states 
-        corrected_cent_norm = rom_param['basis'] @ new_qr
-        rom_param['F'][:,-1]   = corrected_cent_norm
-        rom_param['Q_R'][:,-1] = new_qr
+        # # update states 
+        # corrected_cent_norm = rom_param['basis'] @ new_qr
+        # rom_param['F'][:,-1]   = corrected_cent_norm
+        # rom_param['Q_R'][:,-1] = new_qr
 
         # Not sure if this is needed, we are already computing the true solution with FOM (Maybe useful for future prediction but not for regular time step)
         # # find new solution 
@@ -471,7 +462,8 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
             rom_param['future_state'] = snapshot_state(state)
 
         # Restore to the saved states and update only future values
-        state = restore_state
+        state.clear()
+        state.update(restore_state)
         solver_param.clear()
         solver_param.update(restore_solver)
     
@@ -730,9 +722,15 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             Q_prim_FOM = state['Q_prim'].copy()
 
             # Restore the states
-            state = restore_state
-            solver_param = restore_solver
-            rom_param = restore_rom
+            # state = restore_state
+            # solver_param = restore_solver
+            # rom_param = restore_rom
+            state.clear()
+            state.update(restore_state)
+            solver_param.clear()
+            solver_param.update(restore_solver)
+            rom_param.clear()
+            rom_param.update(restore_rom)
             # state['Q_cons'] = Q_cons_save.copy()
             # state['Q_prim'] = Q_prim_save.copy()
             # solver_param['hyper'] = hyper_save
@@ -854,8 +852,13 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             Q_prim_proj_error = np.abs(Q_prim_FOM - state['Q_prim'])
 
             # Restore the states
-            state = restore_state
-            solver_param = restore_solver
+            # state = restore_state
+            # solver_param = restore_solver
+            state.clear()
+            state.update(restore_state)
+            solver_param.clear()
+            solver_param.update(restore_solver)
+            
 
             # Reshape the error vectors to extract specific variables
             Q_cons_interp_error_reshape = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons_interp_error)[:,2:-2]
