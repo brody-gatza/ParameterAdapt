@@ -13,6 +13,13 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
 
+
+
+# Uniform computational-cell volume.
+# Change this value if the computational-cell volume changes.
+CELL_VOLUME = 0.000144
+
+
 def load_common_data(fom_dir, rom_dir):
     """
     Load FOM and ROM files for all common iterations.
@@ -404,6 +411,296 @@ def plot_histories_to_pdf(
 
 
 
+
+
+
+def load_common_conservative_data(fom_dir, rom_dir, iterations):
+    """
+    Load FOM and ROM conservative-state files for the supplied iterations.
+
+    Expected filename:
+        {iteration}iteration_cons.npy
+
+    Expected shape of each file:
+        (conservative_variable, cell)
+
+    Returned data shape:
+        (time, conservative_variable, cell)
+    """
+    pattern = re.compile(r"^(\d+)iteration_cons\.npy$")
+
+    def find_files(directory):
+        files = {}
+        for filename in os.listdir(directory):
+            match = pattern.match(filename)
+            if match:
+                iteration = int(match.group(1))
+                files[iteration] = os.path.join(directory, filename)
+        return files
+
+    fom_files = find_files(fom_dir)
+    rom_files = find_files(rom_dir)
+
+    missing_fom = [
+        int(iteration)
+        for iteration in iterations
+        if int(iteration) not in fom_files
+    ]
+    missing_rom = [
+        int(iteration)
+        for iteration in iterations
+        if int(iteration) not in rom_files
+    ]
+
+    if missing_fom or missing_rom:
+        message = [
+            "Conservative files are not available for every common "
+            "primitive-data iteration."
+        ]
+        if missing_fom:
+            message.append(
+                "Missing FOM conservative iterations: "
+                + ", ".join(str(value) for value in missing_fom[:20])
+            )
+            if len(missing_fom) > 20:
+                message.append(
+                    f"Also missing {len(missing_fom) - 20} additional "
+                    "FOM conservative files."
+                )
+        if missing_rom:
+            message.append(
+                "Missing ROM conservative iterations: "
+                + ", ".join(str(value) for value in missing_rom[:20])
+            )
+            if len(missing_rom) > 20:
+                message.append(
+                    f"Also missing {len(missing_rom) - 20} additional "
+                    "ROM conservative files."
+                )
+        raise FileNotFoundError("\n".join(message))
+
+    fom_conservative_data = np.array([
+        np.load(fom_files[int(iteration)])
+        for iteration in iterations
+    ])
+    rom_conservative_data = np.array([
+        np.load(rom_files[int(iteration)])
+        for iteration in iterations
+    ])
+
+    if fom_conservative_data.shape != rom_conservative_data.shape:
+        raise ValueError(
+            "FOM and ROM conservative data shapes do not match.\n"
+            f"FOM conservative shape: {fom_conservative_data.shape}\n"
+            f"ROM conservative shape: {rom_conservative_data.shape}"
+        )
+
+    if fom_conservative_data.ndim != 3:
+        raise ValueError(
+            "Expected assembled conservative data shape "
+            "(time, conservative_variable, cell).\n"
+            f"Received shape: {fom_conservative_data.shape}"
+        )
+
+    if fom_conservative_data.shape[0] != len(iterations):
+        raise ValueError(
+            "The number of conservative time steps does not match the "
+            "number of supplied iterations.\n"
+            f"Conservative time steps: {fom_conservative_data.shape[0]}\n"
+            f"Iterations: {len(iterations)}"
+        )
+
+    if fom_conservative_data.shape[1] < 4:
+        raise ValueError(
+            "The conservative data must contain at least four fields "
+            "in this order: density, momentum density, total energy "
+            "density, and species density.\n"
+            f"Received {fom_conservative_data.shape[1]} fields."
+        )
+
+    print("============================================================")
+    print("Loaded FOM and ROM conservative data")
+    print(f"Common iterations:       {len(iterations)}")
+    print(f"First iteration:         {iterations[0]}")
+    print(f"Last iteration:          {iterations[-1]}")
+    print(f"Conservative data shape: {fom_conservative_data.shape}")
+    print("============================================================")
+
+    return fom_conservative_data, rom_conservative_data
+
+
+def compute_conservative_integral_histories(
+    fom_conservative_data,
+    rom_conservative_data,
+):
+    """
+    Compute domain-integrated conservative quantities.
+
+    Fixed conservative field order:
+        index 0: density
+        index 1: momentum density
+        index 2: total energy density
+        index 3: species density
+
+    Integration is performed across all cells at each time step.
+    """
+    if not np.isfinite(CELL_VOLUME) or CELL_VOLUME <= 0.0:
+        raise ValueError(
+            "CELL_VOLUME must be a positive finite value. "
+            f"Received: {CELL_VOLUME}"
+        )
+
+    if fom_conservative_data.shape != rom_conservative_data.shape:
+        raise ValueError(
+            "FOM and ROM conservative data shapes do not match.\n"
+            f"FOM shape: {fom_conservative_data.shape}\n"
+            f"ROM shape: {rom_conservative_data.shape}"
+        )
+
+    conservative_fields = {
+        "mass": 0,
+        "momentum": 1,
+        "energy": 2,
+        "species": 3,
+    }
+
+    def integrate(data, data_name):
+        if data.ndim != 3 or data.shape[1] < 4:
+            raise ValueError(
+                f"{data_name} conservative data must have shape "
+                "(time, at_least_four_variables, cell). "
+                f"Received shape: {data.shape}"
+            )
+
+        histories = {}
+        for quantity_name, variable_index in conservative_fields.items():
+            field = np.asarray(data[:, variable_index, :], dtype=np.float64)
+
+            if not np.all(np.isfinite(field)):
+                bad_times = np.flatnonzero(
+                    np.any(~np.isfinite(field), axis=1)
+                )
+                raise ValueError(
+                    f"{data_name} {quantity_name} contains non-finite "
+                    f"values at {len(bad_times)} time steps. "
+                    f"First affected time index: {int(bad_times[0])}."
+                )
+
+            histories[quantity_name] = CELL_VOLUME * np.sum(
+                field,
+                axis=1,
+                dtype=np.float64,
+            )
+
+        return histories
+
+    fom_integrals = integrate(fom_conservative_data, "FOM")
+    rom_integrals = integrate(rom_conservative_data, "ROM")
+
+    number_of_cells = fom_conservative_data.shape[2]
+    represented_volume = CELL_VOLUME * number_of_cells
+
+    print("============================================================")
+    print("Computed domain-integrated conservative quantities")
+    print(f"Cell volume:              {CELL_VOLUME:.16g}")
+    print(f"Number of cells:          {number_of_cells}")
+    print(f"Total represented volume: {represented_volume:.16g}")
+    print("Conservative variable order:")
+    print("  0: density")
+    print("  1: momentum density")
+    print("  2: total energy density")
+    print("  3: species density")
+    print("============================================================")
+
+    return fom_integrals, rom_integrals
+
+
+def plot_conservative_integral_histories_to_pdf(
+    iterations,
+    fom_integrals,
+    rom_integrals,
+    pdf,
+):
+    """Append integrated mass, momentum, energy, and species plots."""
+    plot_definitions = (
+        ("mass", "Domain-integrated mass", "Total mass"),
+        ("momentum", "Domain-integrated momentum", "Total momentum"),
+        ("energy", "Domain-integrated energy", "Total energy"),
+        ("species", "Domain-integrated species mass", "Total species mass"),
+    )
+
+    iterations = np.asarray(iterations, dtype=float)
+
+    print("============================================================")
+    print("Appending domain-integrated conservative histories")
+    print("============================================================")
+
+    with nullcontext(pdf) as pdf:
+        for key, title, y_label in plot_definitions:
+            fom_values = np.asarray(fom_integrals[key], dtype=float)
+            rom_values = np.asarray(rom_integrals[key], dtype=float)
+
+            if fom_values.shape != iterations.shape:
+                raise ValueError(
+                    f"FOM {key} history shape {fom_values.shape} does not "
+                    f"match iteration shape {iterations.shape}."
+                )
+            if rom_values.shape != iterations.shape:
+                raise ValueError(
+                    f"ROM {key} history shape {rom_values.shape} does not "
+                    f"match iteration shape {iterations.shape}."
+                )
+
+            fig, axis = plt.subplots(figsize=(10, 6))
+            axis.plot(
+                iterations,
+                fom_values,
+                color="black",
+                linestyle="-",
+                linewidth=1.8,
+                label="FOM",
+            )
+            axis.plot(
+                iterations,
+                rom_values,
+                color="tab:orange",
+                linestyle="--",
+                linewidth=1.8,
+                label="ROM",
+            )
+            axis.set_xlabel("Iteration")
+            axis.set_ylabel(y_label)
+            axis.set_title(title)
+            axis.minorticks_on()
+            axis.tick_params(axis="x", which="major", length=6)
+            axis.tick_params(axis="x", which="minor", length=3)
+            axis.grid(
+                which="major",
+                axis="both",
+                linestyle="-",
+                alpha=0.35,
+            )
+            axis.grid(
+                which="minor",
+                axis="x",
+                linestyle=":",
+                alpha=0.20,
+            )
+            axis.legend(loc="best")
+            axis.ticklabel_format(
+                axis="y",
+                style="sci",
+                scilimits=(-3, 3),
+                useMathText=True,
+            )
+            fig.tight_layout()
+            pdf.savefig(fig, bbox_inches="tight")
+            plt.close(fig)
+            print(f"Added: {title}")
+
+    print("Finished appending domain-integrated conservative histories.")
+
+
 ERROR_SIGNAL_GROUPS = (
     ("Primitive Variables - Maximum Error", "prim_interp_max.txt", "primitive"),
     ("Conservative Variables - Maximum Error", "cons_interp_max.txt", "conservative"),
@@ -725,6 +1022,22 @@ def main():
         rom_data=rom_data
     )
 
+
+    fom_conservative_data, rom_conservative_data = (
+        load_common_conservative_data(
+            fom_dir=fom_dir,
+            rom_dir=rom_dir,
+            iterations=iterations,
+        )
+    )
+
+    fom_integrals, rom_integrals = (
+        compute_conservative_integral_histories(
+            fom_conservative_data=fom_conservative_data,
+            rom_conservative_data=rom_conservative_data,
+        )
+    )
+
     # The error directory is the ROM directory's sibling: <rom_dir>/../error.
     error_directory = Path(rom_dir).parent / "error"
 
@@ -736,6 +1049,14 @@ def main():
             correlation=correlation,
             field_names=field_names,
             pdf_filename=pdf_filename,
+            pdf=pdf,
+        )
+
+
+        plot_conservative_integral_histories_to_pdf(
+            iterations=iterations,
+            fom_integrals=fom_integrals,
+            rom_integrals=rom_integrals,
             pdf=pdf,
         )
 

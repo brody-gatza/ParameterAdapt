@@ -889,7 +889,7 @@ def d_flux_dx_calculator(solver_param,rom_param,state):
     return state
 
 def injection_correction(solver_param,state):
-
+    breakpoint()
     # read current states
     Q_prim      = state['Q_prim']
     Q_prim_user = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
@@ -1078,7 +1078,7 @@ def injection_correction(solver_param,state):
     # Reapply periodic BCs (important after modification)
     Q_cons_user[:, 0:2] = Q_cons_user[:, interior_end-2:interior_end]    # left ghosts from right interior
     Q_cons_user[:, -2:] = Q_cons_user[:, interior_start:interior_start+2]  # right ghosts from left interior
-    
+    breakpoint()
     state['Q_cons'] = reshape_func.results_user2solver_converter(Q_cons_user)
 
     return state
