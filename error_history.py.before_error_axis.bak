@@ -620,20 +620,8 @@ def plot_conservative_integral_histories_to_pdf(
     fom_integrals,
     rom_integrals,
     pdf,
-    tolerance=1.0e-14,
 ):
-    """
-    Append integrated mass, momentum, energy, and species plots.
-
-    The left axis shows the FOM and ROM integrated quantities.
-    The right axis shows the relative error in percent:
-
-        100 * abs(ROM - FOM) / abs(FOM)
-
-    If the absolute FOM value is less than or equal to tolerance, the
-    relative error is set to NaN to avoid division by zero or by a value
-    too close to zero.
-    """
+    """Append integrated mass, momentum, energy, and species plots."""
     plot_definitions = (
         ("mass", "Domain-integrated mass", "Total mass"),
         ("momentum", "Domain-integrated momentum", "Total momentum"),
@@ -641,17 +629,10 @@ def plot_conservative_integral_histories_to_pdf(
         ("species", "Domain-integrated species mass", "Total species mass"),
     )
 
-    if not np.isfinite(tolerance) or tolerance < 0.0:
-        raise ValueError(
-            "The conserved-quantity error tolerance must be a finite, "
-            f"nonnegative value. Received: {tolerance}"
-        )
-
     iterations = np.asarray(iterations, dtype=float)
 
     print("============================================================")
     print("Appending domain-integrated conservative histories")
-    print("The right axis shows relative FOM-ROM error in percent")
     print("============================================================")
 
     with nullcontext(pdf) as pdf:
@@ -664,43 +645,14 @@ def plot_conservative_integral_histories_to_pdf(
                     f"FOM {key} history shape {fom_values.shape} does not "
                     f"match iteration shape {iterations.shape}."
                 )
-
             if rom_values.shape != iterations.shape:
                 raise ValueError(
                     f"ROM {key} history shape {rom_values.shape} does not "
                     f"match iteration shape {iterations.shape}."
                 )
 
-            valid = (
-                np.isfinite(fom_values)
-                & np.isfinite(rom_values)
-                & (np.abs(fom_values) > tolerance)
-            )
-
-            relative_error_percent = np.full(
-                fom_values.shape,
-                np.nan,
-                dtype=float,
-            )
-
-            relative_error_percent[valid] = (
-                100.0
-                * np.abs(rom_values[valid] - fom_values[valid])
-                / np.abs(fom_values[valid])
-            )
-
-            invalid_count = np.count_nonzero(~valid)
-            if invalid_count:
-                print(
-                    f"Warning: {invalid_count} {key} error values were set "
-                    "to NaN because the FOM value was non-finite or too "
-                    "close to zero, or the ROM value was non-finite."
-                )
-
-            fig, quantity_axis = plt.subplots(figsize=(10, 6))
-            error_axis = quantity_axis.twinx()
-
-            fom_line, = quantity_axis.plot(
+            fig, axis = plt.subplots(figsize=(10, 6))
+            axis.plot(
                 iterations,
                 fom_values,
                 color="black",
@@ -708,8 +660,7 @@ def plot_conservative_integral_histories_to_pdf(
                 linewidth=1.8,
                 label="FOM",
             )
-
-            rom_line, = quantity_axis.plot(
+            axis.plot(
                 iterations,
                 rom_values,
                 color="tab:orange",
@@ -717,81 +668,37 @@ def plot_conservative_integral_histories_to_pdf(
                 linewidth=1.8,
                 label="ROM",
             )
-
-            error_line, = error_axis.plot(
-                iterations,
-                relative_error_percent,
-                color="tab:red",
-                linestyle=":",
-                linewidth=1.8,
-                label="Relative error",
-            )
-
-            quantity_axis.set_xlabel("Iteration")
-            quantity_axis.set_ylabel(y_label)
-            error_axis.set_ylabel("Relative error [%]", color="tab:red")
-            error_axis.tick_params(axis="y", labelcolor="tab:red")
-
-            quantity_axis.set_title(title)
-            quantity_axis.minorticks_on()
-            quantity_axis.tick_params(axis="x", which="major", length=6)
-            quantity_axis.tick_params(axis="x", which="minor", length=3)
-
-            quantity_axis.grid(
+            axis.set_xlabel("Iteration")
+            axis.set_ylabel(y_label)
+            axis.set_title(title)
+            axis.minorticks_on()
+            axis.tick_params(axis="x", which="major", length=6)
+            axis.tick_params(axis="x", which="minor", length=3)
+            axis.grid(
                 which="major",
                 axis="both",
                 linestyle="-",
                 alpha=0.35,
             )
-
-            quantity_axis.grid(
+            axis.grid(
                 which="minor",
                 axis="x",
                 linestyle=":",
                 alpha=0.20,
             )
-
-            quantity_axis.ticklabel_format(
+            axis.legend(loc="best")
+            axis.ticklabel_format(
                 axis="y",
                 style="sci",
                 scilimits=(-3, 3),
                 useMathText=True,
             )
-
-            error_axis.ticklabel_format(
-                axis="y",
-                style="sci",
-                scilimits=(-3, 3),
-                useMathText=True,
-            )
-
-            quantity_axis.legend(
-                handles=[fom_line, rom_line, error_line],
-                loc="best",
-            )
-
             fig.tight_layout()
             pdf.savefig(fig, bbox_inches="tight")
             plt.close(fig)
+            print(f"Added: {title}")
 
-            finite_error = relative_error_percent[
-                np.isfinite(relative_error_percent)
-            ]
-
-            if len(finite_error):
-                print(
-                    f"Added: {title}; maximum relative error: "
-                    f"{np.max(finite_error):.6e}%"
-                )
-            else:
-                print(
-                    f"Added: {title}; no finite relative-error values"
-                )
-
-    print(
-        "Finished appending domain-integrated conservative histories."
-    )
-
+    print("Finished appending domain-integrated conservative histories.")
 
 
 ERROR_SIGNAL_GROUPS = (
