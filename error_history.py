@@ -17,7 +17,9 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 # Uniform computational-cell volume.
 # Change this value if the computational-cell volume changes.
-CELL_VOLUME = 0.000144
+# CELL_VOLUME = 0.000144
+# Reported values are already multiplied by volume
+CELL_VOLUME = 1
 
 
 def load_common_data(fom_dir, rom_dir):

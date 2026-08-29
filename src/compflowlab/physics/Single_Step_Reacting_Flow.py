@@ -8,6 +8,8 @@ from scipy.interpolate import RegularGridInterpolator
 from compflowlab.utils import reshape_func
 from compflowlab.boundary_condition import bc_func
  
+import copy
+
 def prim2cons_converter(solver_param, state):
 
     num_cell = solver_param['cell_number']
@@ -889,12 +891,12 @@ def d_flux_dx_calculator(solver_param,rom_param,state):
     return state
 
 def injection_correction(solver_param,state):
-    breakpoint()
     # read current states
     Q_prim      = state['Q_prim']
     Q_prim_user = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
 
     Q_cons      = state['Q_cons']
+    Q_pre = copy.deepcopy(Q_cons)
     Q_cons_user = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
 
     rho         = Q_prim_user[0,:]
@@ -1078,8 +1080,13 @@ def injection_correction(solver_param,state):
     # Reapply periodic BCs (important after modification)
     Q_cons_user[:, 0:2] = Q_cons_user[:, interior_end-2:interior_end]    # left ghosts from right interior
     Q_cons_user[:, -2:] = Q_cons_user[:, interior_start:interior_start+2]  # right ghosts from left interior
-    breakpoint()
     state['Q_cons'] = reshape_func.results_user2solver_converter(Q_cons_user)
+
+    if solver_param['error_check']:
+        Q_inj = copy.deepcopy(state['Q_cons']) - Q_pre
+        Q_inj = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_inj)
+        Q_inj = np.sum(Q_inj[:,2:-2], axis=1)
+        state['Q_cons_inj'] += Q_inj
 
     return state
 
@@ -1147,6 +1154,11 @@ def source_calculator(solver_param,rom_param,state):
         state['source_terms'] = source_terms_int[rom_param['S_indx_solver']]
 
     state['d_flux_dx'] = state['d_flux_dx'] + state['source_terms']
+
+    if solver_param['error_check']:
+        Q_inj = np.reshape(state['source_terms'],[solver_param['num_state_var'],-1])
+        Q_inj = np.sum(Q_inj[:,2:-2], axis=1)*solver_param['dt']
+        state['Q_cons_inj'] += Q_inj
 
     return state
 

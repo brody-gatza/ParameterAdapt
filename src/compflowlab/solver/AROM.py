@@ -541,6 +541,10 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
     iter = solver_param['iter']
 
+    if solver_param['error_check']:
+        state['Q_cons_pre'] = copy.deepcopy(state['Q_cons'])
+        state['Q_cons_inj'] = np.zeros(solver_param['num_state_var'])
+        
     if iter <= int(solver_param['FOM2ROM_trans_iter']):
 
         # take FOM step for initial training
@@ -1209,5 +1213,10 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             #         rom_param['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
             #         rom_param['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
 
+    if solver_param['error_check']:
+        Q_cons_reshape = np.sum(np.reshape(state['Q_cons'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1)
+        error_cons = Q_cons_reshape - (np.sum(np.reshape(state['Q_cons_pre'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1) + state['Q_cons_inj'])
+        error_cons_perct = 100.0 * error_cons/Q_cons_reshape
+        print(error_cons_perct) 
 
     return solver_param, state, rom_param
