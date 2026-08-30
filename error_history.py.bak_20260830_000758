@@ -1017,57 +1017,50 @@ def plot_fom_rom_conservation_errors_to_pdf(
     delimiter=",",
 ):
     """
-    Append all FOM conservation-error pages, followed by all ROM pages.
+    Append separate FOM and ROM line-plot pages for each conservative variable.
 
-    Each page contains one raw conservation-error line on a logarithmic
-    y-axis. Percent-error loading and plotting code is retained below as
-    comments so it can be restored later.
+    Each conservative variable produces two PDF pages:
+        1. FOM raw value and FOM percent
+        2. ROM raw value and ROM percent
 
-    The plotted FOM history is capped by sample count so that it contains
-    no more samples than the ROM raw-error history. This does not align or
-    remove samples based on missing ROM iteration numbers.
+    Both y-axes use logarithmic scaling. Raw values and percentages are
+    converted to absolute values, and zero or non-finite samples are omitted.
+    The plotted FOM history is capped at the ROM sample count.
     """
     fom_error_directory = Path(fom_error_directory)
     rom_error_directory = Path(rom_error_directory)
 
     fom_error_iterations, fom_error_values = load_error_signal_file(
-        fom_error_directory / "error_cons.txt",
-        delimiter=delimiter,
+        fom_error_directory / "error_cons.txt", delimiter=delimiter
+    )
+    fom_percent_iterations, fom_percent_values = load_error_signal_file(
+        fom_error_directory / "error_cons_perct.txt", delimiter=delimiter
     )
     rom_error_iterations, rom_error_values = load_error_signal_file(
-        rom_error_directory / "error_cons.txt",
-        delimiter=delimiter,
+        rom_error_directory / "error_cons.txt", delimiter=delimiter
+    )
+    rom_percent_iterations, rom_percent_values = load_error_signal_file(
+        rom_error_directory / "error_cons_perct.txt", delimiter=delimiter
     )
 
-    # Percent-error loading is disabled for now. Uncomment these blocks if
-    # percent histories are added back to the conservation-error figures.
-    #
-    # fom_percent_iterations, fom_percent_values = load_error_signal_file(
-    #     fom_error_directory / "error_cons_perct.txt",
-    #     delimiter=delimiter,
-    # )
-    # rom_percent_iterations, rom_percent_values = load_error_signal_file(
-    #     rom_error_directory / "error_cons_perct.txt",
-    #     delimiter=delimiter,
-    # )
-    #
-    # if not np.array_equal(fom_error_iterations, fom_percent_iterations):
-    #     raise ValueError(
-    #         "FOM conservation-error value and percent iterations do not match."
-    #     )
-    # if not np.array_equal(rom_error_iterations, rom_percent_iterations):
-    #     raise ValueError(
-    #         "ROM conservation-error value and percent iterations do not match."
-    #     )
-    # if fom_error_values.shape != fom_percent_values.shape:
-    #     raise ValueError(
-    #         "FOM conservation-error value and percent shapes do not match."
-    #     )
-    # if rom_error_values.shape != rom_percent_values.shape:
-    #     raise ValueError(
-    #         "ROM conservation-error value and percent shapes do not match."
-    #     )
-
+    if not np.array_equal(fom_error_iterations, fom_percent_iterations):
+        raise ValueError(
+            "FOM conservation-error value and percent iterations do not match."
+        )
+    if not np.array_equal(rom_error_iterations, rom_percent_iterations):
+        raise ValueError(
+            "ROM conservation-error value and percent iterations do not match."
+        )
+    if fom_error_values.shape != fom_percent_values.shape:
+        raise ValueError(
+            "FOM conservation-error value and percent array shapes do not match: "
+            f"{fom_error_values.shape} versus {fom_percent_values.shape}"
+        )
+    if rom_error_values.shape != rom_percent_values.shape:
+        raise ValueError(
+            "ROM conservation-error value and percent array shapes do not match: "
+            f"{rom_error_values.shape} versus {rom_percent_values.shape}"
+        )
     if fom_error_values.shape[1] != rom_error_values.shape[1]:
         raise ValueError(
             "FOM and ROM conservation-error files contain different numbers "
@@ -1075,16 +1068,14 @@ def plot_fom_rom_conservation_errors_to_pdf(
             f"{fom_error_values.shape[1]} versus {rom_error_values.shape[1]}"
         )
 
-    # Convert signed errors to magnitudes for logarithmic plotting.
+    # Convert signed errors to magnitudes before using logarithmic y-axes.
     fom_error_values = np.abs(fom_error_values)
+    fom_percent_values = np.abs(fom_percent_values)
     rom_error_values = np.abs(rom_error_values)
+    rom_percent_values = np.abs(rom_percent_values)
 
-    # Percent-error preprocessing is disabled for now.
-    # fom_percent_values = np.abs(fom_percent_values)
-    # rom_percent_values = np.abs(rom_percent_values)
-
+    # Logarithmic axes require finite values strictly greater than zero.
     def positive_for_log(values):
-        """Replace values invalid for a log axis with NaN."""
         values = np.asarray(values, dtype=float)
         return np.where(
             np.isfinite(values) & (values > 0.0),
@@ -1093,35 +1084,31 @@ def plot_fom_rom_conservation_errors_to_pdf(
         )
 
     fom_error_values = positive_for_log(fom_error_values)
+    fom_percent_values = positive_for_log(fom_percent_values)
     rom_error_values = positive_for_log(rom_error_values)
+    rom_percent_values = positive_for_log(rom_percent_values)
 
-    # Percent-error log filtering is disabled for now.
-    # fom_percent_values = positive_for_log(fom_percent_values)
-    # rom_percent_values = positive_for_log(rom_percent_values)
-
-    # Keep no more FOM samples than the ROM contains. This is a sample-count
-    # cap only. It keeps the first N sorted FOM samples and does not intersect
-    # the FOM and ROM iteration-number arrays.
+    # Retain the existing requirement that FOM has no more plotted samples
+    # than ROM. Since files are sorted by iteration, this keeps the first N
+    # chronological FOM samples. The ROM data are not truncated.
     original_fom_count = len(fom_error_iterations)
     rom_count = len(rom_error_iterations)
     fom_plot_count = min(original_fom_count, rom_count)
 
     fom_error_iterations = fom_error_iterations[:fom_plot_count]
     fom_error_values = fom_error_values[:fom_plot_count, :]
-
-    # Percent-error FOM truncation is disabled for now.
-    # fom_percent_iterations = fom_percent_iterations[:fom_plot_count]
-    # fom_percent_values = fom_percent_values[:fom_plot_count, :]
+    fom_percent_iterations = fom_percent_iterations[:fom_plot_count]
+    fom_percent_values = fom_percent_values[:fom_plot_count, :]
 
     if original_fom_count > fom_plot_count:
         print(
             f"Truncated plotted FOM conservation history from "
-            f"{original_fom_count} to {fom_plot_count} samples "
-            f"to match the ROM sample count."
+            f"{original_fom_count} to {fom_plot_count} time steps "
+            f"to match the ROM history length."
         )
     else:
         print(
-            f"FOM conservation history has {original_fom_count} samples; "
+            f"FOM conservation history has {original_fom_count} time steps; "
             f"ROM has {rom_count}. No FOM truncation was needed."
         )
 
@@ -1141,10 +1128,14 @@ def plot_fom_rom_conservation_errors_to_pdf(
         field_name,
         value_iterations,
         values,
+        percent_iterations,
+        percentages,
         value_color,
+        percent_color,
     ):
-        """Add one raw-error line-history page."""
+        """Add one model/variable page with raw and percent line histories."""
         fig, value_axis = plt.subplots(figsize=(12, 7))
+        percent_axis = value_axis.twinx()
 
         value_line, = value_axis.plot(
             value_iterations,
@@ -1155,39 +1146,34 @@ def plot_fom_rom_conservation_errors_to_pdf(
             label=f"{model_name} value",
             zorder=4,
         )
-
-        # Percent-error plotting is disabled for now. To restore it, create a
-        # second axis and pass percent_iterations, percentages, and a percent
-        # color into this helper, then uncomment and adapt the block below.
-        #
-        # percent_axis = value_axis.twinx()
-        # percent_line, = percent_axis.plot(
-        #     percent_iterations,
-        #     percentages,
-        #     color=percent_color,
-        #     linestyle="--",
-        #     linewidth=1.8,
-        #     alpha=0.95,
-        #     label=f"{model_name} percent",
-        #     zorder=3,
-        # )
-        # percent_axis.set_ylabel(
-        #     "Conservation error [%]",
-        #     color=percent_color,
-        # )
-        # percent_axis.tick_params(axis="y", labelcolor=percent_color)
-        # percent_axis.set_yscale("log")
+        percent_line, = percent_axis.plot(
+            percent_iterations,
+            percentages,
+            color=percent_color,
+            linestyle="--",
+            linewidth=1.8,
+            alpha=0.95,
+            label=f"{model_name} percent",
+            zorder=3,
+        )
 
         value_axis.set_xlabel("Iteration")
         value_axis.set_ylabel(
             "Conservation error value",
             color=value_color,
         )
+        percent_axis.set_ylabel(
+            "Conservation error [%]",
+            color=percent_color,
+        )
         value_axis.tick_params(axis="y", labelcolor=value_color)
+        percent_axis.tick_params(axis="y", labelcolor=percent_color)
         value_axis.set_title(
             f"{model_name} Conservation Error History: {field_name}"
         )
+
         value_axis.set_yscale("log")
+        percent_axis.set_yscale("log")
 
         value_axis.minorticks_on()
         value_axis.tick_params(axis="x", which="major", length=6)
@@ -1205,7 +1191,7 @@ def plot_fom_rom_conservation_errors_to_pdf(
             alpha=0.20,
         )
         value_axis.legend(
-            handles=[value_line],
+            handles=[value_line, percent_line],
             loc="best",
             fontsize=9,
         )
@@ -1215,42 +1201,43 @@ def plot_fom_rom_conservation_errors_to_pdf(
         plt.close(fig)
 
     print("============================================================")
-    print("Appending grouped FOM and ROM conservation-error histories")
-    print(f"FOM pages first: {number_of_variables}")
-    print(f"ROM pages second: {number_of_variables}")
-    print("Percent-error plotting is disabled")
+    print("Appending separate FOM and ROM conservation-error histories")
+    print(f"Conservative variables: {number_of_variables}")
+    print(f"PDF pages to add: {2 * number_of_variables}")
     print("============================================================")
 
-    # Add every FOM variable page first.
     for variable_index, field_name in enumerate(field_names):
         add_model_page(
             model_name="FOM",
             field_name=field_name,
             value_iterations=fom_error_iterations,
             values=fom_error_values[:, variable_index],
+            percent_iterations=fom_percent_iterations,
+            percentages=fom_percent_values[:, variable_index],
             value_color="darkblue",
+            percent_color="lightskyblue",
         )
         print(
             f"Added FOM conservation-error page "
             f"{variable_index + 1}/{number_of_variables}: {field_name}"
         )
 
-    # Add every ROM variable page after all FOM pages.
-    for variable_index, field_name in enumerate(field_names):
         add_model_page(
             model_name="ROM",
             field_name=field_name,
             value_iterations=rom_error_iterations,
             values=rom_error_values[:, variable_index],
+            percent_iterations=rom_percent_iterations,
+            percentages=rom_percent_values[:, variable_index],
             value_color="tab:red",
+            percent_color="tab:orange",
         )
         print(
             f"Added ROM conservation-error page "
             f"{variable_index + 1}/{number_of_variables}: {field_name}"
         )
 
-    print("Finished appending grouped conservation-error histories.")
-
+    print("Finished appending separate conservation-error histories.")
 
 
 

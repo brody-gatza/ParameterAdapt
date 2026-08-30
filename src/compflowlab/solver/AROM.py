@@ -1263,7 +1263,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             #         rom_param['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
             #         rom_param['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
 
-    if solver_param['error_check']:
+    if ( solver_param['error_check'] and not ( np.any(solver_param['iter'] == solver_param['resample_iter_list']) ) ):
         Q_cons_reshape = np.sum(np.reshape(state['Q_cons'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1)
         error_cons = Q_cons_reshape - (np.sum(np.reshape(state['Q_cons_pre'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1) + state['Q_cons_inj'])
         error_cons_perct = 100.0 * error_cons/Q_cons_reshape
