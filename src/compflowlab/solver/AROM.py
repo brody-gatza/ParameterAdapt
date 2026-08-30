@@ -19,6 +19,7 @@ def snapshot_state(state):
     """
     reference_only_keys = {
         "error_output_files",
+        "conservation_error_output_files",
     }
 
     # Preserve external resources by reference.
@@ -54,9 +55,9 @@ def slope_weight(n, nm1, slope, ):
     # weight = np.where(np.abs(weight) < tol, -1, np.where(np.abs(weight) > thresh, 2, 1))
     weight = np.where(np.abs(weight) < tol, 0, np.where(np.abs(weight) > thresh, 2, 1))
 
-    
+
     # weight = np.ones_like(slope)
-    
+
     return weight
 
 def _format_array_line(iter, arr):
@@ -177,6 +178,55 @@ def _write_error_output_line(state, name, line):
     state["error_output_files"][name].write(line)
 
 
+def _open_conservation_error_output_files(state, dir_results, mode):
+    # These files are independent of the periodically evaluated ROM errors.
+    os.makedirs(dir_results, exist_ok=True)
+    state["conservation_error_output_files"] = {}
+
+    for name in ["error_cons", "error_cons_perct"]:
+        file_path = os.path.join(dir_results, name + ".txt")
+        state["conservation_error_output_files"][name] = open(
+            file_path,
+            mode,
+            buffering=1024 * 1024,
+        )
+
+    state["conservation_error_output_flush_counter"] = 0
+
+
+def _write_conservation_error_output_line(state, name, line):
+    state["conservation_error_output_files"][name].write(line)
+
+
+def _flush_conservation_error_output_files(state, force=False):
+    if "conservation_error_output_files" not in state:
+        return
+
+    flush_interval = state.get("error_output_flush_interval", 100)
+    state["conservation_error_output_flush_counter"] += 1
+
+    if force or state["conservation_error_output_flush_counter"] >= flush_interval:
+        for file in state["conservation_error_output_files"].values():
+            file.flush()
+
+        state["conservation_error_output_flush_counter"] = 0
+
+
+def close_conservation_error_output_files(state):
+    if "conservation_error_output_files" not in state:
+        return
+
+    for file in state["conservation_error_output_files"].values():
+        try:
+            file.flush()
+            file.close()
+        except Exception:
+            pass
+
+    del state["conservation_error_output_files"]
+    state.pop("conservation_error_output_flush_counter", None)
+
+
 def _flush_error_output_files(state, force=False):
     if "error_output_files" not in state:
         return
@@ -229,7 +279,7 @@ def precomputer(solver_param):
     # reference profile
     q_ref = training_data_cons[:,:,-1]
 
-    # center data 
+    # center data
     centered_data = training_data_cons - q_ref[:,:,np.newaxis]
 
     # normalizing factors
@@ -267,7 +317,7 @@ def prepare_to_store_FOM(solver_param,state,rom_param):
     # prepare data to save
     state['cons_results_save'] = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],state['Q_cons'])[:,2:-2]
     state['res_save']          = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],state['d_flux_dx'])[:,2:-2]
-    
+
     if solver_param['gas_model'] == 'Air':
 
         state['prim_results_save'] = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],[state['Q_prim']])[:,2:-2]
@@ -285,7 +335,7 @@ def prepare_to_store_ROM(solver_param,state,rom_param):
     state['res_save']          = np.zeros_like(state['cons_results_save'].ravel())-1
     state['res_save'][rom_param['S_indx_solver']] = state['d_flux_dx']
     state['res_save']          = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number']-4,state['res_save'])
-    
+
     if solver_param['gas_model'] == 'Air':
 
         state['prim_results_save'] = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],[state['Q_prim']])[:,2:-2]
@@ -387,11 +437,11 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
 
             # adapt basis with newly found sanpshot
             rom_param = adapt_basis(solver_param,rom_param,Q_bar_star_new_solver_int)
-        
+
             # find corrected qr (projected with new basis)
             new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
 
-            # update states 
+            # update states
             corrected_cent_norm = rom_param['basis'] @ new_qr
             rom_param['F'][:,-1]   = corrected_cent_norm
             rom_param['Q_R'][:,-1] = new_qr
@@ -408,7 +458,7 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
             # prepare results to save
             state = prepare_to_store_FOM(solver_param,state,rom_param)
 
-            # save the data 
+            # save the data
             if solver_param['iter'] % solver_param['save_interval'] == 0:
 
                 results_recorder_ROM(solver_param,state,rom_param)
@@ -424,7 +474,7 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
         state = physics.residual_calculator(solver_param,rom_param,state)
         state = time_integration.advance_time(solver_param,rom_param,state,physics)
 
-        if solver_param['injection']: 
+        if solver_param['injection']:
 
             state = physics.injection_correction(solver_param,state)
 
@@ -442,17 +492,17 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
         # Disabling basis update based on prediction
         # # adapt basis with newly found sanpshot
         # rom_param = adapt_basis(solver_param,rom_param,Q_bar_new_solver_int)
-    
+
         # # find corrected qr (projected with new basis)
         # new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
 
-        # # update states 
+        # # update states
         # corrected_cent_norm = rom_param['basis'] @ new_qr
         # rom_param['F'][:,-1]   = corrected_cent_norm
         # rom_param['Q_R'][:,-1] = new_qr
 
         # Not sure if this is needed, we are already computing the true solution with FOM (Maybe useful for future prediction but not for regular time step)
-        # # find new solution 
+        # # find new solution
         # Q_tilda_correct_solver_int = q_ref + (denormalizor * corrected_cent_norm)
         # Q_tilda_correct_solver_full= reshape_func.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int)
         # state['Q_cons'] = Q_tilda_correct_solver_full
@@ -466,7 +516,7 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
         state.update(restore_state)
         solver_param.clear()
         solver_param.update(restore_solver)
-    
+
     # Otherwise, compute the next time step
     else:
 
@@ -477,7 +527,7 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
         state = physics.residual_calculator(solver_param,rom_param,state)
         state = time_integration.advance_time(solver_param,rom_param,state,physics)
 
-        if solver_param['injection']: 
+        if solver_param['injection']:
 
             state = physics.injection_correction(solver_param,state)
 
@@ -493,11 +543,11 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
 
         # adapt basis with newly found sanpshot
         rom_param = adapt_basis(solver_param,rom_param,Q_bar_new_solver_int)
-    
+
         # find corrected qr (projected with new basis)
         new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
 
-        # update states 
+        # update states
         corrected_cent_norm = rom_param['basis'] @ new_qr
         rom_param['F'][:,-1]   = corrected_cent_norm
         rom_param['Q_R'][:,-1] = new_qr
@@ -520,7 +570,7 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
         # prepare results to save
         state = prepare_to_store_FOM(solver_param,state,rom_param)
 
-        # save the data 
+        # save the data
         if solver_param['iter'] % solver_param['save_interval'] == 0:
 
             results_recorder_ROM(solver_param,state,rom_param)
@@ -544,7 +594,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
     if solver_param['error_check']:
         state['Q_cons_pre'] = copy.deepcopy(state['Q_cons'])
         state['Q_cons_inj'] = np.zeros(solver_param['num_state_var'])
-        
+
     if iter <= int(solver_param['FOM2ROM_trans_iter']):
 
         # take FOM step for initial training
@@ -716,7 +766,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             # prepare results to save
             state = prepare_to_store_FOM(solver_param,state,rom_param)
 
-            # save the data 
+            # save the data
             if solver_param['iter'] % solver_param['save_interval'] == 0:
 
                 results_recorder_FOM_error(solver_param,state,rom_param)
@@ -767,7 +817,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             decen_norm_Q_bar_new_sampling           = normalizor[rom_param['S_indx_solver']]*(Q_bar_new_sampling-q_ref[rom_param['S_indx_solver']])
             C                                       = np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver']]) @ decen_norm_Q_bar_new_sampling
             Q_bar_new_solver_int                    = q_ref + (denormalizor * (rom_param['basis'] @ C ))
-            
+
             if solver_param['injection']:
 
                 Q_bar_new_solver_full               = reshape_func.solver_add_ghost(solver_param['cell_number'],
@@ -782,13 +832,13 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                                                                             solver_param['num_state_var'],
                                                                             Q_bar_new_solver_full)
 
-            # adapt basis with newly found sanpshot 
+            # adapt basis with newly found sanpshot
             rom_param = adapt_basis(solver_param,rom_param,Q_bar_new_solver_int)
-        
+
             # find corrected qr (projected with new basis)
             new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
 
-            # update states 
+            # update states
             corrected_cent_norm    = rom_param['basis'] @ new_qr
             rom_param['F'][:,-1]   = corrected_cent_norm
             rom_param['Q_R'][:,-1] = new_qr
@@ -815,7 +865,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             # prepare results to save
             state = prepare_to_store_ROM(solver_param,state,rom_param)
 
-            # save the data 
+            # save the data
             if solver_param['iter'] % solver_param['save_interval'] == 0:
 
                 results_recorder_ROM(solver_param,state,rom_param)
@@ -829,7 +879,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             Q_cons_interp_error = np.abs(Q_cons_FOM - state['Q_cons'])
             Q_prim_interp_error = np.abs(Q_prim_FOM - state['Q_prim'])
 
-            # Calculate the projection error 
+            # Calculate the projection error
             Q_cons_FOM_int = normalizor * (reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_cons_FOM) - q_ref)
             Q_cons_FOM_int_proj = denormalizor * (rom_param['basis'] @ (rom_param['basis'].T @ Q_cons_FOM_int)) + q_ref
             Q_cons_FOM_proj = reshape_func.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_cons_FOM_int_proj)
@@ -862,7 +912,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             state.update(restore_state)
             solver_param.clear()
             solver_param.update(restore_solver)
-            
+
 
             # Reshape the error vectors to extract specific variables
             Q_cons_interp_error_reshape = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons_interp_error)[:,2:-2]
@@ -1217,6 +1267,36 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
         Q_cons_reshape = np.sum(np.reshape(state['Q_cons'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1)
         error_cons = Q_cons_reshape - (np.sum(np.reshape(state['Q_cons_pre'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1) + state['Q_cons_inj'])
         error_cons_perct = 100.0 * error_cons/Q_cons_reshape
-        print(error_cons_perct) 
+
+        # This is outside the periodically skipped interpolation/projection
+        # error block, so both values are exported at every timestep.
+        dir_results = os.path.join(solver_param["dir_results"], "error")
+
+        if "conservation_error_output_files" not in state:
+            state["error_output_flush_interval"] = solver_param.get(
+                "error_output_flush_interval",
+                100,
+            )
+            output_mode = solver_param.get(
+                "conservation_error_output_mode",
+                "w",
+            )
+            _open_conservation_error_output_files(
+                state,
+                dir_results,
+                output_mode,
+            )
+
+        _write_conservation_error_output_line(
+            state,
+            "error_cons",
+            _format_array_line(iter, error_cons),
+        )
+        _write_conservation_error_output_line(
+            state,
+            "error_cons_perct",
+            _format_array_line(iter, error_cons_perct),
+        )
+        _flush_conservation_error_output_files(state)
 
     return solver_param, state, rom_param

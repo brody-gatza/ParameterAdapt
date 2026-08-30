@@ -8,6 +8,40 @@ from compflowlab.rom.basis_func import adapt_basis
 from compflowlab.rom.sampling_func import hyper_precompute
 
 from ..utils.classes import MovingAverage
+import copy
+
+def snapshot_state(state):
+    """
+    Create an independent snapshot of the complete mutable solver state.
+
+    Open file handles are preserved by reference because they cannot and
+    should not be deep-copied.
+    """
+    reference_only_keys = {
+        "error_output_files",
+    }
+
+    # Preserve external resources by reference.
+    preserved_references = {
+        key: state[key]
+        for key in reference_only_keys
+        if key in state
+    }
+
+    # Deep-copy everything else as one object. Copying the dictionary as one
+    # object preserves any shared references between its copied entries.
+    copyable_state = {
+        key: value
+        for key, value in state.items()
+        if key not in reference_only_keys
+    }
+
+    snapshot = copy.deepcopy(copyable_state)
+
+    # Reattach the original external resources.
+    snapshot.update(preserved_references)
+
+    return snapshot
 
 def slope_weight(n, nm1, slope, ):
     tol = 5 # 10
@@ -26,7 +60,91 @@ def slope_weight(n, nm1, slope, ):
     return weight
 
 def _format_array_line(iter, arr):
+    arr = np.atleast_1d(arr)
     return str(iter) + "," + ",".join(f"{x:.17e}" for x in arr) + "\n"
+
+
+
+def _get_error_output_base_names():
+    """
+    Base error-output names.
+
+    Every base name gets:
+        raw output
+        _short_ma
+        _long_ma
+        _ma_counter
+        _slope_counter
+        _slope_ratio
+    """
+    return [
+        "prim_interp_max",
+        "prim_interp_avg",
+        "prim_proj_max",
+        "prim_proj_avg",
+
+        "cons_interp_max",
+        "cons_interp_avg",
+        "cons_proj_max",
+        "cons_proj_avg",
+    ]
+
+
+def _get_error_output_file_names(include_sampling_freq=True):
+    """
+    Returns the complete list of error-output file keys.
+
+    This is the single source of truth used by:
+        _open_error_output_files(...)
+        _write_error_output_array_map(...)
+    """
+    base_names = _get_error_output_base_names()
+
+    file_names = []
+
+    file_names.extend(base_names)
+
+    for suffix in [
+        "_short_ma",
+        "_long_ma",
+        "_ma_counter",
+        "_ma_counter_sum",
+    ]:
+        for name in base_names:
+            file_names.append(f"{name}{suffix}")
+
+    for suffix in [
+        "_slope_counter",
+        "_slope_ratio",
+    ]:
+        for name in base_names:
+            file_names.append(f"{name}{suffix}")
+
+    if include_sampling_freq:
+        file_names.append("sampling_freq")
+
+    return file_names
+
+
+def _write_error_output_array_map(state, iter, output_array_map):
+    """
+    Write all array-based error outputs using the centralized file list.
+
+    sampling_freq is intentionally excluded because it is scalar-formatted
+    separately.
+    """
+    for name in _get_error_output_file_names(include_sampling_freq=False):
+        if name not in output_array_map:
+            raise KeyError(
+                f"Missing output array for '{name}'. "
+                "Check _get_error_output_file_names() and output_array_map."
+            )
+
+        _write_error_output_line(
+            state,
+            name,
+            _format_array_line(iter, output_array_map[name])
+        )
 
 
 def _open_error_output_files(state, dir_results, mode):
@@ -38,74 +156,7 @@ def _open_error_output_files(state, dir_results, mode):
         "a" if restarting/appending
     """
 
-    file_names = [
-        "prim_interp_max",
-        "prim_interp_avg",
-        "prim_proj_max",
-        "prim_proj_avg",
-
-        "cons_interp_max",
-        "cons_interp_avg",
-        "cons_proj_max",
-        "cons_proj_avg",
-
-        "cons_interp_max_slope_counter",
-        "cons_interp_avg_slope_counter",
-        "cons_proj_max_slope_counter",
-        "cons_proj_avg_slope_counter",
-
-        "prim_interp_max_slope_counter",
-        "prim_interp_avg_slope_counter",
-        "prim_proj_max_slope_counter",
-        "prim_proj_avg_slope_counter",
-
-        "cons_interp_max_slope_ratio",
-        "cons_interp_avg_slope_ratio",
-        "cons_proj_max_slope_ratio",
-        "cons_proj_avg_slope_ratio",
-
-        "prim_interp_max_slope_ratio",
-        "prim_interp_avg_slope_ratio",
-        "prim_proj_max_slope_ratio",
-        "prim_proj_avg_slope_ratio",
-
-        "cons_interp_max_short_ma",
-        "cons_interp_avg_short_ma",
-        "cons_proj_max_short_ma",
-        "cons_proj_avg_short_ma",
-
-        "prim_interp_max_short_ma",
-        "prim_interp_avg_short_ma",
-        "prim_proj_max_short_ma",
-        "prim_proj_avg_short_ma",
-
-        "cons_interp_max_long_ma",
-        "cons_interp_avg_long_ma",
-        "cons_proj_max_long_ma",
-        "cons_proj_avg_long_ma",
-
-        "prim_interp_max_long_ma",
-        "prim_interp_avg_long_ma",
-        "prim_proj_max_long_ma",
-        "prim_proj_avg_long_ma",
-
-        "cons_interp_max_ma_counter",
-        "cons_interp_avg_ma_counter",
-        "cons_proj_max_ma_counter",
-        "cons_proj_avg_ma_counter",
-
-        "prim_interp_max_ma_counter",
-        "prim_interp_avg_ma_counter",
-        "prim_proj_max_ma_counter",
-        "prim_proj_avg_ma_counter",
-
-        "sampling_freq",
-
-        # "full_data/cons_interp_error",
-        # "full_data/prim_interp_error",
-        # "full_data/cons_proj_error",
-        # "full_data/prim_proj_error",
-    ]
+    file_names = _get_error_output_file_names()
 
     state["error_output_files"] = {}
 
@@ -305,6 +356,180 @@ def results_recorder_ROM(solver_param,state,rom_param=None):
     np.save(os.path.join(dir_results,'samples_user'  ,f"{save_title}_samples_user.npy")   , rom_param['S_indx_user'])
     np.save(os.path.join(dir_results,'samples_solver',f"{save_title}_samples_solver.npy") , rom_param['S_indx_solver'])
 
+def update_sampling_points(solver_param,state,physics,time_integration,rom_param,sampling_adapt_freq):
+    # Compute a time step in the future if using future FGS
+    if solver_param['sampling_method'] == 'FFGS' or solver_param['sampling_method'] == 'FFGSR':
+
+        # Save the state to restore to
+        restore_solver = snapshot_state(solver_param)
+
+        # Load the previous future state and export as the field solution
+        if ( not ( solver_param['iter'] == int(solver_param['FOM2ROM_trans_iter'])) ):
+            if solver_param['sampling_method'] == 'FFGS':
+                # Load the stored future state
+                state = snapshot_state(rom_param['future_state'])
+
+            elif solver_param['sampling_method'] == 'FFGSR':
+                # Evaluate the full field
+                solver_param['hyper'] = False
+
+                # take FOM step for initial training
+                state = physics.residual_calculator(solver_param,rom_param,state)
+                state = time_integration.advance_time(solver_param,rom_param,state,physics)
+
+                # post process part
+                if solver_param['injection']:
+
+                    state = physics.injection_correction(solver_param,state)
+
+            Q_bar_star_new = state['Q_cons']
+            Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
+
+            # adapt basis with newly found sanpshot
+            rom_param = adapt_basis(solver_param,rom_param,Q_bar_star_new_solver_int)
+        
+            # find corrected qr (projected with new basis)
+            new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
+
+            # update states 
+            corrected_cent_norm = rom_param['basis'] @ new_qr
+            rom_param['F'][:,-1]   = corrected_cent_norm
+            rom_param['Q_R'][:,-1] = new_qr
+
+            # update prim state
+            state = physics.cons2prim_converter(solver_param,state)
+
+            # update the ghost cells
+            state = bc_func.update_ghost_cell(solver_param,state)
+
+            # update prim state
+            state = physics.prim2cons_converter(solver_param,state)
+
+            # prepare results to save
+            state = prepare_to_store_FOM(solver_param,state,rom_param)
+
+            # save the data 
+            if solver_param['iter'] % solver_param['save_interval'] == 0:
+
+                results_recorder_ROM(solver_param,state,rom_param)
+
+        # Save the state to restore to
+        restore_state = snapshot_state(state)
+
+        # adjust the solver parameters for taking large time step FOM
+        solver_param['hyper'] = False
+        solver_param['dt']    = sampling_adapt_freq * solver_param['dt']
+
+        # take one FOM step
+        state = physics.residual_calculator(solver_param,rom_param,state)
+        state = time_integration.advance_time(solver_param,rom_param,state,physics)
+
+        if solver_param['injection']: 
+
+            state = physics.injection_correction(solver_param,state)
+
+        Q_bar_star_new = state['Q_cons']
+        Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
+
+        # some sampling methods (ex. FGS) need this for sampling
+        rom_param['Q_bar'] = Q_bar_star_new.copy()
+
+        # reset solver parameters to samller time step setup (user defined setup)
+        # Q_bar_new_solver_int    = Q_bar_star_new_solver_int
+        solver_param['hyper']   = True
+        solver_param['dt']      = solver_param['dt'] / sampling_adapt_freq
+
+        # Disabling basis update based on prediction
+        # # adapt basis with newly found sanpshot
+        # rom_param = adapt_basis(solver_param,rom_param,Q_bar_new_solver_int)
+    
+        # # find corrected qr (projected with new basis)
+        # new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
+
+        # # update states 
+        # corrected_cent_norm = rom_param['basis'] @ new_qr
+        # rom_param['F'][:,-1]   = corrected_cent_norm
+        # rom_param['Q_R'][:,-1] = new_qr
+
+        # Not sure if this is needed, we are already computing the true solution with FOM (Maybe useful for future prediction but not for regular time step)
+        # # find new solution 
+        # Q_tilda_correct_solver_int = q_ref + (denormalizor * corrected_cent_norm)
+        # Q_tilda_correct_solver_full= reshape_func.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int)
+        # state['Q_cons'] = Q_tilda_correct_solver_full
+
+        # Save the future predicted state for writing later
+        if solver_param['sampling_method'] == 'FFGS':
+            rom_param['future_state'] = snapshot_state(state)
+
+        # Restore to the saved states and update only future values
+        state.clear()
+        state.update(restore_state)
+        solver_param.clear()
+        solver_param.update(restore_solver)
+    
+    # Otherwise, compute the next time step
+    else:
+
+        # adjust the solver parameters for regular time step FOM
+        solver_param['hyper'] = False
+
+        # take one FOM step
+        state = physics.residual_calculator(solver_param,rom_param,state)
+        state = time_integration.advance_time(solver_param,rom_param,state,physics)
+
+        if solver_param['injection']: 
+
+            state = physics.injection_correction(solver_param,state)
+
+        Q_bar_star_new = state['Q_cons'].copy()
+        Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
+
+        # some sampling methods (ex. FGS) need this for sampling
+        rom_param['Q_bar'] = Q_bar_star_new.copy()
+
+        # reset solver parameters to samller time step setup (user defined setup)
+        Q_bar_new_solver_int    = Q_bar_star_new_solver_int
+        solver_param['hyper']   = True
+
+        # adapt basis with newly found sanpshot
+        rom_param = adapt_basis(solver_param,rom_param,Q_bar_new_solver_int)
+    
+        # find corrected qr (projected with new basis)
+        new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
+
+        # update states 
+        corrected_cent_norm = rom_param['basis'] @ new_qr
+        rom_param['F'][:,-1]   = corrected_cent_norm
+        rom_param['Q_R'][:,-1] = new_qr
+
+        # BUG? Why is this called twice??
+        # # post process part
+        # if solver_param['injection']:
+
+        #     state = physics.injection_correction(solver_param,state)
+
+        # update prim state
+        state = physics.cons2prim_converter(solver_param,state)
+
+        # update the ghost cells
+        state = bc_func.update_ghost_cell(solver_param,state)
+
+        # update prim state
+        state = physics.prim2cons_converter(solver_param,state)
+
+        # prepare results to save
+        state = prepare_to_store_FOM(solver_param,state,rom_param)
+
+        # save the data 
+        if solver_param['iter'] % solver_param['save_interval'] == 0:
+
+            results_recorder_ROM(solver_param,state,rom_param)
+
+    # Update Samples
+    rom_param = hyper_precompute(solver_param,rom_param,static_basis=False)
+
+    return state, rom_param
+
 def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=None):
 
     #############################################
@@ -316,56 +541,39 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
     iter = solver_param['iter']
 
+    if solver_param['error_check']:
+        state['Q_cons_pre'] = copy.deepcopy(state['Q_cons'])
+        state['Q_cons_inj'] = np.zeros(solver_param['num_state_var'])
+        
     if iter <= int(solver_param['FOM2ROM_trans_iter']):
 
+        # take FOM step for initial training
+        state = physics.residual_calculator(solver_param,rom_param,state)
+        state = time_integration.advance_time(solver_param,rom_param,state,physics)
+
+        # post process part
+        if solver_param['injection']:
+
+            state = physics.injection_correction(solver_param,state)
+
+        # update prim state
+        state = physics.cons2prim_converter(solver_param,state)
+
+        # update the ghost cells
+        state = bc_func.update_ghost_cell(solver_param,state)
+
+        # update prim state
+        state = physics.prim2cons_converter(solver_param,state)
+
+        # prepare results to save
+        state = prepare_to_store_FOM(solver_param,state,rom_param)
+
         if iter != int(solver_param['FOM2ROM_trans_iter']):
-
-            # take FOM step for initial training
-            state = physics.residual_calculator(solver_param,rom_param,state)
-            state = time_integration.advance_time(solver_param,rom_param,state,physics)
-
-            # post process part
-            if solver_param['injection']:
-
-                state = physics.injection_correction(solver_param,state)
-
-            # update prim state
-            state = physics.cons2prim_converter(solver_param,state)
-
-            # update the ghost cells
-            state = bc_func.update_ghost_cell(solver_param,state)
-
-            # update prim state
-            state = physics.prim2cons_converter(solver_param,state)
-
-            # prepare results to save
-            state = prepare_to_store_FOM(solver_param,state,rom_param)
 
             # save solution
             results_recorder_FOM(solver_param,state,rom_param)
 
         elif iter == int(solver_param['FOM2ROM_trans_iter']):
-
-            # take one more FOM step and prepare basis and samples based on that
-            state = physics.residual_calculator(solver_param,rom_param,state)
-            state = time_integration.advance_time(solver_param,rom_param,state,physics)
-
-            # post process part
-            if solver_param['injection']:
-
-                state = physics.injection_correction(solver_param,state)
-
-            # update prim state
-            state = physics.cons2prim_converter(solver_param,state)
-
-            # update the ghost cells
-            state = bc_func.update_ghost_cell(solver_param,state)
-
-            # update prim state
-            state = physics.prim2cons_converter(solver_param,state)
-
-            # prepare results to save
-            state = prepare_to_store_FOM(solver_param,state,rom_param)
 
             # adjust the training range
             solver_param['training_start_iter'] = int(iter-solver_param['init_training_win'])
@@ -377,56 +585,113 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             rom_param = precomputer(solver_param)
 
             # create a full-state copy
-            state['Q_bar']     = state['Q_cons']
-            rom_param['Q_bar'] = state['Q_bar'] 
+            rom_param['Q_bar'] = state['Q_cons'].copy()
 
             # adjust sampling configuration
             solver_param['hyper'] = True
 
-            # find initial samples
-            rom_param = hyper_precompute(solver_param,rom_param,static_basis=False)
-
-            # create list of resampling time steps
+            # manually specify resampling time steps
             if solver_param['multi_samp']:
-                solver_param['resample_iter_list'] = np.unique(np.concatenate((
-                                                     np.arange(
-                                                         solver_param['FOM2ROM_trans_iter'],
-                                                         solver_param['multi_samp_iter'],
-                                                         solver_param['unsampled_update_freq'],
-                                                         dtype=int
-                                                     ),
-                                                     np.arange(
-                                                         solver_param['multi_samp_iter'],
-                                                         solver_param['num_step'],
-                                                         solver_param['unsampled_update_freq_2'],
-                                                         dtype=int
-                                                     ))))
+
+                block_size = 5000
+
+                for i in range(2, 50):
+                    if i == 2:
+                        block_start = solver_param['FOM2ROM_trans_iter']
+                    else:
+                        block_start = actual_block_end
+                    nominal_block_end = (i - 1) * block_size
+
+                    # Move nominal_block_end forward until it lands on the sampling schedule
+                    remainder = (nominal_block_end - block_start) % i
+
+                    if remainder == 0:
+                        actual_block_end = nominal_block_end
+                    else:
+                        actual_block_end = nominal_block_end + (i - remainder)
+
+                    # Optional but recommended: do not go past num_step
+                    actual_block_end = min(actual_block_end, solver_param['num_step'])
+
+                    sampling_list = np.arange(
+                        block_start,
+                        actual_block_end,
+                        i,
+                        dtype=int
+                    )
+
+                    if i == 2:
+                        solver_param['resample_iter_list'] = sampling_list
+                    else:
+                        solver_param['resample_iter_list'] = np.append(
+                            solver_param['resample_iter_list'],
+                            sampling_list
+                        )
+
+                    if actual_block_end >= solver_param['num_step']:
+                        break
+
+                solver_param['resample_iter_list'] = np.unique(solver_param['resample_iter_list'])
+                sampling_adapt_freq = 2
+
+            elif solver_param['force_FOM']:
+                start_FOM = 86000
+                end_FOM =   96000
+                solver_param['resample_iter_list'] = np.arange(solver_param['FOM2ROM_trans_iter'],
+                                                               start_FOM,
+                                                               solver_param['unsampled_update_freq'],dtype=int)
+                sampling_adapt_freq = solver_param['unsampled_update_freq']
+
+                solver_param['resample_iter_list'] = np.append(solver_param['resample_iter_list'],np.arange(start_FOM,
+                                                               end_FOM,
+                                                               1,dtype=int))
+                sampling_adapt_freq = solver_param['unsampled_update_freq']
+
+                solver_param['resample_iter_list'] = np.append(solver_param['resample_iter_list'],np.arange(end_FOM,
+                                                               solver_param['num_step'],
+                                                               solver_param['unsampled_update_freq'],dtype=int))
+                sampling_adapt_freq = solver_param['unsampled_update_freq']
+
+
             else:
                 solver_param['resample_iter_list'] = np.arange(solver_param['FOM2ROM_trans_iter'],
                                                                solver_param['num_step'],
                                                                solver_param['unsampled_update_freq'],dtype=int)
+                sampling_adapt_freq = solver_param['unsampled_update_freq']
+
+            # find initial samples
+            if solver_param['sampling_method'] == 'FFGS' or solver_param['sampling_method'] == 'FFGSR':
+                state, rom_param = update_sampling_points(solver_param,state,physics,time_integration,rom_param,sampling_adapt_freq)
+            else:
+                rom_param = hyper_precompute(solver_param,rom_param,static_basis=False)
 
             # save ROM related param
             results_recorder_trans(solver_param,state,rom_param)
 
     else:
-
         # read basic parameters
         q_ref                  = rom_param['q_ref']
         normalizor             = rom_param['norm']
         denormalizor           = rom_param['denorm']
 
         # Q tilda (ROM) before any update
-        Q_tilda_old            = state['Q_cons']
+        Q_tilda_old            = state['Q_cons'].copy()
         Q_tilda_old_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_old)
 
         # This routine evalutes the FOM based on the current time step to calculate ROM errors
-        if solver_param['error_check']:
+        if ( solver_param['error_check'] and not ( np.any(solver_param['iter'] == solver_param['resample_iter_list']) ) ):
+        # if ( solver_param['error_check']):
+
+            # Save the ROM state to restore to
+            restore_state = snapshot_state(state)
+            restore_solver = snapshot_state(solver_param)
+            restore_rom = snapshot_state(rom_param)
+
+            # Q_cons_save = state['Q_cons'].copy()
+            # Q_prim_save = state['Q_prim'].copy()
+            # hyper_save = solver_param['hyper']
 
             # disable hyper-reduction so the FOM is fully evaluated
-            Q_cons_save = state['Q_cons']
-            Q_prim_save = state['Q_prim']
-            hyper_save = solver_param['hyper']
             solver_param['hyper'] = False
 
             # take one FOM step
@@ -456,97 +721,37 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
                 results_recorder_FOM_error(solver_param,state,rom_param)
 
-            # reset solver parameters and store the FOM solution
-            Q_cons_FOM = state['Q_cons']
-            Q_prim_FOM = state['Q_prim']
-            state['Q_cons'] = Q_cons_save
-            state['Q_prim'] = Q_prim_save
-            solver_param['hyper'] = hyper_save
+            # Store the FOM solution
+            Q_cons_FOM = state['Q_cons'].copy()
+            Q_prim_FOM = state['Q_prim'].copy()
 
-        # it must be decided to whether to a large time step FOM to update whole domain or 
-        # perform a normal time step ROM
-        if solver_param['multi_samp']:
-            if solver_param['iter'] >= solver_param['multi_samp_iter']:
-                sampling_adapt_freq = solver_param['unsampled_update_freq_2']
-            else:
-                sampling_adapt_freq = solver_param['unsampled_update_freq']
+            # Restore the states
+            # state = restore_state
+            # solver_param = restore_solver
+            # rom_param = restore_rom
+            state.clear()
+            state.update(restore_state)
+            solver_param.clear()
+            solver_param.update(restore_solver)
+            rom_param.clear()
+            rom_param.update(restore_rom)
+            # state['Q_cons'] = Q_cons_save.copy()
+            # state['Q_prim'] = Q_prim_save.copy()
+            # solver_param['hyper'] = hyper_save
+
+        # Update the sampling frequency to reflect the current value if using multi_samp
+        if solver_param['multi_samp'] or solver_param['force_FOM']:
+            iter_ind = np.where(solver_param['resample_iter_list'] == iter)[0]
+            if iter_ind.size > 0:
+                sampling_adapt_freq = solver_param['resample_iter_list'][iter_ind + 1] - solver_param['resample_iter_list'][iter_ind]
+                sampling_adapt_freq = int(sampling_adapt_freq[0])
+                solver_param['unsampled_update_freq'] = sampling_adapt_freq
         else:
             sampling_adapt_freq = solver_param['unsampled_update_freq']
 
-        # condition for large time step FOM
-        # if (sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0):
+        # Compute FOM a time step to update the sampling points and ROM basis
         if np.any(solver_param['iter'] == solver_param['resample_iter_list']):
-
-            # adjust the solver parameters for taking large time step FOM
-            Q_bar_star_old        = state['Q_bar']
-            solver_param['hyper'] = False
-            solver_param['dt']    = sampling_adapt_freq * solver_param['dt']
-            state['Q_cons']       = Q_bar_star_old
-
-            # take one FOM step
-            state = physics.residual_calculator(solver_param,rom_param,state)
-            state = time_integration.advance_time(solver_param,rom_param,state,physics)
-
-            if solver_param['injection']: 
-
-                state = physics.injection_correction(solver_param,state)
-
-            Q_bar_star_new = state['Q_cons']
-            Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
-            
-            # update the large time step state 
-            state['Q_bar'] = Q_bar_star_new
-
-            # some sampling methods (ex. FGS) need this for sampling
-            rom_param['Q_bar'] = state['Q_bar']
-
-            # hold new solution
-            Q_bar_star_new            = state['Q_cons']
-            Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
-
-            # reset solver parameters to samller time step setup (user defined setup)
-            # Q_bar_new_sampling      = Q_bar_star_new_solver_int[rom_param['S_indx_solver']]
-            Q_bar_new_solver_int    = Q_bar_star_new_solver_int
-            solver_param['hyper']   = True
-            solver_param['dt']      = solver_param['dt'] / sampling_adapt_freq
-
-            # adapt basis with newly found sanpshot
-            rom_param = adapt_basis(solver_param,rom_param,Q_bar_new_solver_int)
-        
-            # find corrected qr (projected with new basis)
-            new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
-
-            # update states 
-            corrected_cent_norm = rom_param['basis'] @ new_qr
-            rom_param['F'][:,-1]   = corrected_cent_norm
-            rom_param['Q_R'][:,-1] = new_qr
-
-            # find new solution 
-            Q_tilda_correct_solver_int = q_ref + (denormalizor * corrected_cent_norm)
-            Q_tilda_correct_solver_full= reshape_func.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int)
-            state['Q_cons'] = Q_tilda_correct_solver_full
-
-            # post process part
-            if solver_param['injection']:
-
-                state = physics.injection_correction(solver_param,state)
-
-            # update prim state
-            state = physics.cons2prim_converter(solver_param,state)
-
-            # update the ghost cells
-            state = bc_func.update_ghost_cell(solver_param,state)
-
-            # update prim state
-            state = physics.prim2cons_converter(solver_param,state)
-
-            # prepare results to save
-            state = prepare_to_store_FOM(solver_param,state,rom_param)
-
-            # save the data 
-            if solver_param['iter'] % solver_param['save_interval'] == 0:
-
-                results_recorder_ROM(solver_param,state,rom_param)
+            state, rom_param = update_sampling_points(solver_param,state,physics,time_integration,rom_param,sampling_adapt_freq)
 
         # Run ROM at small time step (user defined dt)
         else:
@@ -616,10 +821,11 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 results_recorder_ROM(solver_param,state,rom_param)
 
         # Error checking routines
-        if solver_param['error_check']:
+        if ( solver_param['error_check'] and not ( np.any(solver_param['iter'] == solver_param['resample_iter_list']) ) ):
+        # if ( solver_param['error_check'] ):
 
             # Calculate the interpolation error
-            # Crude, inclues FOM evaluations at sampled points but should be good enough
+            # Not technically interpolation error, more like overall ROM error
             Q_cons_interp_error = np.abs(Q_cons_FOM - state['Q_cons'])
             Q_prim_interp_error = np.abs(Q_prim_FOM - state['Q_prim'])
 
@@ -629,9 +835,9 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             Q_cons_FOM_proj = reshape_func.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_cons_FOM_int_proj)
             Q_cons_proj_error = np.abs(Q_cons_FOM - Q_cons_FOM_proj)
 
-            # Save the ROM states
-            Q_cons_save = state['Q_cons']
-            Q_prim_save = state['Q_prim']
+            # Save the ROM state to restore to
+            restore_state = snapshot_state(state)
+            restore_solver = snapshot_state(solver_param)
 
             # Convert the projected FOM to primitive variables
             state['Q_cons'] = Q_cons_FOM_proj
@@ -649,9 +855,14 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
             Q_prim_proj_error = np.abs(Q_prim_FOM - state['Q_prim'])
 
-            # Reset the the ROM states
-            state['Q_cons'] = Q_cons_save
-            state['Q_prim'] = Q_prim_save
+            # Restore the states
+            # state = restore_state
+            # solver_param = restore_solver
+            state.clear()
+            state.update(restore_state)
+            solver_param.clear()
+            solver_param.update(restore_solver)
+            
 
             # Reshape the error vectors to extract specific variables
             Q_cons_interp_error_reshape = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons_interp_error)[:,2:-2]
@@ -684,29 +895,26 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             # prim_proj_min = np.min(Q_prim_proj_error_reshape, axis=1)
             prim_proj_avg = np.mean(Q_prim_proj_error_reshape, axis=1)
 
-            # Compute moving averages
-
-
             # Write the error values
             dir_results = os.path.join(solver_param["dir_results"], "error")
             if iter == int(solver_param['FOM2ROM_trans_iter']) + 1:
                 # Creates new files or clears existing files
                 mode = "w"
 
-                state["error_output_flush_interval"] = solver_param.get("error_output_flush_interval", 100)
+                rom_param["error_output_flush_interval"] = solver_param.get("error_output_flush_interval", 100)
 
-                if "error_output_files" not in state:
-                    _open_error_output_files(state, dir_results, mode)
+                if "error_output_files" not in rom_param:
+                    _open_error_output_files(rom_param, dir_results, mode)
 
-                state['cons_interp_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
-                state['cons_interp_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
-                state['cons_proj_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
-                state['cons_proj_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                rom_param['cons_interp_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                rom_param['cons_interp_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                rom_param['cons_proj_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                rom_param['cons_proj_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
 
-                state['prim_interp_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
-                state['prim_interp_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
-                state['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
-                state['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                rom_param['prim_interp_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                rom_param['prim_interp_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                rom_param['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                rom_param['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
 
                 cons_interp_max_slope_ratio = np.zeros_like(cons_interp_max)
                 cons_interp_avg_slope_ratio = np.zeros_like(cons_interp_avg)
@@ -722,456 +930,248 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 short_ma_window = 25
                 long_ma_window = 100
 
-                state['cons_interp_max_short_ma']   = MovingAverage(short_ma_window, solver_param['num_state_var'])
-                state['cons_interp_max_long_ma']    = MovingAverage(long_ma_window,  solver_param['num_state_var'])
-                state['cons_interp_max_ma_counter'] = np.zeros(solver_param['num_state_var'])
+                rom_param['cons_interp_max_short_ma']   = MovingAverage(short_ma_window, solver_param['num_state_var'])
+                rom_param['cons_interp_max_long_ma']    = MovingAverage(long_ma_window,  solver_param['num_state_var'])
+                rom_param['cons_interp_max_ma_counter'] = np.zeros(solver_param['num_state_var'])
 
-                state['cons_interp_avg_short_ma']   = MovingAverage(short_ma_window, solver_param['num_state_var'])
-                state['cons_interp_avg_long_ma']    = MovingAverage(long_ma_window,  solver_param['num_state_var'])
-                state['cons_interp_avg_ma_counter'] = np.zeros(solver_param['num_state_var'])
+                rom_param['cons_interp_avg_short_ma']   = MovingAverage(short_ma_window, solver_param['num_state_var'])
+                rom_param['cons_interp_avg_long_ma']    = MovingAverage(long_ma_window,  solver_param['num_state_var'])
+                rom_param['cons_interp_avg_ma_counter'] = np.zeros(solver_param['num_state_var'])
 
-                state['cons_proj_max_short_ma']     = MovingAverage(short_ma_window, solver_param['num_state_var'])
-                state['cons_proj_max_long_ma']      = MovingAverage(long_ma_window,  solver_param['num_state_var'])
-                state['cons_proj_max_ma_counter']   = np.zeros(solver_param['num_state_var'])
+                rom_param['cons_proj_max_short_ma']     = MovingAverage(short_ma_window, solver_param['num_state_var'])
+                rom_param['cons_proj_max_long_ma']      = MovingAverage(long_ma_window,  solver_param['num_state_var'])
+                rom_param['cons_proj_max_ma_counter']   = np.zeros(solver_param['num_state_var'])
 
-                state['cons_proj_avg_short_ma']     = MovingAverage(short_ma_window, solver_param['num_state_var'])
-                state['cons_proj_avg_long_ma']      = MovingAverage(long_ma_window,  solver_param['num_state_var'])
-                state['cons_proj_avg_ma_counter']   = np.zeros(solver_param['num_state_var'])
+                rom_param['cons_proj_avg_short_ma']     = MovingAverage(short_ma_window, solver_param['num_state_var'])
+                rom_param['cons_proj_avg_long_ma']      = MovingAverage(long_ma_window,  solver_param['num_state_var'])
+                rom_param['cons_proj_avg_ma_counter']   = np.zeros(solver_param['num_state_var'])
 
-                state['prim_interp_max_short_ma']   = MovingAverage(short_ma_window, solver_param['num_prim_var'])
-                state['prim_interp_max_long_ma']    = MovingAverage(long_ma_window,  solver_param['num_prim_var'])
-                state['prim_interp_max_ma_counter'] = np.zeros(solver_param['num_prim_var'])
+                rom_param['prim_interp_max_short_ma']   = MovingAverage(short_ma_window, solver_param['num_prim_var'])
+                rom_param['prim_interp_max_long_ma']    = MovingAverage(long_ma_window,  solver_param['num_prim_var'])
+                rom_param['prim_interp_max_ma_counter'] = np.zeros(solver_param['num_prim_var'])
 
-                state['prim_interp_avg_short_ma']   = MovingAverage(short_ma_window, solver_param['num_prim_var'])
-                state['prim_interp_avg_long_ma']    = MovingAverage(long_ma_window,  solver_param['num_prim_var'])
-                state['prim_interp_avg_ma_counter'] = np.zeros(solver_param['num_prim_var'])
+                rom_param['prim_interp_avg_short_ma']   = MovingAverage(short_ma_window, solver_param['num_prim_var'])
+                rom_param['prim_interp_avg_long_ma']    = MovingAverage(long_ma_window,  solver_param['num_prim_var'])
+                rom_param['prim_interp_avg_ma_counter'] = np.zeros(solver_param['num_prim_var'])
 
-                state['prim_proj_max_short_ma']     = MovingAverage(short_ma_window, solver_param['num_prim_var'])
-                state['prim_proj_max_long_ma']      = MovingAverage(long_ma_window,  solver_param['num_prim_var'])
-                state['prim_proj_max_ma_counter']   = np.zeros(solver_param['num_prim_var'])
+                rom_param['prim_proj_max_short_ma']     = MovingAverage(short_ma_window, solver_param['num_prim_var'])
+                rom_param['prim_proj_max_long_ma']      = MovingAverage(long_ma_window,  solver_param['num_prim_var'])
+                rom_param['prim_proj_max_ma_counter']   = np.zeros(solver_param['num_prim_var'])
 
-                state['prim_proj_avg_short_ma']     = MovingAverage(short_ma_window, solver_param['num_prim_var'])
-                state['prim_proj_avg_long_ma']      = MovingAverage(long_ma_window,  solver_param['num_prim_var'])
-                state['prim_proj_avg_ma_counter']   = np.zeros(solver_param['num_prim_var'])
+                rom_param['prim_proj_avg_short_ma']     = MovingAverage(short_ma_window, solver_param['num_prim_var'])
+                rom_param['prim_proj_avg_long_ma']      = MovingAverage(long_ma_window,  solver_param['num_prim_var'])
+                rom_param['prim_proj_avg_ma_counter']   = np.zeros(solver_param['num_prim_var'])
 
             else:
                 # Files should already be open. If they are not, open in append mode.
                 mode = "a"
 
-                if "error_output_files" not in state:
-                    state["error_output_flush_interval"] = solver_param.get("error_output_flush_interval", 100)
-                    _open_error_output_files(state, dir_results, mode)
+                if "error_output_files" not in rom_param:
+                    rom_param["error_output_flush_interval"] = solver_param.get("error_output_flush_interval", 100)
+                    _open_error_output_files(rom_param, dir_results, mode)
 
                 # Compute the error slope
-                cons_interp_max_slope = cons_interp_max - state['cons_interp_max_store']
-                cons_interp_avg_slope = cons_interp_avg - state['cons_interp_avg_store']
-                cons_proj_max_slope = cons_proj_max - state['cons_proj_max_store']
-                cons_proj_avg_slope = cons_proj_avg - state['cons_proj_avg_store']
+                cons_interp_max_slope = cons_interp_max - rom_param['cons_interp_max_store']
+                cons_interp_avg_slope = cons_interp_avg - rom_param['cons_interp_avg_store']
+                cons_proj_max_slope = cons_proj_max - rom_param['cons_proj_max_store']
+                cons_proj_avg_slope = cons_proj_avg - rom_param['cons_proj_avg_store']
 
-                prim_interp_max_slope = prim_interp_max - state['prim_interp_max_store']
-                prim_interp_avg_slope = prim_interp_avg - state['prim_interp_avg_store']
-                prim_proj_max_slope = prim_proj_max - state['prim_proj_max_store']
-                prim_proj_avg_slope = prim_proj_avg - state['prim_proj_avg_store']
+                prim_interp_max_slope = prim_interp_max - rom_param['prim_interp_max_store']
+                prim_interp_avg_slope = prim_interp_avg - rom_param['prim_interp_avg_store']
+                prim_proj_max_slope = prim_proj_max - rom_param['prim_proj_max_store']
+                prim_proj_avg_slope = prim_proj_avg - rom_param['prim_proj_avg_store']
 
                 # Find the sign and add to the counter
-                # state['cons_interp_max_slope_counter'] += np.sign(cons_interp_max_slope)
-                # state['cons_interp_avg_slope_counter'] += np.sign(cons_interp_avg_slope)
-                # state['cons_proj_max_slope_counter'] += np.sign(cons_proj_max_slope)
-                # state['cons_proj_avg_slope_counter'] += np.sign(cons_proj_avg_slope)
+                # rom_param['cons_interp_max_slope_counter'] += np.sign(cons_interp_max_slope)
+                # rom_param['cons_interp_avg_slope_counter'] += np.sign(cons_interp_avg_slope)
+                # rom_param['cons_proj_max_slope_counter'] += np.sign(cons_proj_max_slope)
+                # rom_param['cons_proj_avg_slope_counter'] += np.sign(cons_proj_avg_slope)
 
-                # state['prim_interp_max_slope_counter'] += np.sign(prim_interp_max_slope)
-                # state['prim_interp_avg_slope_counter'] += np.sign(prim_interp_avg_slope)
-                # state['prim_proj_max_slope_counter'] += np.sign(prim_proj_max_slope)
-                # state['prim_proj_avg_slope_counter'] += np.sign(prim_proj_avg_slope)
+                # rom_param['prim_interp_max_slope_counter'] += np.sign(prim_interp_max_slope)
+                # rom_param['prim_interp_avg_slope_counter'] += np.sign(prim_interp_avg_slope)
+                # rom_param['prim_proj_max_slope_counter'] += np.sign(prim_proj_max_slope)
+                # rom_param['prim_proj_avg_slope_counter'] += np.sign(prim_proj_avg_slope)
 
-                state['cons_interp_max_slope_counter'] += np.sign(cons_interp_max_slope) * slope_weight(cons_interp_max, state['cons_interp_max_store'], cons_interp_max_slope)
-                state['cons_interp_avg_slope_counter'] += np.sign(cons_interp_avg_slope) * slope_weight(cons_interp_avg, state['cons_interp_avg_store'], cons_interp_avg_slope)
-                state['cons_proj_max_slope_counter']   += np.sign(cons_proj_max_slope)   * slope_weight(cons_proj_max,   state['cons_proj_max_store'],   cons_proj_max_slope)
-                state['cons_proj_avg_slope_counter']   += np.sign(cons_proj_avg_slope)   * slope_weight(cons_proj_avg,   state['cons_proj_avg_store'],   cons_proj_avg_slope)
+                rom_param['cons_interp_max_slope_counter'] += np.sign(cons_interp_max_slope) * slope_weight(cons_interp_max, rom_param['cons_interp_max_store'], cons_interp_max_slope)
+                rom_param['cons_interp_avg_slope_counter'] += np.sign(cons_interp_avg_slope) * slope_weight(cons_interp_avg, rom_param['cons_interp_avg_store'], cons_interp_avg_slope)
+                rom_param['cons_proj_max_slope_counter']   += np.sign(cons_proj_max_slope)   * slope_weight(cons_proj_max,   rom_param['cons_proj_max_store'],   cons_proj_max_slope)
+                rom_param['cons_proj_avg_slope_counter']   += np.sign(cons_proj_avg_slope)   * slope_weight(cons_proj_avg,   rom_param['cons_proj_avg_store'],   cons_proj_avg_slope)
 
-                state['prim_interp_max_slope_counter'] += np.sign(prim_interp_max_slope) * slope_weight(prim_interp_max, state['prim_interp_max_store'], prim_interp_max_slope)
-                state['prim_interp_avg_slope_counter'] += np.sign(prim_interp_avg_slope) * slope_weight(prim_interp_avg, state['prim_interp_avg_store'], prim_interp_avg_slope)
-                state['prim_proj_max_slope_counter']   += np.sign(prim_proj_max_slope)   * slope_weight(prim_proj_max,   state['prim_proj_max_store'],   prim_proj_max_slope)
-                state['prim_proj_avg_slope_counter']   += np.sign(prim_proj_avg_slope)   * slope_weight(prim_proj_avg,   state['prim_proj_avg_store'],   prim_proj_avg_slope)
+                rom_param['prim_interp_max_slope_counter'] += np.sign(prim_interp_max_slope) * slope_weight(prim_interp_max, rom_param['prim_interp_max_store'], prim_interp_max_slope)
+                rom_param['prim_interp_avg_slope_counter'] += np.sign(prim_interp_avg_slope) * slope_weight(prim_interp_avg, rom_param['prim_interp_avg_store'], prim_interp_avg_slope)
+                rom_param['prim_proj_max_slope_counter']   += np.sign(prim_proj_max_slope)   * slope_weight(prim_proj_max,   rom_param['prim_proj_max_store'],   prim_proj_max_slope)
+                rom_param['prim_proj_avg_slope_counter']   += np.sign(prim_proj_avg_slope)   * slope_weight(prim_proj_avg,   rom_param['prim_proj_avg_store'],   prim_proj_avg_slope)
 
-                cons_interp_max_slope_ratio = np.where(cons_interp_max_slope > 0, cons_interp_max/state['cons_interp_max_store'], np.where(cons_interp_max_slope < 0, state['cons_interp_max_store']/cons_interp_max, 0))
-                cons_interp_avg_slope_ratio = np.where(cons_interp_avg_slope > 0, cons_interp_avg/state['cons_interp_avg_store'], np.where(cons_interp_avg_slope < 0, state['cons_interp_avg_store']/cons_interp_avg, 0))
-                cons_proj_max_slope_ratio   = np.where(cons_proj_max_slope   > 0, cons_proj_max/state['cons_proj_max_store'],     np.where(cons_proj_max_slope   < 0, state['cons_proj_max_store']/cons_proj_max,     0))
-                cons_proj_avg_slope_ratio   = np.where(cons_proj_avg_slope   > 0, cons_proj_avg/state['cons_proj_avg_store'],     np.where(cons_proj_avg_slope   < 0, state['cons_proj_avg_store']/cons_proj_avg,     0))
+                cons_interp_max_slope_ratio = np.where(cons_interp_max_slope > 0, cons_interp_max/rom_param['cons_interp_max_store'], np.where(cons_interp_max_slope < 0, rom_param['cons_interp_max_store']/cons_interp_max, 0))
+                cons_interp_avg_slope_ratio = np.where(cons_interp_avg_slope > 0, cons_interp_avg/rom_param['cons_interp_avg_store'], np.where(cons_interp_avg_slope < 0, rom_param['cons_interp_avg_store']/cons_interp_avg, 0))
+                cons_proj_max_slope_ratio   = np.where(cons_proj_max_slope   > 0, cons_proj_max/rom_param['cons_proj_max_store'],     np.where(cons_proj_max_slope   < 0, rom_param['cons_proj_max_store']/cons_proj_max,     0))
+                cons_proj_avg_slope_ratio   = np.where(cons_proj_avg_slope   > 0, cons_proj_avg/rom_param['cons_proj_avg_store'],     np.where(cons_proj_avg_slope   < 0, rom_param['cons_proj_avg_store']/cons_proj_avg,     0))
 
-                prim_interp_max_slope_ratio = np.where(prim_interp_max_slope > 0, prim_interp_max/state['prim_interp_max_store'], np.where(prim_interp_max_slope < 0, state['prim_interp_max_store']/prim_interp_max, 0))
-                prim_interp_avg_slope_ratio = np.where(prim_interp_avg_slope > 0, prim_interp_avg/state['prim_interp_avg_store'], np.where(prim_interp_avg_slope < 0, state['prim_interp_avg_store']/prim_interp_avg, 0))
-                prim_proj_max_slope_ratio   = np.where(prim_proj_max_slope   > 0, prim_proj_max/state['prim_proj_max_store'],     np.where(prim_proj_max_slope   < 0, state['prim_proj_max_store']/prim_proj_max,     0))
-                prim_proj_avg_slope_ratio   = np.where(prim_proj_avg_slope   > 0, prim_proj_avg/state['prim_proj_avg_store'],     np.where(prim_proj_avg_slope   < 0, state['prim_proj_avg_store']/prim_proj_avg,     0))
+                prim_interp_max_slope_ratio = np.where(prim_interp_max_slope > 0, prim_interp_max/rom_param['prim_interp_max_store'], np.where(prim_interp_max_slope < 0, rom_param['prim_interp_max_store']/prim_interp_max, 0))
+                prim_interp_avg_slope_ratio = np.where(prim_interp_avg_slope > 0, prim_interp_avg/rom_param['prim_interp_avg_store'], np.where(prim_interp_avg_slope < 0, rom_param['prim_interp_avg_store']/prim_interp_avg, 0))
+                prim_proj_max_slope_ratio   = np.where(prim_proj_max_slope   > 0, prim_proj_max/rom_param['prim_proj_max_store'],     np.where(prim_proj_max_slope   < 0, rom_param['prim_proj_max_store']/prim_proj_max,     0))
+                prim_proj_avg_slope_ratio   = np.where(prim_proj_avg_slope   > 0, prim_proj_avg/rom_param['prim_proj_avg_store'],     np.where(prim_proj_avg_slope   < 0, rom_param['prim_proj_avg_store']/prim_proj_avg,     0))
 
             # Store the current error QoIs
-            state['cons_interp_max_store'] = cons_interp_max
-            state['cons_interp_avg_store'] = cons_interp_avg
-            state['cons_proj_max_store'] = cons_proj_max
-            state['cons_proj_avg_store'] = cons_proj_avg
+            rom_param['cons_interp_max_store'] = cons_interp_max
+            rom_param['cons_interp_avg_store'] = cons_interp_avg
+            rom_param['cons_proj_max_store'] = cons_proj_max
+            rom_param['cons_proj_avg_store'] = cons_proj_avg
 
-            state['prim_interp_max_store'] = prim_interp_max
-            state['prim_interp_avg_store'] = prim_interp_avg
-            state['prim_proj_max_store'] = prim_proj_max
-            state['prim_proj_avg_store'] = prim_proj_avg
+            rom_param['prim_interp_max_store'] = prim_interp_max
+            rom_param['prim_interp_avg_store'] = prim_interp_avg
+            rom_param['prim_proj_max_store'] = prim_proj_max
+            rom_param['prim_proj_avg_store'] = prim_proj_avg
 
             ## Update the moving averages
-            state['cons_interp_max_short_ma'].update(cons_interp_max)
-            state['cons_interp_max_long_ma'].update(cons_interp_max)
+            rom_param['cons_interp_max_short_ma'].update(cons_interp_max)
+            rom_param['cons_interp_max_long_ma'].update(cons_interp_max)
 
-            state['cons_interp_avg_short_ma'].update(cons_interp_avg)
-            state['cons_interp_avg_long_ma'].update(cons_interp_avg)
+            rom_param['cons_interp_avg_short_ma'].update(cons_interp_avg)
+            rom_param['cons_interp_avg_long_ma'].update(cons_interp_avg)
 
-            state['cons_proj_max_short_ma'].update(cons_proj_max)
-            state['cons_proj_max_long_ma'].update(cons_proj_max)
+            rom_param['cons_proj_max_short_ma'].update(cons_proj_max)
+            rom_param['cons_proj_max_long_ma'].update(cons_proj_max)
 
-            state['cons_proj_avg_short_ma'].update(cons_proj_avg)
-            state['cons_proj_avg_long_ma'].update(cons_proj_avg)
+            rom_param['cons_proj_avg_short_ma'].update(cons_proj_avg)
+            rom_param['cons_proj_avg_long_ma'].update(cons_proj_avg)
 
-            state['prim_interp_max_short_ma'].update(prim_interp_max)
-            state['prim_interp_max_long_ma'].update(prim_interp_max)
+            rom_param['prim_interp_max_short_ma'].update(prim_interp_max)
+            rom_param['prim_interp_max_long_ma'].update(prim_interp_max)
 
-            state['prim_interp_avg_short_ma'].update(prim_interp_avg)
-            state['prim_interp_avg_long_ma'].update(prim_interp_avg)
+            rom_param['prim_interp_avg_short_ma'].update(prim_interp_avg)
+            rom_param['prim_interp_avg_long_ma'].update(prim_interp_avg)
 
-            state['prim_proj_max_short_ma'].update(prim_proj_max)
-            state['prim_proj_max_long_ma'].update(prim_proj_max)
+            rom_param['prim_proj_max_short_ma'].update(prim_proj_max)
+            rom_param['prim_proj_max_long_ma'].update(prim_proj_max)
 
-            state['prim_proj_avg_short_ma'].update(prim_proj_avg)
-            state['prim_proj_avg_long_ma'].update(prim_proj_avg)
+            rom_param['prim_proj_avg_short_ma'].update(prim_proj_avg)
+            rom_param['prim_proj_avg_long_ma'].update(prim_proj_avg)
 
             ## Update the moving average counter
-            state['cons_interp_max_ma_counter'] += np.sign(state['cons_interp_max_short_ma'].avg - state['cons_interp_max_long_ma'].avg)
-            state['cons_interp_avg_ma_counter'] += np.sign(state['cons_interp_avg_short_ma'].avg - state['cons_interp_avg_long_ma'].avg)
-            state['cons_proj_max_ma_counter']   += np.sign(state['cons_proj_max_short_ma'].avg   - state['cons_proj_max_long_ma'].avg)
-            state['cons_proj_avg_ma_counter']   += np.sign(state['cons_proj_avg_short_ma'].avg   - state['cons_proj_avg_long_ma'].avg)
+            rom_param['cons_interp_max_ma_counter'] += np.sign(rom_param['cons_interp_max_short_ma'].avg - rom_param['cons_interp_max_long_ma'].avg)
+            rom_param['cons_interp_avg_ma_counter'] += np.sign(rom_param['cons_interp_avg_short_ma'].avg - rom_param['cons_interp_avg_long_ma'].avg)
+            rom_param['cons_proj_max_ma_counter']   += np.sign(rom_param['cons_proj_max_short_ma'].avg   - rom_param['cons_proj_max_long_ma'].avg)
+            rom_param['cons_proj_avg_ma_counter']   += np.sign(rom_param['cons_proj_avg_short_ma'].avg   - rom_param['cons_proj_avg_long_ma'].avg)
 
-            state['prim_interp_max_ma_counter'] += np.sign(state['prim_interp_max_short_ma'].avg - state['prim_interp_max_long_ma'].avg)
-            state['prim_interp_avg_ma_counter'] += np.sign(state['prim_interp_avg_short_ma'].avg - state['prim_interp_avg_long_ma'].avg)
-            state['prim_proj_max_ma_counter']   += np.sign(state['prim_proj_max_short_ma'].avg   - state['prim_proj_max_long_ma'].avg)
-            state['prim_proj_avg_ma_counter']   += np.sign(state['prim_proj_avg_short_ma'].avg   - state['prim_proj_avg_long_ma'].avg)
+            rom_param['prim_interp_max_ma_counter'] += np.sign(rom_param['prim_interp_max_short_ma'].avg - rom_param['prim_interp_max_long_ma'].avg)
+            rom_param['prim_interp_avg_ma_counter'] += np.sign(rom_param['prim_interp_avg_short_ma'].avg - rom_param['prim_interp_avg_long_ma'].avg)
+            rom_param['prim_proj_max_ma_counter']   += np.sign(rom_param['prim_proj_max_short_ma'].avg   - rom_param['prim_proj_max_long_ma'].avg)
+            rom_param['prim_proj_avg_ma_counter']   += np.sign(rom_param['prim_proj_avg_short_ma'].avg   - rom_param['prim_proj_avg_long_ma'].avg)
+
+            rom_param['cons_interp_max_ma_counter_sum'] = np.sum(rom_param['cons_interp_max_ma_counter'])
+            rom_param['cons_interp_avg_ma_counter_sum'] = np.sum(rom_param['cons_interp_avg_ma_counter'])
+            rom_param['cons_proj_max_ma_counter_sum']   = np.sum(rom_param['cons_proj_max_ma_counter'])
+            rom_param['cons_proj_avg_ma_counter_sum']   = np.sum(rom_param['cons_proj_avg_ma_counter'])
+
+            rom_param['prim_interp_max_ma_counter_sum'] = np.sum(rom_param['prim_interp_max_ma_counter'])
+            rom_param['prim_interp_avg_ma_counter_sum'] = np.sum(rom_param['prim_interp_avg_ma_counter'])
+            rom_param['prim_proj_max_ma_counter_sum']   = np.sum(rom_param['prim_proj_max_ma_counter'])
+            rom_param['prim_proj_avg_ma_counter_sum']   = np.sum(rom_param['prim_proj_avg_ma_counter'])
 
             # # Save the current errors for gradient calculation
-            # state['Q_cons_interp_error_save'] = Q_cons_interp_error_reshape
-            # state['Q_prim_interp_error_save'] = Q_prim_interp_error_reshape
-            # state['Q_cons_proj_error_save'] = Q_cons_proj_error_reshape
-            # state['Q_prim_proj_error_save'] = Q_prim_proj_error_reshape
+            # rom_param['Q_cons_interp_error_save'] = Q_cons_interp_error_reshape
+            # rom_param['Q_prim_interp_error_save'] = Q_prim_interp_error_reshape
+            # rom_param['Q_cons_proj_error_save'] = Q_cons_proj_error_reshape
+            # rom_param['Q_prim_proj_error_save'] = Q_prim_proj_error_reshape
 
             # Write the full error vectors
             # _write_error_output_line(
-            #     state,
+            #     rom_param,
             #     "full_data/cons_interp_error",
             #     _format_array_line(iter, Q_cons_interp_error)
             # )
 
             # _write_error_output_line(
-            #     state,
+            #     rom_param,
             #     "full_data/prim_interp_error",
             #     _format_array_line(iter, Q_prim_interp_error)
             # )
 
             # _write_error_output_line(
-            #     state,
+            #     rom_param,
             #     "full_data/cons_proj_error",
             #     _format_array_line(iter, Q_cons_proj_error)
             # )
 
             # _write_error_output_line(
-            #     state,
+            #     rom_param,
             #     "full_data/prim_proj_error",
             #     _format_array_line(iter, Q_prim_proj_error)
             # )
 
 
-            # Write the QoIs
-            _write_error_output_line(state, "prim_interp_max", _format_array_line(iter, prim_interp_max))
+            # Write error-output arrays using the centralized output registry
+            qoi_data = {
+                "prim_interp_max": prim_interp_max,
+                "prim_interp_avg": prim_interp_avg,
+                "prim_proj_max":   prim_proj_max,
+                "prim_proj_avg":   prim_proj_avg,
 
-            # _write_error_output_line(state, "prim_interp_min", _format_array_line(iter, prim_interp_min))
+                "cons_interp_max": cons_interp_max,
+                "cons_interp_avg": cons_interp_avg,
+                "cons_proj_max":   cons_proj_max,
+                "cons_proj_avg":   cons_proj_avg,
+            }
 
-            _write_error_output_line(state, "prim_interp_avg", _format_array_line(iter, prim_interp_avg))
+            slope_counter_data = {
+                "cons_interp_max_slope_counter": rom_param["cons_interp_max_slope_counter"],
+                "cons_interp_avg_slope_counter": rom_param["cons_interp_avg_slope_counter"],
+                "cons_proj_max_slope_counter":   rom_param["cons_proj_max_slope_counter"],
+                "cons_proj_avg_slope_counter":   rom_param["cons_proj_avg_slope_counter"],
 
-            _write_error_output_line(state, "prim_proj_max", _format_array_line(iter, prim_proj_max))
+                "prim_interp_max_slope_counter": rom_param["prim_interp_max_slope_counter"],
+                "prim_interp_avg_slope_counter": rom_param["prim_interp_avg_slope_counter"],
+                "prim_proj_max_slope_counter":   rom_param["prim_proj_max_slope_counter"],
+                "prim_proj_avg_slope_counter":   rom_param["prim_proj_avg_slope_counter"],
+            }
 
-            # _write_error_output_line(state, "prim_proj_min", _format_array_line(iter, prim_proj_min))
+            slope_ratio_data = {
+                "cons_interp_max_slope_ratio": cons_interp_max_slope_ratio,
+                "cons_interp_avg_slope_ratio": cons_interp_avg_slope_ratio,
+                "cons_proj_max_slope_ratio":   cons_proj_max_slope_ratio,
+                "cons_proj_avg_slope_ratio":   cons_proj_avg_slope_ratio,
 
-            _write_error_output_line(state, "prim_proj_avg", _format_array_line(iter, prim_proj_avg))
+                "prim_interp_max_slope_ratio": prim_interp_max_slope_ratio,
+                "prim_interp_avg_slope_ratio": prim_interp_avg_slope_ratio,
+                "prim_proj_max_slope_ratio":   prim_proj_max_slope_ratio,
+                "prim_proj_avg_slope_ratio":   prim_proj_avg_slope_ratio,
+            }
 
-            _write_error_output_line(state, "cons_interp_max", _format_array_line(iter, cons_interp_max))
+            output_array_map = {}
 
-            # _write_error_output_line(state, "cons_interp_min", _format_array_line(iter, cons_interp_min))
+            output_array_map.update(qoi_data)
 
-            _write_error_output_line(state, "cons_interp_avg", _format_array_line(iter, cons_interp_avg))
+            for name in qoi_data:
+                output_array_map[f"{name}_short_ma"]   = rom_param[f"{name}_short_ma"].avg
+                output_array_map[f"{name}_long_ma"]    = rom_param[f"{name}_long_ma"].avg
+                output_array_map[f"{name}_ma_counter"] = rom_param[f"{name}_ma_counter"]
+                output_array_map[f"{name}_ma_counter_sum"] = rom_param[f"{name}_ma_counter_sum"]
 
-            _write_error_output_line(state, "cons_proj_max", _format_array_line(iter, cons_proj_max))
+            output_array_map.update(slope_counter_data)
+            output_array_map.update(slope_ratio_data)
 
-            # _write_error_output_line(state, "cons_proj_min", _format_array_line(iter, cons_proj_min))
-
-            _write_error_output_line(state, "cons_proj_avg", _format_array_line(iter, cons_proj_avg))
-
-            # Write the short moving averages
-            _write_error_output_line(
-                state,
-                "cons_interp_max_short_ma",
-                _format_array_line(iter, state["cons_interp_max_short_ma"].avg)
+            _write_error_output_array_map(
+                rom_param,
+                iter,
+                output_array_map,
             )
 
+            # Write sampling frequency separately because it is scalar data
             _write_error_output_line(
-                state,
-                "cons_interp_avg_short_ma",
-                _format_array_line(iter, state["cons_interp_avg_short_ma"].avg)
-            )
-
-            _write_error_output_line(
-                state,
-                "cons_proj_max_short_ma",
-                _format_array_line(iter, state["cons_proj_max_short_ma"].avg)
-            )
-
-            _write_error_output_line(
-                state,
-                "cons_proj_avg_short_ma",
-                _format_array_line(iter, state["cons_proj_avg_short_ma"].avg)
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_interp_max_short_ma",
-                _format_array_line(iter, state["prim_interp_max_short_ma"].avg)
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_interp_avg_short_ma",
-                _format_array_line(iter, state["prim_interp_avg_short_ma"].avg)
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_proj_max_short_ma",
-                _format_array_line(iter, state["prim_proj_max_short_ma"].avg)
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_proj_avg_short_ma",
-                _format_array_line(iter, state["prim_proj_avg_short_ma"].avg)
-            )
-
-
-            # Write the long moving averages
-            _write_error_output_line(
-                state,
-                "cons_interp_max_long_ma",
-                _format_array_line(iter, state["cons_interp_max_long_ma"].avg)
-            )
-
-            _write_error_output_line(
-                state,
-                "cons_interp_avg_long_ma",
-                _format_array_line(iter, state["cons_interp_avg_long_ma"].avg)
-            )
-
-            _write_error_output_line(
-                state,
-                "cons_proj_max_long_ma",
-                _format_array_line(iter, state["cons_proj_max_long_ma"].avg)
-            )
-
-            _write_error_output_line(
-                state,
-                "cons_proj_avg_long_ma",
-                _format_array_line(iter, state["cons_proj_avg_long_ma"].avg)
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_interp_max_long_ma",
-                _format_array_line(iter, state["prim_interp_max_long_ma"].avg)
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_interp_avg_long_ma",
-                _format_array_line(iter, state["prim_interp_avg_long_ma"].avg)
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_proj_max_long_ma",
-                _format_array_line(iter, state["prim_proj_max_long_ma"].avg)
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_proj_avg_long_ma",
-                _format_array_line(iter, state["prim_proj_avg_long_ma"].avg)
-            )
-
-
-            # Write the moving average counters
-            _write_error_output_line(
-                state,
-                "cons_interp_max_ma_counter",
-                _format_array_line(iter, state["cons_interp_max_ma_counter"])
-            )
-
-            _write_error_output_line(
-                state,
-                "cons_interp_avg_ma_counter",
-                _format_array_line(iter, state["cons_interp_avg_ma_counter"])
-            )
-
-            _write_error_output_line(
-                state,
-                "cons_proj_max_ma_counter",
-                _format_array_line(iter, state["cons_proj_max_ma_counter"])
-            )
-
-            _write_error_output_line(
-                state,
-                "cons_proj_avg_ma_counter",
-                _format_array_line(iter, state["cons_proj_avg_ma_counter"])
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_interp_max_ma_counter",
-                _format_array_line(iter, state["prim_interp_max_ma_counter"])
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_interp_avg_ma_counter",
-                _format_array_line(iter, state["prim_interp_avg_ma_counter"])
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_proj_max_ma_counter",
-                _format_array_line(iter, state["prim_proj_max_ma_counter"])
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_proj_avg_ma_counter",
-                _format_array_line(iter, state["prim_proj_avg_ma_counter"])
-            )
-
-            # Write the slope counters
-            _write_error_output_line(
-                state,
-                "cons_interp_max_slope_counter",
-                _format_array_line(iter, state["cons_interp_max_slope_counter"])
-            )
-
-            _write_error_output_line(
-                state,
-                "cons_interp_avg_slope_counter",
-                _format_array_line(iter, state["cons_interp_avg_slope_counter"])
-            )
-
-            _write_error_output_line(
-                state,
-                "cons_proj_max_slope_counter",
-                _format_array_line(iter, state["cons_proj_max_slope_counter"])
-            )
-
-            _write_error_output_line(
-                state,
-                "cons_proj_avg_slope_counter",
-                _format_array_line(iter, state["cons_proj_avg_slope_counter"])
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_interp_max_slope_counter",
-                _format_array_line(iter, state["prim_interp_max_slope_counter"])
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_interp_avg_slope_counter",
-                _format_array_line(iter, state["prim_interp_avg_slope_counter"])
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_proj_max_slope_counter",
-                _format_array_line(iter, state["prim_proj_max_slope_counter"])
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_proj_avg_slope_counter",
-                _format_array_line(iter, state["prim_proj_avg_slope_counter"])
-            )
-
-
-            # Write the slope ratios
-            _write_error_output_line(
-                state,
-                "cons_interp_max_slope_ratio",
-                _format_array_line(iter, cons_interp_max_slope_ratio)
-            )
-
-            _write_error_output_line(
-                state,
-                "cons_interp_avg_slope_ratio",
-                _format_array_line(iter, cons_interp_avg_slope_ratio)
-            )
-
-            _write_error_output_line(
-                state,
-                "cons_proj_max_slope_ratio",
-                _format_array_line(iter, cons_proj_max_slope_ratio)
-            )
-
-            _write_error_output_line(
-                state,
-                "cons_proj_avg_slope_ratio",
-                _format_array_line(iter, cons_proj_avg_slope_ratio)
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_interp_max_slope_ratio",
-                _format_array_line(iter, prim_interp_max_slope_ratio)
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_interp_avg_slope_ratio",
-                _format_array_line(iter, prim_interp_avg_slope_ratio)
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_proj_max_slope_ratio",
-                _format_array_line(iter, prim_proj_max_slope_ratio)
-            )
-
-            _write_error_output_line(
-                state,
-                "prim_proj_avg_slope_ratio",
-                _format_array_line(iter, prim_proj_avg_slope_ratio)
-            )
-
-
-            # Write sampling frequency
-            _write_error_output_line(
-                state,
+                rom_param,
                 "sampling_freq",
                 str(iter) + "," + str(solver_param["unsampled_update_freq"]) + "\n"
             )
 
             # Periodically flush the open file handles
-            _flush_error_output_files(state)
+            _flush_error_output_files(rom_param)
 
             # Check if the slope counter thresholds are exceeded
             # if solver_param['parameter_adapt']:
-            #     if np.any((state['prim_interp_max_slope_counter'] >= 100) | (state['prim_interp_max_slope_counter'] <= -100)):
+            #     if np.any((rom_param['prim_interp_max_slope_counter'] >= 100) | (rom_param['prim_interp_max_slope_counter'] <= -100)):
 
-            #         if np.any(state['prim_interp_max_slope_counter'] >= 100):
+            #         if np.any(rom_param['prim_interp_max_slope_counter'] >= 100):
             #             if solver_param['unsampled_update_freq'] == 2:
             #                 print('Update frequency is already at max')
             #             else:
@@ -1184,7 +1184,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             #         # Update the sampling iterations
             #         past_samples = solver_param['resample_iter_list'][solver_param['resample_iter_list'] <= iter]
 
-            #         if np.any(state['prim_interp_max_slope_counter'] >= 100):
+            #         if np.any(rom_param['prim_interp_max_slope_counter'] >= 100):
             #             # Set a sampling update at the next iteration
             #             future_samples = np.arange(
             #                 iter + 1,
@@ -1203,22 +1203,20 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             #         solver_param['resample_iter_list'] = np.concatenate((past_samples, future_samples))
 
             #         # Reset the slope counter
-            #         state['cons_interp_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
-            #         state['cons_interp_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
-            #         state['cons_proj_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
-            #         state['cons_proj_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
+            #         rom_param['cons_interp_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
+            #         rom_param['cons_interp_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
+            #         rom_param['cons_proj_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
+            #         rom_param['cons_proj_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
 
-            #         state['prim_interp_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
-            #         state['prim_interp_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
-            #         state['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
-            #         state['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+            #         rom_param['prim_interp_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+            #         rom_param['prim_interp_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+            #         rom_param['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+            #         rom_param['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
 
-
-        # Update Samples
-        # if (sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0) or (iter == int(solver_param['init_training_win'])+1):
-        # if (sampling_adapt_freq != 0 and solver_param['iter'] % sampling_adapt_freq == 0):
-        if np.any(solver_param['iter'] == solver_param['resample_iter_list']):
-
-            rom_param = hyper_precompute(solver_param,rom_param,static_basis=False)
+    if solver_param['error_check']:
+        Q_cons_reshape = np.sum(np.reshape(state['Q_cons'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1)
+        error_cons = Q_cons_reshape - (np.sum(np.reshape(state['Q_cons_pre'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1) + state['Q_cons_inj'])
+        error_cons_perct = 100.0 * error_cons/Q_cons_reshape
+        print(error_cons_perct) 
 
     return solver_param, state, rom_param

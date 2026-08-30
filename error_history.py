@@ -1009,6 +1009,186 @@ def plot_error_signals_to_pdf(
 
     print("Finished appending error-signal plots.")
 
+
+def plot_fom_rom_conservation_errors_to_pdf(
+    fom_error_directory,
+    rom_error_directory,
+    pdf,
+    delimiter=",",
+):
+    """
+    Append one figure comparing FOM and ROM conservation errors.
+
+    The left axis shows the conservation-error values from error_cons.txt.
+    The right axis shows percent errors from error_cons_perct.txt.
+    """
+    fom_error_directory = Path(fom_error_directory)
+    rom_error_directory = Path(rom_error_directory)
+
+    fom_error_iterations, fom_error_values = load_error_signal_file(
+        fom_error_directory / "error_cons.txt",
+        delimiter=delimiter,
+    )
+    fom_percent_iterations, fom_percent_values = load_error_signal_file(
+        fom_error_directory / "error_cons_perct.txt",
+        delimiter=delimiter,
+    )
+    rom_error_iterations, rom_error_values = load_error_signal_file(
+        rom_error_directory / "error_cons.txt",
+        delimiter=delimiter,
+    )
+    rom_percent_iterations, rom_percent_values = load_error_signal_file(
+        rom_error_directory / "error_cons_perct.txt",
+        delimiter=delimiter,
+    )
+
+    if not np.array_equal(fom_error_iterations, fom_percent_iterations):
+        raise ValueError(
+            "FOM conservation-error value and percent iterations do not match."
+        )
+
+    if not np.array_equal(rom_error_iterations, rom_percent_iterations):
+        raise ValueError(
+            "ROM conservation-error value and percent iterations do not match."
+        )
+
+    if fom_error_values.shape != fom_percent_values.shape:
+        raise ValueError(
+            "FOM conservation-error value and percent arrays do not match.\n"
+            f"Value shape:   {fom_error_values.shape}\n"
+            f"Percent shape: {fom_percent_values.shape}"
+        )
+
+    if rom_error_values.shape != rom_percent_values.shape:
+        raise ValueError(
+            "ROM conservation-error value and percent arrays do not match.\n"
+            f"Value shape:   {rom_error_values.shape}\n"
+            f"Percent shape: {rom_percent_values.shape}"
+        )
+
+    if fom_error_values.shape[1] != rom_error_values.shape[1]:
+        raise ValueError(
+            "FOM and ROM conservation-error files contain different numbers "
+            "of conservative variables.\n"
+            f"FOM variables: {fom_error_values.shape[1]}\n"
+            f"ROM variables: {rom_error_values.shape[1]}"
+        )
+
+    default_names = [
+        "Mass",
+        "Momentum",
+        "Energy",
+        "Species",
+    ]
+
+    number_of_variables = fom_error_values.shape[1]
+    if number_of_variables == len(default_names):
+        field_names = default_names
+    else:
+        field_names = [
+            f"Conservative field {index + 1}"
+            for index in range(number_of_variables)
+        ]
+
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    fig, value_axis = plt.subplots(figsize=(14, 8))
+    percent_axis = value_axis.twinx()
+    lines = []
+
+    for variable_index, field_name in enumerate(field_names):
+        color = colors[variable_index % len(colors)]
+
+        fom_value_line, = value_axis.plot(
+            fom_error_iterations,
+            fom_error_values[:, variable_index],
+            color=color,
+            linestyle="-",
+            linewidth=1.8,
+            label=f"FOM {field_name} value",
+        )
+        rom_value_line, = value_axis.plot(
+            rom_error_iterations,
+            rom_error_values[:, variable_index],
+            color=color,
+            linestyle=":",
+            linewidth=1.8,
+            label=f"ROM {field_name} value",
+        )
+        fom_percent_line, = percent_axis.plot(
+            fom_percent_iterations,
+            fom_percent_values[:, variable_index],
+            color=color,
+            linestyle="--",
+            linewidth=1.4,
+            alpha=0.85,
+            label=f"FOM {field_name} percent",
+        )
+        rom_percent_line, = percent_axis.plot(
+            rom_percent_iterations,
+            rom_percent_values[:, variable_index],
+            color=color,
+            linestyle="-.",
+            linewidth=1.4,
+            alpha=0.85,
+            label=f"ROM {field_name} percent",
+        )
+
+        lines.extend([
+            fom_value_line,
+            rom_value_line,
+            fom_percent_line,
+            rom_percent_line,
+        ])
+
+    value_axis.set_xlabel("Iteration")
+    value_axis.set_ylabel("Conservation error value")
+    percent_axis.set_ylabel("Conservation error [%]")
+    value_axis.set_title("FOM and ROM Conservation Error Histories")
+
+    value_axis.minorticks_on()
+    value_axis.tick_params(axis="x", which="major", length=6)
+    value_axis.tick_params(axis="x", which="minor", length=3)
+    value_axis.grid(
+        which="major",
+        axis="both",
+        linestyle="-",
+        alpha=0.35,
+    )
+    value_axis.grid(
+        which="minor",
+        axis="x",
+        linestyle=":",
+        alpha=0.20,
+    )
+
+    value_axis.ticklabel_format(
+        axis="y",
+        style="sci",
+        scilimits=(-3, 3),
+        useMathText=True,
+    )
+    percent_axis.ticklabel_format(
+        axis="y",
+        style="sci",
+        scilimits=(-3, 3),
+        useMathText=True,
+    )
+
+    value_axis.legend(
+        lines,
+        [line.get_label() for line in lines],
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.13),
+        ncol=4,
+        fontsize=8,
+    )
+
+    fig.subplots_adjust(bottom=0.28)
+    pdf.savefig(fig, bbox_inches="tight")
+    plt.close(fig)
+
+    print("Added: FOM and ROM Conservation Error Histories")
+
 def parse_arguments():
     """
     Read command-line arguments.
@@ -1133,8 +1313,10 @@ def main():
         )
     )
 
-    # The error directory is the ROM directory's sibling: <rom_dir>/../error.
-    error_directory = Path(rom_dir).parent / "error"
+    # Each error directory is a sibling of its corresponding results directory.
+    fom_error_directory = Path(fom_dir) / "error"
+    rom_error_directory = Path(rom_dir).parent / "error"
+    error_directory = rom_error_directory
 
     # Open the output PDF exactly once so every figure is written to the same file.
     with PdfPages(pdf_filename) as pdf:
@@ -1153,6 +1335,13 @@ def main():
             fom_integrals=fom_integrals,
             rom_integrals=rom_integrals,
             pdf=pdf,
+        )
+
+        plot_fom_rom_conservation_errors_to_pdf(
+            fom_error_directory=fom_error_directory,
+            rom_error_directory=rom_error_directory,
+            pdf=pdf,
+            delimiter=args.error_delimiter,
         )
 
         plot_error_signals_to_pdf(

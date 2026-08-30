@@ -896,8 +896,10 @@ def injection_correction(solver_param,state):
     Q_prim_user = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
 
     Q_cons      = state['Q_cons']
-    Q_pre = copy.deepcopy(Q_cons)
     Q_cons_user = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
+
+    if solver_param['error_check']:
+        Q_pre = copy.deepcopy(Q_cons)
 
     rho         = Q_prim_user[0,:]
     u           = Q_prim_user[1,:]    
