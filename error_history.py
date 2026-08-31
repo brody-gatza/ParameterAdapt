@@ -1014,21 +1014,28 @@ def plot_fom_rom_conservation_errors_to_pdf(
     fom_error_directory,
     rom_error_directory,
     pdf,
+    short_window=1000,
+    long_window=5000,
     delimiter=",",
 ):
     """
-    Append all FOM conservation-error pages, followed by all ROM pages.
+    Append ROM conservation-error plots with short and long moving averages.
 
-    Each page contains one raw conservation-error line on a logarithmic
-    y-axis. Percent-error loading and plotting code is retained below as
-    comments so it can be restored later.
+    Four pages are created for each conservative variable:
+        1. line plot with logarithmic y-axis
+        2. line plot with linear y-axis
+        3. scatter plot with logarithmic y-axis
+        4. scatter plot with linear y-axis
 
-    The plotted FOM history is capped by sample count so that it contains
-    no more samples than the ROM raw-error history. This does not align or
-    remove samples based on missing ROM iteration numbers.
+    FOM conservation-error data is still loaded and validated against the ROM
+    variable count, but the FOM plotting block is retained as comments and no
+    FOM conservation-error pages are added to the PDF.
     """
     fom_error_directory = Path(fom_error_directory)
     rom_error_directory = Path(rom_error_directory)
+
+    if short_window <= 0 or long_window <= 0:
+        raise ValueError("Moving-average windows must be positive integers.")
 
     fom_error_iterations, fom_error_values = load_error_signal_file(
         fom_error_directory / "error_cons.txt",
@@ -1039,35 +1046,6 @@ def plot_fom_rom_conservation_errors_to_pdf(
         delimiter=delimiter,
     )
 
-    # Percent-error loading is disabled for now. Uncomment these blocks if
-    # percent histories are added back to the conservation-error figures.
-    #
-    # fom_percent_iterations, fom_percent_values = load_error_signal_file(
-    #     fom_error_directory / "error_cons_perct.txt",
-    #     delimiter=delimiter,
-    # )
-    # rom_percent_iterations, rom_percent_values = load_error_signal_file(
-    #     rom_error_directory / "error_cons_perct.txt",
-    #     delimiter=delimiter,
-    # )
-    #
-    # if not np.array_equal(fom_error_iterations, fom_percent_iterations):
-    #     raise ValueError(
-    #         "FOM conservation-error value and percent iterations do not match."
-    #     )
-    # if not np.array_equal(rom_error_iterations, rom_percent_iterations):
-    #     raise ValueError(
-    #         "ROM conservation-error value and percent iterations do not match."
-    #     )
-    # if fom_error_values.shape != fom_percent_values.shape:
-    #     raise ValueError(
-    #         "FOM conservation-error value and percent shapes do not match."
-    #     )
-    # if rom_error_values.shape != rom_percent_values.shape:
-    #     raise ValueError(
-    #         "ROM conservation-error value and percent shapes do not match."
-    #     )
-
     if fom_error_values.shape[1] != rom_error_values.shape[1]:
         raise ValueError(
             "FOM and ROM conservation-error files contain different numbers "
@@ -1075,58 +1053,13 @@ def plot_fom_rom_conservation_errors_to_pdf(
             f"{fom_error_values.shape[1]} versus {rom_error_values.shape[1]}"
         )
 
-    # Convert signed errors to magnitudes for logarithmic plotting.
+    # Conservation errors are plotted as magnitudes. This also ensures that
+    # valid nonzero samples can be displayed on logarithmic axes.
     fom_error_values = np.abs(fom_error_values)
     rom_error_values = np.abs(rom_error_values)
 
-    # Percent-error preprocessing is disabled for now.
-    # fom_percent_values = np.abs(fom_percent_values)
-    # rom_percent_values = np.abs(rom_percent_values)
-
-    def positive_for_log(values):
-        """Replace values invalid for a log axis with NaN."""
-        values = np.asarray(values, dtype=float)
-        return np.where(
-            np.isfinite(values) & (values > 0.0),
-            values,
-            np.nan,
-        )
-
-    fom_error_values = positive_for_log(fom_error_values)
-    rom_error_values = positive_for_log(rom_error_values)
-
-    # Percent-error log filtering is disabled for now.
-    # fom_percent_values = positive_for_log(fom_percent_values)
-    # rom_percent_values = positive_for_log(rom_percent_values)
-
-    # Keep no more FOM samples than the ROM contains. This is a sample-count
-    # cap only. It keeps the first N sorted FOM samples and does not intersect
-    # the FOM and ROM iteration-number arrays.
-    original_fom_count = len(fom_error_iterations)
-    rom_count = len(rom_error_iterations)
-    fom_plot_count = min(original_fom_count, rom_count)
-
-    fom_error_iterations = fom_error_iterations[:fom_plot_count]
-    fom_error_values = fom_error_values[:fom_plot_count, :]
-
-    # Percent-error FOM truncation is disabled for now.
-    # fom_percent_iterations = fom_percent_iterations[:fom_plot_count]
-    # fom_percent_values = fom_percent_values[:fom_plot_count, :]
-
-    if original_fom_count > fom_plot_count:
-        print(
-            f"Truncated plotted FOM conservation history from "
-            f"{original_fom_count} to {fom_plot_count} samples "
-            f"to match the ROM sample count."
-        )
-    else:
-        print(
-            f"FOM conservation history has {original_fom_count} samples; "
-            f"ROM has {rom_count}. No FOM truncation was needed."
-        )
-
     default_names = ["Mass", "Momentum", "Energy", "Species"]
-    number_of_variables = fom_error_values.shape[1]
+    number_of_variables = rom_error_values.shape[1]
     field_names = (
         default_names
         if number_of_variables == len(default_names)
@@ -1136,58 +1069,92 @@ def plot_fom_rom_conservation_errors_to_pdf(
         ]
     )
 
-    def add_model_page(
-        model_name,
+    plot_variants = (
+        ("Line, logarithmic y-axis", "line", True),
+        ("Line, linear y-axis", "line", False),
+        ("Scatter, logarithmic y-axis", "scatter", True),
+        ("Scatter, linear y-axis", "scatter", False),
+    )
+
+    def add_rom_page(
         field_name,
-        value_iterations,
         values,
-        value_color,
+        short_average,
+        long_average,
+        plot_label,
+        plot_kind,
+        use_log_y,
     ):
-        """Add one raw-error line-history page."""
+        """Add one ROM raw-error plot and its two moving averages."""
         fig, value_axis = plt.subplots(figsize=(12, 7))
 
-        value_line, = value_axis.plot(
-            value_iterations,
-            values,
-            color=value_color,
+        if use_log_y:
+            raw_plot_values = np.where(
+                np.isfinite(values) & (values > 0.0), values, np.nan
+            )
+            short_plot_values = np.where(
+                np.isfinite(short_average) & (short_average > 0.0),
+                short_average,
+                np.nan,
+            )
+            long_plot_values = np.where(
+                np.isfinite(long_average) & (long_average > 0.0),
+                long_average,
+                np.nan,
+            )
+        else:
+            raw_plot_values = values
+            short_plot_values = short_average
+            long_plot_values = long_average
+
+        if plot_kind == "scatter":
+            raw_artist = value_axis.scatter(
+                rom_error_iterations,
+                raw_plot_values,
+                color="tab:red",
+                s=10,
+                alpha=0.50,
+                label="ROM value",
+                zorder=2,
+            )
+        else:
+            raw_artist, = value_axis.plot(
+                rom_error_iterations,
+                raw_plot_values,
+                color="tab:red",
+                linestyle="-",
+                linewidth=1.0,
+                alpha=0.60,
+                label="ROM value",
+                zorder=2,
+            )
+
+        short_line, = value_axis.plot(
+            rom_error_iterations,
+            short_plot_values,
+            color="darkblue",
             linestyle="-",
-            linewidth=1.8,
-            label=f"{model_name} value",
+            linewidth=2.0,
+            label=f"Moving average ({short_window})",
             zorder=4,
         )
-
-        # Percent-error plotting is disabled for now. To restore it, create a
-        # second axis and pass percent_iterations, percentages, and a percent
-        # color into this helper, then uncomment and adapt the block below.
-        #
-        # percent_axis = value_axis.twinx()
-        # percent_line, = percent_axis.plot(
-        #     percent_iterations,
-        #     percentages,
-        #     color=percent_color,
-        #     linestyle="--",
-        #     linewidth=1.8,
-        #     alpha=0.95,
-        #     label=f"{model_name} percent",
-        #     zorder=3,
-        # )
-        # percent_axis.set_ylabel(
-        #     "Conservation error [%]",
-        #     color=percent_color,
-        # )
-        # percent_axis.tick_params(axis="y", labelcolor=percent_color)
-        # percent_axis.set_yscale("log")
+        long_line, = value_axis.plot(
+            rom_error_iterations,
+            long_plot_values,
+            color="tab:green",
+            linestyle="-.",
+            linewidth=2.2,
+            label=f"Moving average ({long_window})",
+            zorder=5,
+        )
 
         value_axis.set_xlabel("Iteration")
-        value_axis.set_ylabel(
-            "Conservation error value",
-            color=value_color,
-        )
-        value_axis.tick_params(axis="y", labelcolor=value_color)
+        value_axis.set_ylabel("Conservation error magnitude")
         value_axis.set_title(
-            f"{model_name} Conservation Error History: {field_name}"
+            f"ROM Conservation Error History: {field_name}\n{plot_label}"
         )
-        value_axis.set_yscale("log")
+        if use_log_y:
+            value_axis.set_yscale("log")
 
         value_axis.minorticks_on()
         value_axis.tick_params(axis="x", which="major", length=6)
@@ -1205,7 +1172,7 @@ def plot_fom_rom_conservation_errors_to_pdf(
             alpha=0.20,
         )
         value_axis.legend(
-            handles=[value_line],
+            handles=[raw_artist, short_line, long_line],
             loc="best",
             fontsize=9,
         )
@@ -1215,46 +1182,53 @@ def plot_fom_rom_conservation_errors_to_pdf(
         plt.close(fig)
 
     print("============================================================")
-    print("Appending grouped FOM and ROM conservation-error histories")
-    print(f"FOM pages first: {number_of_variables}")
-    print(f"ROM pages second: {number_of_variables}")
-    print("Percent-error plotting is disabled")
+    print("Appending ROM conservation-error histories")
+    print("FOM conservation-error plotting is commented out")
+    print(f"ROM variables: {number_of_variables}")
+    print(f"Pages per ROM variable: {len(plot_variants)}")
+    print(f"Moving-average windows: {short_window}, {long_window}")
     print("============================================================")
 
-    # Add every FOM variable page first.
+    # FOM conservation-error plots are intentionally disabled.
+    # The former FOM plotting loop would be placed here. FOM data continues
+    # to be loaded above so the input files and conservative-variable counts
+    # are still checked.
+    #
+    # for variable_index, field_name in enumerate(field_names):
+    #     add_model_page(
+    #         model_name="FOM",
+    #         field_name=field_name,
+    #         value_iterations=fom_error_iterations,
+    #         values=fom_error_values[:, variable_index],
+    #         value_color="darkblue",
+    #     )
+
     for variable_index, field_name in enumerate(field_names):
-        add_model_page(
-            model_name="FOM",
-            field_name=field_name,
-            value_iterations=fom_error_iterations,
-            values=fom_error_values[:, variable_index],
-            value_color="darkblue",
+        values = rom_error_values[:, variable_index]
+        short_average = compute_moving_average_ignore_nan(
+            values, short_window
         )
-        print(
-            f"Added FOM conservation-error page "
-            f"{variable_index + 1}/{number_of_variables}: {field_name}"
+        long_average = compute_moving_average_ignore_nan(
+            values, long_window
         )
 
-    # Add every ROM variable page after all FOM pages.
-    for variable_index, field_name in enumerate(field_names):
-        add_model_page(
-            model_name="ROM",
-            field_name=field_name,
-            value_iterations=rom_error_iterations,
-            values=rom_error_values[:, variable_index],
-            value_color="tab:red",
-        )
-        print(
-            f"Added ROM conservation-error page "
-            f"{variable_index + 1}/{number_of_variables}: {field_name}"
-        )
+        for plot_label, plot_kind, use_log_y in plot_variants:
+            add_rom_page(
+                field_name=field_name,
+                values=values,
+                short_average=short_average,
+                long_average=long_average,
+                plot_label=plot_label,
+                plot_kind=plot_kind,
+                use_log_y=use_log_y,
+            )
+            print(
+                f"Added ROM conservation-error page "
+                f"{variable_index + 1}/{number_of_variables}: "
+                f"{field_name}, {plot_label}"
+            )
 
-    print("Finished appending grouped conservation-error histories.")
-
-
-
-
-
+    print("Finished appending ROM conservation-error histories.")
 
 
 def parse_arguments():
@@ -1409,6 +1383,8 @@ def main():
             fom_error_directory=fom_error_directory,
             rom_error_directory=rom_error_directory,
             pdf=pdf,
+            short_window=args.error_short_window,
+            long_window=args.error_long_window,
             delimiter=args.error_delimiter,
         )
 

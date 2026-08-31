@@ -19,6 +19,7 @@ def snapshot_state(state):
     """
     reference_only_keys = {
         "error_output_files",
+        "conservation_error_output_files",
     }
 
     # Preserve external resources by reference.
@@ -120,13 +121,6 @@ def _get_error_output_file_names(include_sampling_freq=True):
         for name in base_names:
             file_names.append(f"{name}{suffix}")
 
-    # Conservation errors use the same open/write/flush/close lifecycle as
-    # the other error outputs, but they do not have moving-average or slope files.
-    file_names.extend([
-        "error_cons",
-        "error_cons_perct",
-    ])
-
     if include_sampling_freq:
         file_names.append("sampling_freq")
 
@@ -182,6 +176,55 @@ def _open_error_output_files(state, dir_results, mode):
 
 def _write_error_output_line(state, name, line):
     state["error_output_files"][name].write(line)
+
+
+def _open_conservation_error_output_files(state, dir_results, mode):
+    # These files are independent of the periodically evaluated ROM errors.
+    os.makedirs(dir_results, exist_ok=True)
+    state["conservation_error_output_files"] = {}
+
+    for name in ["error_cons", "error_cons_perct"]:
+        file_path = os.path.join(dir_results, name + ".txt")
+        state["conservation_error_output_files"][name] = open(
+            file_path,
+            mode,
+            buffering=1024 * 1024,
+        )
+
+    state["conservation_error_output_flush_counter"] = 0
+
+
+def _write_conservation_error_output_line(state, name, line):
+    state["conservation_error_output_files"][name].write(line)
+
+
+def _flush_conservation_error_output_files(state, force=False):
+    if "conservation_error_output_files" not in state:
+        return
+
+    flush_interval = state.get("error_output_flush_interval", 100)
+    state["conservation_error_output_flush_counter"] += 1
+
+    if force or state["conservation_error_output_flush_counter"] >= flush_interval:
+        for file in state["conservation_error_output_files"].values():
+            file.flush()
+
+        state["conservation_error_output_flush_counter"] = 0
+
+
+def close_conservation_error_output_files(state):
+    if "conservation_error_output_files" not in state:
+        return
+
+    for file in state["conservation_error_output_files"].values():
+        try:
+            file.flush()
+            file.close()
+        except Exception:
+            pass
+
+    del state["conservation_error_output_files"]
+    state.pop("conservation_error_output_flush_counter", None)
 
 
 def _flush_error_output_files(state, force=False):
@@ -551,6 +594,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
     if solver_param['error_check']:
         state['Q_cons_pre'] = copy.deepcopy(state['Q_cons'])
         state['Q_cons_inj'] = np.zeros(solver_param['num_state_var'])
+        solver_param['resample_iter_list'] = iter
 
     if iter <= int(solver_param['FOM2ROM_trans_iter']):
 
@@ -687,6 +731,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
         # This routine evalutes the FOM based on the current time step to calculate ROM errors
         if ( solver_param['error_check'] and not ( np.any(solver_param['iter'] == solver_param['resample_iter_list']) ) ):
+        # if ( solver_param['error_check']):
 
             # Save the ROM state to restore to
             restore_state = snapshot_state(state)
@@ -828,11 +873,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
         # Error checking routines
         if ( solver_param['error_check'] and not ( np.any(solver_param['iter'] == solver_param['resample_iter_list']) ) ):
-
-            # Compute the conservation error
-            Q_cons_reshape = np.sum(np.reshape(state['Q_cons'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1)
-            error_cons = Q_cons_reshape - (np.sum(np.reshape(state['Q_cons_pre'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1) + state['Q_cons_inj'])
-            error_cons_perct = 100.0 * error_cons/Q_cons_reshape
+        # if ( solver_param['error_check'] ):
 
             # Calculate the interpolation error
             # Not technically interpolation error, more like overall ROM error
@@ -1110,7 +1151,8 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             #     _format_array_line(iter, Q_prim_proj_error)
             # )
 
-            # Write error-output arrays using the centralized output registry.
+
+            # Write error-output arrays using the centralized output registry
             qoi_data = {
                 "prim_interp_max": prim_interp_max,
                 "prim_interp_avg": prim_interp_avg,
@@ -1147,10 +1189,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 "prim_proj_avg_slope_ratio":   prim_proj_avg_slope_ratio,
             }
 
-            output_array_map = {
-                "error_cons": error_cons,
-                "error_cons_perct": error_cons_perct,
-            }
+            output_array_map = {}
 
             output_array_map.update(qoi_data)
 
@@ -1224,5 +1263,41 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             #         rom_param['prim_interp_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
             #         rom_param['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
             #         rom_param['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+
+    if ( solver_param['error_check'] and not ( np.any(solver_param['iter'] == solver_param['resample_iter_list']) ) ):
+        Q_cons_reshape = np.sum(np.reshape(state['Q_cons'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1)
+        error_cons = Q_cons_reshape - (np.sum(np.reshape(state['Q_cons_pre'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1) + state['Q_cons_inj'])
+        error_cons_perct = 100.0 * error_cons/Q_cons_reshape
+
+        # This is outside the periodically skipped interpolation/projection
+        # error block, so both values are exported at every timestep.
+        dir_results = os.path.join(solver_param["dir_results"], "error")
+
+        if "conservation_error_output_files" not in state:
+            state["error_output_flush_interval"] = solver_param.get(
+                "error_output_flush_interval",
+                100,
+            )
+            output_mode = solver_param.get(
+                "conservation_error_output_mode",
+                "w",
+            )
+            _open_conservation_error_output_files(
+                state,
+                dir_results,
+                output_mode,
+            )
+
+        _write_conservation_error_output_line(
+            state,
+            "error_cons",
+            _format_array_line(iter, error_cons),
+        )
+        _write_conservation_error_output_line(
+            state,
+            "error_cons_perct",
+            _format_array_line(iter, error_cons_perct),
+        )
+        _flush_conservation_error_output_files(state)
 
     return solver_param, state, rom_param
