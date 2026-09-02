@@ -1046,6 +1046,15 @@ def plot_fom_rom_conservation_errors_to_pdf(
         delimiter=delimiter,
     )
 
+    fom_percent_iterations, fom_percent_values = load_error_signal_file(
+        fom_error_directory / "error_cons_perct.txt",
+        delimiter=delimiter,
+    )
+    rom_percent_iterations, rom_percent_values = load_error_signal_file(
+        rom_error_directory / "error_cons_perct.txt",
+        delimiter=delimiter,
+    )
+
     if fom_error_values.shape[1] != rom_error_values.shape[1]:
         raise ValueError(
             "FOM and ROM conservation-error files contain different numbers "
@@ -1053,10 +1062,28 @@ def plot_fom_rom_conservation_errors_to_pdf(
             f"{fom_error_values.shape[1]} versus {rom_error_values.shape[1]}"
         )
 
+    if fom_percent_values.shape[1] != rom_percent_values.shape[1]:
+        raise ValueError(
+            "FOM and ROM percent conservation-error files contain different "
+            "numbers of conservative variables: "
+            f"{fom_percent_values.shape[1]} versus "
+            f"{rom_percent_values.shape[1]}"
+        )
+
+    if rom_error_values.shape[1] != rom_percent_values.shape[1]:
+        raise ValueError(
+            "ROM absolute and percent conservation-error files contain "
+            "different numbers of conservative variables: "
+            f"{rom_error_values.shape[1]} versus "
+            f"{rom_percent_values.shape[1]}"
+        )
+
     # Conservation errors are plotted as magnitudes. This also ensures that
     # valid nonzero samples can be displayed on logarithmic axes.
     fom_error_values = np.abs(fom_error_values)
     rom_error_values = np.abs(rom_error_values)
+    fom_percent_values = np.abs(fom_percent_values)
+    rom_percent_values = np.abs(rom_percent_values)
 
     default_names = ["Mass", "Momentum", "Energy", "Species"]
     number_of_variables = rom_error_values.shape[1]
@@ -1070,8 +1097,6 @@ def plot_fom_rom_conservation_errors_to_pdf(
     )
 
     plot_variants = (
-        ("Line, logarithmic y-axis", "line", True),
-        ("Line, linear y-axis", "line", False),
         ("Scatter, logarithmic y-axis", "scatter", True),
         ("Scatter, linear y-axis", "scatter", False),
     )
@@ -1084,8 +1109,13 @@ def plot_fom_rom_conservation_errors_to_pdf(
         plot_label,
         plot_kind,
         use_log_y,
+        value_iterations=None,
+        y_label="Conservation error magnitude",
+        title_prefix="ROM Conservation Error History",
     ):
-        """Add one ROM raw-error plot and its two moving averages."""
+        """Add one ROM raw-error scatter plot and two moving averages."""
+        if value_iterations is None:
+            value_iterations = rom_error_iterations
         fig, value_axis = plt.subplots(figsize=(12, 7))
 
         if use_log_y:
@@ -1109,7 +1139,7 @@ def plot_fom_rom_conservation_errors_to_pdf(
 
         if plot_kind == "scatter":
             raw_artist = value_axis.scatter(
-                rom_error_iterations,
+                value_iterations,
                 raw_plot_values,
                 color="tab:red",
                 s=10,
@@ -1119,7 +1149,7 @@ def plot_fom_rom_conservation_errors_to_pdf(
             )
         else:
             raw_artist, = value_axis.plot(
-                rom_error_iterations,
+                value_iterations,
                 raw_plot_values,
                 color="tab:red",
                 linestyle="-",
@@ -1130,7 +1160,7 @@ def plot_fom_rom_conservation_errors_to_pdf(
             )
 
         short_line, = value_axis.plot(
-            rom_error_iterations,
+            value_iterations,
             short_plot_values,
             color="darkblue",
             linestyle="-",
@@ -1139,7 +1169,7 @@ def plot_fom_rom_conservation_errors_to_pdf(
             zorder=4,
         )
         long_line, = value_axis.plot(
-            rom_error_iterations,
+            value_iterations,
             long_plot_values,
             color="tab:green",
             linestyle="-.",
@@ -1149,7 +1179,7 @@ def plot_fom_rom_conservation_errors_to_pdf(
         )
 
         value_axis.set_xlabel("Iteration")
-        value_axis.set_ylabel("Conservation error magnitude")
+        value_axis.set_ylabel(y_label)
         value_axis.set_title(
             f"ROM Conservation Error History: {field_name}\n{plot_label}"
         )
@@ -1224,6 +1254,33 @@ def plot_fom_rom_conservation_errors_to_pdf(
             )
             print(
                 f"Added ROM conservation-error page "
+                f"{variable_index + 1}/{number_of_variables}: "
+                f"{field_name}, {plot_label}"
+            )
+
+        percent_values = rom_percent_values[:, variable_index]
+        percent_short_average = compute_moving_average_ignore_nan(
+            percent_values, short_window
+        )
+        percent_long_average = compute_moving_average_ignore_nan(
+            percent_values, long_window
+        )
+
+        for plot_label, plot_kind, use_log_y in plot_variants:
+            add_rom_page(
+                field_name=field_name,
+                values=percent_values,
+                short_average=percent_short_average,
+                long_average=percent_long_average,
+                plot_label=plot_label,
+                plot_kind=plot_kind,
+                use_log_y=use_log_y,
+                value_iterations=rom_percent_iterations,
+                y_label="Conservation error [%]",
+                title_prefix="ROM Percent Conservation Error History",
+            )
+            print(
+                f"Added ROM percent conservation-error page "
                 f"{variable_index + 1}/{number_of_variables}: "
                 f"{field_name}, {plot_label}"
             )

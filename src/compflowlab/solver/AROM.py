@@ -19,6 +19,8 @@ def snapshot_state(state):
     """
     reference_only_keys = {
         "error_output_files",
+        "gas",
+        "gas_array",
     }
 
     # Preserve external resources by reference.
@@ -509,12 +511,6 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
         rom_param['F'][:,-1]   = corrected_cent_norm
         rom_param['Q_R'][:,-1] = new_qr
 
-        # BUG? Why is this called twice??
-        # # post process part
-        # if solver_param['injection']:
-
-        #     state = physics.injection_correction(solver_param,state)
-
         # update prim state
         state = physics.cons2prim_converter(solver_param,state)
 
@@ -676,6 +672,11 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             results_recorder_trans(solver_param,state,rom_param)
 
     else:
+        if solver_param['error_check']:
+            restart_state = snapshot_state(state)
+            restart_rom = snapshot_state(rom_param)
+            restart_solver = snapshot_state(solver_param)
+
         # read basic parameters
         q_ref                  = rom_param['q_ref']
         normalizor             = rom_param['norm']
@@ -831,7 +832,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
             # Compute the conservation error
             Q_cons_reshape = np.sum(np.reshape(state['Q_cons'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1)
-            error_cons = Q_cons_reshape - (np.sum(np.reshape(state['Q_cons_pre'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1) + state['Q_cons_inj'])
+            error_cons = np.abs(Q_cons_reshape - (np.sum(np.reshape(state['Q_cons_pre'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1) + state['Q_cons_inj']))
             error_cons_perct = 100.0 * error_cons/Q_cons_reshape
 
             # Calculate the interpolation error
@@ -904,6 +905,70 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             prim_proj_max = np.max(Q_prim_proj_error_reshape, axis=1)
             # prim_proj_min = np.min(Q_prim_proj_error_reshape, axis=1)
             prim_proj_avg = np.mean(Q_prim_proj_error_reshape, axis=1)
+
+            # Check if thresholds are exceeded
+            if solver_param['parameter_adapt']:
+                thresholds = np.array([2E-2,4E-1,0.003])
+                threshold_exceeded = np.any(error_cons_perct[:3] >= thresholds)
+                if (threshold_exceeded and (not (iter == int(solver_param['FOM2ROM_trans_iter']) + 1))):
+                    print('Rerunning time step with FOM')
+                    state.clear()
+                    state.update(restart_state)
+                    rom_param.clear()
+                    rom_param.update(restart_rom)
+                    solver_param.clear()
+                    solver_param.update(restart_solver)
+
+                    # adjust the solver parameters for regular time step FOM
+                    solver_param['hyper'] = False
+
+                    # take one FOM step
+                    state = physics.residual_calculator(solver_param,rom_param,state)
+                    state = time_integration.advance_time(solver_param,rom_param,state,physics)
+
+                    if solver_param['injection']:
+
+                        state = physics.injection_correction(solver_param,state)
+
+                    Q_bar_star_new = state['Q_cons'].copy()
+                    Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
+
+                    # some sampling methods (ex. FGS) need this for sampling
+                    rom_param['Q_bar'] = Q_bar_star_new.copy()
+
+                    # reset solver parameters to samller time step setup (user defined setup)
+                    Q_bar_new_solver_int    = Q_bar_star_new_solver_int
+                    solver_param['hyper']   = True
+
+                    # adapt basis with newly found sanpshot
+                    rom_param = adapt_basis(solver_param,rom_param,Q_bar_new_solver_int)
+
+                    # find corrected qr (projected with new basis)
+                    new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
+
+                    # update states
+                    corrected_cent_norm = rom_param['basis'] @ new_qr
+                    rom_param['F'][:,-1]   = corrected_cent_norm
+                    rom_param['Q_R'][:,-1] = new_qr
+
+                    # update prim state
+                    state = physics.cons2prim_converter(solver_param,state)
+
+                    # update the ghost cells
+                    state = bc_func.update_ghost_cell(solver_param,state)
+
+                    # update prim state
+                    state = physics.prim2cons_converter(solver_param,state)
+
+                    # prepare results to save
+                    state = prepare_to_store_FOM(solver_param,state,rom_param)
+
+                    # save the data
+                    if solver_param['iter'] % solver_param['save_interval'] == 0:
+
+                        results_recorder_ROM(solver_param,state,rom_param)
+
+                    return solver_param, state, rom_param
 
             # Write the error values
             dir_results = os.path.join(solver_param["dir_results"], "error")
@@ -1179,50 +1244,50 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             # Periodically flush the open file handles
             _flush_error_output_files(rom_param)
 
-            # Check if the slope counter thresholds are exceeded
+            # Check if thresholds are exceeded
             # if solver_param['parameter_adapt']:
-            #     if np.any((rom_param['prim_interp_max_slope_counter'] >= 100) | (rom_param['prim_interp_max_slope_counter'] <= -100)):
+                # if np.any((rom_param['prim_interp_max_slope_counter'] >= 100) | (rom_param['prim_interp_max_slope_counter'] <= -100)):
 
-            #         if np.any(rom_param['prim_interp_max_slope_counter'] >= 100):
-            #             if solver_param['unsampled_update_freq'] == 2:
-            #                 print('Update frequency is already at max')
-            #             else:
-            #                 solver_param['unsampled_update_freq'] -= 1
-            #         else:
-            #             solver_param['unsampled_update_freq'] += 1
+                #     if np.any(rom_param['prim_interp_max_slope_counter'] >= 100):
+                #         if solver_param['unsampled_update_freq'] == 2:
+                #             print('Update frequency is already at max')
+                #         else:
+                #             solver_param['unsampled_update_freq'] -= 1
+                #     else:
+                #         solver_param['unsampled_update_freq'] += 1
 
-            #         print('Updated the sampling frequency to', solver_param['unsampled_update_freq'])
+                #     print('Updated the sampling frequency to', solver_param['unsampled_update_freq'])
 
-            #         # Update the sampling iterations
-            #         past_samples = solver_param['resample_iter_list'][solver_param['resample_iter_list'] <= iter]
+                #     # Update the sampling iterations
+                #     past_samples = solver_param['resample_iter_list'][solver_param['resample_iter_list'] <= iter]
 
-            #         if np.any(rom_param['prim_interp_max_slope_counter'] >= 100):
-            #             # Set a sampling update at the next iteration
-            #             future_samples = np.arange(
-            #                 iter + 1,
-            #                 solver_param['num_step'],
-            #                 solver_param['unsampled_update_freq'],
-            #                 dtype=int
-            #             )
-            #         else:
-            #             future_samples = np.arange(
-            #                 iter + solver_param['unsampled_update_freq'],
-            #                 solver_param['num_step'],
-            #                 solver_param['unsampled_update_freq'],
-            #                 dtype=int
-            #             )
+                #     if np.any(rom_param['prim_interp_max_slope_counter'] >= 100):
+                #         # Set a sampling update at the next iteration
+                #         future_samples = np.arange(
+                #             iter + 1,
+                #             solver_param['num_step'],
+                #             solver_param['unsampled_update_freq'],
+                #             dtype=int
+                #         )
+                #     else:
+                #         future_samples = np.arange(
+                #             iter + solver_param['unsampled_update_freq'],
+                #             solver_param['num_step'],
+                #             solver_param['unsampled_update_freq'],
+                #             dtype=int
+                #         )
 
-            #         solver_param['resample_iter_list'] = np.concatenate((past_samples, future_samples))
+                #     solver_param['resample_iter_list'] = np.concatenate((past_samples, future_samples))
 
-            #         # Reset the slope counter
-            #         rom_param['cons_interp_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
-            #         rom_param['cons_interp_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
-            #         rom_param['cons_proj_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
-            #         rom_param['cons_proj_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                #     # Reset the slope counter
+                #     rom_param['cons_interp_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                #     rom_param['cons_interp_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                #     rom_param['cons_proj_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
+                #     rom_param['cons_proj_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
 
-            #         rom_param['prim_interp_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
-            #         rom_param['prim_interp_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
-            #         rom_param['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
-            #         rom_param['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                #     rom_param['prim_interp_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                #     rom_param['prim_interp_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                #     rom_param['prim_proj_max_slope_counter'] = np.zeros(solver_param['num_prim_var'])
+                #     rom_param['prim_proj_avg_slope_counter'] = np.zeros(solver_param['num_prim_var'])
 
     return solver_param, state, rom_param

@@ -94,7 +94,7 @@ def QDEIM_sample_point_finder(basis,num_cell):
     Q, R, P = sc.linalg.qr(basis.T, mode='full',pivoting=True)
 
     S_indx_solver = P[:m]
-
+    
     S_indx_user   = reshape_func.solver2user_indx_converter(S_indx_solver,num_cell)
 
     S_indx_user   = np.unique(S_indx_user)
@@ -234,9 +234,6 @@ def FGS_sample_point_finder(basis,num_samples,num_cell,ref_state,num_state_var):
 
     S_indx_user = QDEIM_sample_point_finder(basis,num_cell)
 
-    range_elements = np.arange(0,num_cell)
-    options2choose = np.delete(range_elements,S_indx_user)
-
     n_sample_fgs = num_samples - len(S_indx_user)
 
     if n_sample_fgs<=0:
@@ -249,12 +246,13 @@ def FGS_sample_point_finder(basis,num_samples,num_cell,ref_state,num_state_var):
     Q_future_int_user   = Q_future_solver_user[:,2:-2]
     
     ### future shock ###
+    # This is placed based on the gradient of the energy conservative terms?
     rho_bar_shock = Q_future_int_user[2,:]
 
     first_derv_density  = np.gradient(rho_bar_shock)
 
     high_grad_area_indx = np.argsort(first_derv_density)
-    high_grad_area_indx = np.delete(high_grad_area_indx,S_indx_user)
+    high_grad_area_indx = high_grad_area_indx[~np.isin(high_grad_area_indx,S_indx_user)]
 
     fgs_selected_samples = high_grad_area_indx[0:n_sample_fgs]
 
