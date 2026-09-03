@@ -249,9 +249,9 @@ def FGS_sample_point_finder(basis,num_samples,num_cell,ref_state,num_state_var):
     # This is placed based on the gradient of the energy conservative terms?
     rho_bar_shock = Q_future_int_user[2,:]
 
-    first_derv_density  = np.gradient(rho_bar_shock)
+    first_derv_density  = np.abs(np.gradient(rho_bar_shock))
 
-    high_grad_area_indx = np.argsort(first_derv_density)
+    high_grad_area_indx = np.argsort(first_derv_density)[::-1]
     high_grad_area_indx = high_grad_area_indx[~np.isin(high_grad_area_indx,S_indx_user)]
 
     fgs_selected_samples = high_grad_area_indx[0:n_sample_fgs]
