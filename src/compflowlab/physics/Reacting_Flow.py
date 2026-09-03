@@ -1188,8 +1188,12 @@ def source_calculator(solver_param,rom_param,state):
     state['d_flux_dx'] = state['d_flux_dx'] + state['source_terms']
 
     if solver_param['error_check']:
-        Q_inj = np.reshape(state['source_terms'],[solver_param['num_state_var'],-1])
-        Q_inj = np.sum(Q_inj[:,2:-2], axis=1)*solver_param['dt']
+        Q_inj = np.reshape(copy.deepcopy(state['source_terms']),[solver_param['num_state_var'],-1])
+        if solver_param['hyper'] == True:
+            Q_inj = np.sum(Q_inj, axis=1)*solver_param['dt']
+        else:
+            Q_inj = np.sum(Q_inj[:,2:-2], axis=1)*solver_param['dt']
+
         state['Q_cons_inj'] += Q_inj
 
     return state

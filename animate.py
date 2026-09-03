@@ -353,11 +353,11 @@ if __name__ == '__main__':
     # Inputs
     # ============================================================
 
-    directory = '/kuhpc/scratch/capl/b323g408/1D_RDE_matrix'
+    directory = '/kuhpc/scratch/capl/b323g408/1D_RDE_rx_matrix/verify/'
 
     # Single FOM path
     # fom_result_dir = '/kuhpc/scratch/capl/b323g408/1D_RDE/FOM_results_every'
-    fom_result_dir = '/kuhpc/scratch/capl/b323g408/1D_RDE/FOM_results/'
+    fom_result_dir = '/kuhpc/scratch/capl/b323g408/1D_RDE_rxlp/FOM_results/'
 
     # ============================================================
     # ROM case list settings
@@ -429,8 +429,10 @@ if __name__ == '__main__':
     # Uncomment this block if you want to generate s#_u# cases.
     # ------------------------------------------------------------
 
-    s_list = [0.5, 1, 2]
-    u_list = [2, 5, 10, 20, 40]
+    # s_list = [0.5, 1, 2]
+    # u_list = [2, 5, 10, 20, 40]
+    s_list = [100]
+    u_list = [5]
     rom_case_names = [f's{s_num}_u{u_num}' for s_num in s_list for u_num in u_list]
 
     # ------------------------------------------------------------
@@ -516,7 +518,7 @@ if __name__ == '__main__':
     # ============================================================
 
     start_iter = 0
-    step_iter  = 100
+    step_iter  = 1
     end_iter   = 500000
 
     step_plot  = 1
@@ -527,7 +529,7 @@ if __name__ == '__main__':
 
     x_0      = 0
     x_f      = 0.288
-    cell_num = 2000
+    cell_num = 200
 
     x_label = 'x [m]'
 
@@ -569,6 +571,41 @@ if __name__ == '__main__':
             'var_name': 'hrr',
             'y_label': 'heat release [W]'
         }
+        #         {
+        #     'var_index': 6,
+        #     'var_name': 'hrr',
+        #     'y_label': 'heat release [W]'
+        # },
+        #         {
+        #     'var_index': 7,
+        #     'var_name': 'hrr',
+        #     'y_label': 'heat release [W]'
+        # },
+        #         {
+        #     'var_index': 8,
+        #     'var_name': 'hrr',
+        #     'y_label': 'heat release [W]'
+        # },
+        #         {
+        #     'var_index': 9,
+        #     'var_name': 'hrr',
+        #     'y_label': 'heat release [W]'
+        # },
+        #         {
+        #     'var_index': 10,
+        #     'var_name': 'hrr',
+        #     'y_label': 'heat release [W]'
+        # },
+        #         {
+        #     'var_index': 11,
+        #     'var_name': 'hrr',
+        #     'y_label': 'heat release [W]'
+        # },
+        #         {
+        #     'var_index': 12,
+        #     'var_name': 'hrr',
+        #     'y_label': 'heat release [W]'
+        # }
     ]
 
     fom_legend = 'FOM'
@@ -595,7 +632,7 @@ if __name__ == '__main__':
     # GIF frame rate.
     # Duration is approximately:
     #     len(common_iter_list) * frame_hold / fps_input
-    fps_input = 60
+    fps_input = 15
 
     # Optional: hold each plotted frame for multiple GIF frames.
     #

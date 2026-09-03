@@ -768,22 +768,26 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             state              = physics.residual_calculator(solver_param,rom_param,state)
             state['Q_cons']    = Q_tilda_old_solver_int[rom_param['S_indx_solver']]
             state              = time_integration.advance_time(solver_param,rom_param,state,physics)
-            Q_bar_new_sampling = state['Q_cons']
+            Q_bar_new_sampling = copy.deepcopy(state['Q_cons'])
 
             # Estimate full-state at unsampled points using old basis (DEIM Equation) -- PREDICTION STEP
             decen_norm_Q_bar_new_sampling           = normalizor[rom_param['S_indx_solver']]*(Q_bar_new_sampling-q_ref[rom_param['S_indx_solver']])
             C                                       = np.linalg.pinv(rom_param['basis'][rom_param['S_indx_solver']]) @ decen_norm_Q_bar_new_sampling
             Q_bar_new_solver_int                    = q_ref + (denormalizor * (rom_param['basis'] @ C ))
 
-            if solver_param['injection']:
+            # # Only apply the reconstruction to the unsampled cells
+            # Q_bar_new_solver_int_unsampled = copy.deepcopy(Q_bar_new_solver_int)
+            # Q_bar_new_solver_int_unsampled[rom_param['S_indx_solver']] = copy.deepcopy(Q_bar_new_sampling)
 
-                Q_bar_new_solver_full               = reshape_func.solver_add_ghost(solver_param['cell_number'],
+            Q_bar_new_solver_full = reshape_func.solver_add_ghost(solver_param['cell_number'],
                                                                                     solver_param['num_state_var'],
                                                                                     Q_bar_new_solver_int)
 
-                state['Q_cons'] = Q_bar_new_solver_full
+            state['Q_cons'] = copy.deepcopy(Q_bar_new_solver_full)
+
+            if solver_param['injection']:
                 state = physics.injection_correction(solver_param,state)
-                Q_bar_new_solver_full = state['Q_cons']
+                Q_bar_new_solver_full = copy.deepcopy(state['Q_cons'])
 
                 Q_bar_new_solver_int  = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],
                                                                             solver_param['num_state_var'],
@@ -799,16 +803,26 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             corrected_cent_norm    = rom_param['basis'] @ new_qr
             rom_param['F'][:,-1]   = corrected_cent_norm
             rom_param['Q_R'][:,-1] = new_qr
+            
+            # Turned off correction step as it is modifying the injected values
+            # # Find unsampled cell indices
+            # S_unsampled_solver = np.zeros(Q_bar_new_solver_int.size, dtype=bool)
+            # S_unsampled_solver[np.asarray(rom_param['S_indx_solver'], dtype=np.intp)] = True
+            # S_unsampled_solver = ~S_unsampled_solver
 
-            # find new solution -- CORRECTION STEP
-            Q_tilda_correct_solver_int= q_ref + (denormalizor * corrected_cent_norm)
-            Q_tilda_correct_solver_full= reshape_func.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int)
-            state['Q_cons'] = Q_tilda_correct_solver_full
+            # # find new solution at unsampled cells -- CORRECTION STEP
+            # Q_tilda_correct_solver_int= q_ref + (denormalizor * corrected_cent_norm)
+            
+            # Q_tilda_correct_solver_int_unsampled = copy.deepcopy(Q_bar_new_solver_int_unsampled)
+            # Q_tilda_correct_solver_int_unsampled[S_unsampled_solver] = Q_tilda_correct_solver_int[S_unsampled_solver]
 
-            # post process part
-            if solver_param['injection']:
+            # Q_tilda_correct_solver_full = reshape_func.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int_unsampled)
+            # state['Q_cons'] = Q_tilda_correct_solver_full
 
-                state = physics.injection_correction(solver_param,state)
+            # # post process part
+            # if solver_param['injection']:
+
+            #     state = physics.injection_correction(solver_param,state)
 
             # update prim state
             state = physics.cons2prim_converter(solver_param,state)
@@ -833,7 +847,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             # Compute the conservation error
             Q_cons_reshape = np.sum(np.reshape(state['Q_cons'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1)
             error_cons = np.abs(Q_cons_reshape - (np.sum(np.reshape(state['Q_cons_pre'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1) + state['Q_cons_inj']))
-            error_cons_perct = 100.0 * error_cons/Q_cons_reshape
+            error_cons_perct = 100.0 * error_cons/np.abs(Q_cons_reshape)
 
             # Calculate the interpolation error
             # Not technically interpolation error, more like overall ROM error
@@ -905,6 +919,8 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             prim_proj_max = np.max(Q_prim_proj_error_reshape, axis=1)
             # prim_proj_min = np.min(Q_prim_proj_error_reshape, axis=1)
             prim_proj_avg = np.mean(Q_prim_proj_error_reshape, axis=1)
+
+            # print(np.max(cons_interp_max), np.max(prim_interp_max))
 
             # Check if thresholds are exceeded
             if solver_param['parameter_adapt']:
