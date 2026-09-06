@@ -66,6 +66,10 @@ def _format_array_line(iter, arr):
     return str(iter) + "," + ",".join(f"{x:.17e}" for x in arr) + "\n"
 
 
+def _format_integer_line(iter, value):
+    return f"{iter},{int(value)}\n"
+
+
 
 def _get_error_output_base_names():
     """
@@ -127,6 +131,8 @@ def _get_error_output_file_names(include_sampling_freq=True):
     file_names.extend([
         "error_cons",
         "error_cons_perct",
+        "error_cons_perct_ma",
+        "error_cons_fom_iter_counter",
     ])
 
     if include_sampling_freq:
@@ -149,10 +155,15 @@ def _write_error_output_array_map(state, iter, output_array_map):
                 "Check _get_error_output_file_names() and output_array_map."
             )
 
+        if name == "error_cons_fom_iter_counter":
+            line = _format_integer_line(iter, output_array_map[name])
+        else:
+            line = _format_array_line(iter, output_array_map[name])
+
         _write_error_output_line(
             state,
             name,
-            _format_array_line(iter, output_array_map[name])
+            line,
         )
 
 
@@ -389,7 +400,7 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
                 # post process part
                 if solver_param['injection']:
 
-                    state = physics.injection_correction(solver_param,state)
+                    state = physics.injection_correction(solver_param,state,rom_param)
 
             Q_bar_star_new = state['Q_cons']
             Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
@@ -435,7 +446,7 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
 
         if solver_param['injection']:
 
-            state = physics.injection_correction(solver_param,state)
+            state = physics.injection_correction(solver_param,state,rom_param)
 
         Q_bar_star_new = state['Q_cons']
         Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
@@ -488,7 +499,7 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
 
         if solver_param['injection']:
 
-            state = physics.injection_correction(solver_param,state)
+            state = physics.injection_correction(solver_param,state,rom_param)
 
         Q_bar_star_new = state['Q_cons'].copy()
         Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
@@ -529,7 +540,7 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
             results_recorder_ROM(solver_param,state,rom_param)
 
     # Update Samples
-    rom_param = hyper_precompute(solver_param,rom_param,static_basis=False)
+    rom_param = hyper_precompute(solver_param,rom_param,state,physics,static_basis=False)
 
     return state, rom_param
 
@@ -547,6 +558,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
     if solver_param['error_check']:
         state['Q_cons_pre'] = copy.deepcopy(state['Q_cons'])
         state['Q_cons_inj'] = np.zeros(solver_param['num_state_var'])
+        state['Q_cons_inj_samp'] = np.zeros([solver_param['num_state_var'],solver_param['cell_number']])
 
     if iter <= int(solver_param['FOM2ROM_trans_iter']):
 
@@ -557,7 +569,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
         # post process part
         if solver_param['injection']:
 
-            state = physics.injection_correction(solver_param,state)
+            state = physics.injection_correction(solver_param,state,rom_param)
 
         # update prim state
         state = physics.cons2prim_converter(solver_param,state)
@@ -666,7 +678,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             if solver_param['sampling_method'] == 'FFGS' or solver_param['sampling_method'] == 'FFGSR':
                 state, rom_param = update_sampling_points(solver_param,state,physics,time_integration,rom_param,sampling_adapt_freq)
             else:
-                rom_param = hyper_precompute(solver_param,rom_param,static_basis=False)
+                rom_param = hyper_precompute(solver_param,rom_param,state,physics,static_basis=False)
 
             # save ROM related param
             results_recorder_trans(solver_param,state,rom_param)
@@ -708,7 +720,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             # post process part
             if solver_param['injection']:
 
-                state = physics.injection_correction(solver_param,state)
+                state = physics.injection_correction(solver_param,state,rom_param)
 
             # Calculate the primitive variables for the FOM FOM solution
             # update prim state
@@ -786,7 +798,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             state['Q_cons'] = copy.deepcopy(Q_bar_new_solver_full)
 
             if solver_param['injection']:
-                state = physics.injection_correction(solver_param,state)
+                state = physics.injection_correction(solver_param,state,rom_param)
                 Q_bar_new_solver_full = copy.deepcopy(state['Q_cons'])
 
                 Q_bar_new_solver_int  = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],
@@ -816,13 +828,13 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             # Q_tilda_correct_solver_int_unsampled = copy.deepcopy(Q_bar_new_solver_int_unsampled)
             # Q_tilda_correct_solver_int_unsampled[S_unsampled_solver] = Q_tilda_correct_solver_int[S_unsampled_solver]
 
-            # Q_tilda_correct_solver_full = reshape_func.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int_unsampled)
+            # Q_tilda_correct_solver_full = reshape_func.solver_add_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_tilda_correct_solver_int)
             # state['Q_cons'] = Q_tilda_correct_solver_full
 
             # # post process part
             # if solver_param['injection']:
 
-            #     state = physics.injection_correction(solver_param,state)
+            #     state = physics.injection_correction(solver_param,state,rom_param)
 
             # update prim state
             state = physics.cons2prim_converter(solver_param,state)
@@ -845,9 +857,13 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
         if ( solver_param['error_check'] and not ( np.any(solver_param['iter'] == solver_param['resample_iter_list']) ) ):
 
             # Compute the conservation error
-            Q_cons_reshape = np.sum(np.reshape(state['Q_cons'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1)
-            error_cons = np.abs(Q_cons_reshape - (np.sum(np.reshape(state['Q_cons_pre'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2],axis=1) + state['Q_cons_inj']))
-            error_cons_perct = 100.0 * error_cons/np.abs(Q_cons_reshape)
+            Q_cons_reshape = np.reshape(state['Q_cons'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2]
+            Q_cons_pre_reshape = np.reshape(state['Q_cons_pre'],[solver_param['num_state_var'],solver_param['cell_number']+4])[:,2:-2]
+            error_cons = np.abs(np.sum(Q_cons_reshape,axis=1) - (np.sum(Q_cons_pre_reshape,axis=1) + state['Q_cons_inj']))
+            error_cons_perct = 100.0 * error_cons / np.abs(np.sum(Q_cons_reshape,axis=1))
+            error_cons_samp_perct = 100.0 * np.abs((Q_cons_reshape[:,rom_param['S_indx_user']] - (Q_cons_pre_reshape[:,rom_param['S_indx_user']] + state['Q_cons_inj_samp'][:,rom_param['S_indx_user']])) / Q_cons_reshape[:,rom_param['S_indx_user']])
+            print(np.max(state['Q_cons_inj_samp'][:,rom_param['S_indx_user']],axis=1))
+            breakpoint()
 
             # Calculate the interpolation error
             # Not technically interpolation error, more like overall ROM error
@@ -870,7 +886,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             # # post process part
             # if solver_param['injection']:
 
-            #     state = physics.injection_correction(solver_param,state)
+            #     state = physics.injection_correction(solver_param,state,rom_param)
 
             # update prim state
             state = physics.cons2prim_converter(solver_param,state)
@@ -924,67 +940,166 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
             # Check if thresholds are exceeded
             if solver_param['parameter_adapt']:
-                thresholds = np.array([2E-2,4E-1,0.003])
-                threshold_exceeded = np.any(error_cons_perct[:3] >= thresholds)
-                if (threshold_exceeded and (not (iter == int(solver_param['FOM2ROM_trans_iter']) + 1))):
-                    print('Rerunning time step with FOM')
-                    state.clear()
-                    state.update(restart_state)
-                    rom_param.clear()
-                    rom_param.update(restart_rom)
-                    solver_param.clear()
-                    solver_param.update(restart_solver)
+                # thresholds = np.array([0.001,100,0.001])
+                # threshold_exceeded = np.any(error_cons_perct[:3] >= thresholds)
+                # if (threshold_exceeded and (not (iter == int(solver_param['FOM2ROM_trans_iter']) + 1))):
 
-                    # adjust the solver parameters for regular time step FOM
-                    solver_param['hyper'] = False
+                if (not (iter == int(solver_param['FOM2ROM_trans_iter']) + 1)):
+                    # error_cons_perct_ratio = np.abs(error_cons_perct / rom_param['error_cons_perct_prev'])
+                    error_cons_perct_ratio = np.abs(error_cons_perct / rom_param['error_cons_perct_ma'].avg)
+                    # Store which conservative variables crossed the threshold.
+                    # The original decision checked only variables 0 through 2.
+                    threshold_exceeded_mask = np.zeros(
+                        solver_param["num_state_var"],
+                        dtype=bool,
+                    )
+                    threshold_exceeded_mask[:3] = (
+                        error_cons_perct_ratio[:3] >= 1.5
+                    )
 
-                    # take one FOM step
-                    state = physics.residual_calculator(solver_param,rom_param,state)
-                    state = time_integration.advance_time(solver_param,rom_param,state,physics)
+                    if np.any(threshold_exceeded_mask):
+                        print('Rerunning time step with FOM')
 
-                    if solver_param['injection']:
+                        state.clear()
+                        state.update(restart_state)
+                        rom_param.clear()
+                        rom_param.update(restart_rom)
+                        solver_param.clear()
+                        solver_param.update(restart_solver)
 
-                        state = physics.injection_correction(solver_param,state)
+                        rom_param['error_cons_fom_iter_counter'] += 1
 
-                    Q_bar_star_new = state['Q_cons'].copy()
-                    Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
+                        error_output_files = rom_param.get(
+                            "error_output_files",
+                            {},
+                        )
 
-                    # some sampling methods (ex. FGS) need this for sampling
-                    rom_param['Q_bar'] = Q_bar_star_new.copy()
+                        required_rerun_output_names = (
+                            "error_cons",
+                            "error_cons_perct",
+                            "error_cons_perct_ma",
+                            "error_cons_fom_iter_counter",
+                        )
 
-                    # reset solver parameters to samller time step setup (user defined setup)
-                    Q_bar_new_solver_int    = Q_bar_star_new_solver_int
-                    solver_param['hyper']   = True
+                        error_output_files["error_cons"].write(
+                            _format_array_line(iter, error_cons)
+                        )
 
-                    # adapt basis with newly found sanpshot
-                    rom_param = adapt_basis(solver_param,rom_param,Q_bar_new_solver_int)
+                        error_output_files["error_cons_perct"].write(
+                            _format_array_line(iter, error_cons_perct)
+                        )
 
-                    # find corrected qr (projected with new basis)
-                    new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
+                        rom_param['error_cons_perct_ma'].update(error_cons_perct)
 
-                    # update states
-                    corrected_cent_norm = rom_param['basis'] @ new_qr
-                    rom_param['F'][:,-1]   = corrected_cent_norm
-                    rom_param['Q_R'][:,-1] = new_qr
+                        error_output_files["error_cons_perct_ma"].write(
+                            _format_array_line(
+                                iter,
+                                rom_param["error_cons_perct_ma"].avg,
+                            )
+                        )
 
-                    # update prim state
-                    state = physics.cons2prim_converter(solver_param,state)
+                        error_output_files[
+                            "error_cons_fom_iter_counter"
+                        ].write(
+                            _format_integer_line(
+                                iter,
+                                rom_param[
+                                    "error_cons_fom_iter_counter"
+                                ],
+                            )
+                        )
 
-                    # update the ghost cells
-                    state = bc_func.update_ghost_cell(solver_param,state)
+                        # Record which variables caused this FOM rerun.
+                        # The comment prefix preserves numpy.loadtxt compatibility.
+                        conservative_variable_names = (
+                            "Mass",
+                            "Momentum",
+                            "Energy",
+                            "Species",
+                        )
 
-                    # update prim state
-                    state = physics.prim2cons_converter(solver_param,state)
+                        exceeded_variable_names = [
+                            (
+                                conservative_variable_names[index]
+                                if index < len(conservative_variable_names)
+                                else f"Conservative_variable_{index + 1}"
+                            )
+                            for index in np.flatnonzero(threshold_exceeded_mask)
+                        ]
 
-                    # prepare results to save
-                    state = prepare_to_store_FOM(solver_param,state,rom_param)
+                        threshold_mask_text = "|".join(
+                            "1" if exceeded else "0"
+                            for exceeded in threshold_exceeded_mask
+                        )
 
-                    # save the data
-                    if solver_param['iter'] % solver_param['save_interval'] == 0:
+                        error_output_files[
+                            "error_cons_fom_iter_counter"
+                        ].write(
+                            "# threshold_exceeded,"
+                            f"iteration={iter},"
+                            "variables="
+                            + "|".join(exceeded_variable_names)
+                            + f",mask={threshold_mask_text}\n"
+                        )
 
-                        results_recorder_ROM(solver_param,state,rom_param)
+                        for name in required_rerun_output_names:
+                            error_output_files[name].flush()
 
-                    return solver_param, state, rom_param
+                        # adjust the solver parameters for regular time step FOM
+                        solver_param['hyper'] = False
+
+                        # take one FOM step
+                        state = physics.residual_calculator(solver_param,rom_param,state)
+                        state = time_integration.advance_time(solver_param,rom_param,state,physics)
+
+                        if solver_param['injection']:
+
+                            state = physics.injection_correction(solver_param,state,rom_param)
+
+                        Q_bar_star_new = state['Q_cons'].copy()
+                        Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
+
+                        # some sampling methods (ex. FGS) need this for sampling
+                        rom_param['Q_bar'] = Q_bar_star_new.copy()
+
+                        # reset solver parameters to samller time step setup (user defined setup)
+                        Q_bar_new_solver_int    = Q_bar_star_new_solver_int
+                        solver_param['hyper']   = True
+
+                        # adapt basis with newly found sanpshot
+                        rom_param = adapt_basis(solver_param,rom_param,Q_bar_new_solver_int)
+
+                        # find corrected qr (projected with new basis)
+                        new_qr = np.transpose(rom_param['basis']) @ rom_param['F'][:,-1]
+
+                        # update states
+                        corrected_cent_norm = rom_param['basis'] @ new_qr
+                        rom_param['F'][:,-1]   = corrected_cent_norm
+                        rom_param['Q_R'][:,-1] = new_qr
+
+                        # update prim state
+                        state = physics.cons2prim_converter(solver_param,state)
+
+                        # update the ghost cells
+                        state = bc_func.update_ghost_cell(solver_param,state)
+
+                        # update prim state
+                        state = physics.prim2cons_converter(solver_param,state)
+
+                        # prepare results to save
+                        state = prepare_to_store_FOM(solver_param,state,rom_param)
+
+                        # save the data
+                        if solver_param['iter'] % solver_param['save_interval'] == 0:
+
+                            results_recorder_ROM(solver_param,state,rom_param)
+
+                        return solver_param, state, rom_param
+
+                    else:
+                        rom_param['error_cons_perct_prev'] = error_cons_perct.copy()
+                else:
+                    rom_param['error_cons_perct_prev'] = error_cons_perct.copy()
 
             # Write the error values
             dir_results = os.path.join(solver_param["dir_results"], "error")
@@ -996,6 +1111,9 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
                 if "error_output_files" not in rom_param:
                     _open_error_output_files(rom_param, dir_results, mode)
+
+                rom_param['error_cons_perct_ma'] = MovingAverage(5000, solver_param['num_state_var'])
+                rom_param['error_cons_fom_iter_counter'] = 0
 
                 rom_param['cons_interp_max_slope_counter'] = np.zeros(solver_param['num_state_var'])
                 rom_param['cons_interp_avg_slope_counter'] = np.zeros(solver_param['num_state_var'])
@@ -1102,6 +1220,9 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 prim_interp_avg_slope_ratio = np.where(prim_interp_avg_slope > 0, prim_interp_avg/rom_param['prim_interp_avg_store'], np.where(prim_interp_avg_slope < 0, rom_param['prim_interp_avg_store']/prim_interp_avg, 0))
                 prim_proj_max_slope_ratio   = np.where(prim_proj_max_slope   > 0, prim_proj_max/rom_param['prim_proj_max_store'],     np.where(prim_proj_max_slope   < 0, rom_param['prim_proj_max_store']/prim_proj_max,     0))
                 prim_proj_avg_slope_ratio   = np.where(prim_proj_avg_slope   > 0, prim_proj_avg/rom_param['prim_proj_avg_store'],     np.where(prim_proj_avg_slope   < 0, rom_param['prim_proj_avg_store']/prim_proj_avg,     0))
+
+            # Update the conservation error moving average
+            rom_param['error_cons_perct_ma'].update(error_cons_perct)
 
             # Store the current error QoIs
             rom_param['cons_interp_max_store'] = cons_interp_max
@@ -1231,6 +1352,12 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             output_array_map = {
                 "error_cons": error_cons,
                 "error_cons_perct": error_cons_perct,
+                "error_cons_perct_ma": (
+                    rom_param["error_cons_perct_ma"].avg.copy()
+                ),
+                "error_cons_fom_iter_counter": rom_param.get(
+                    "error_cons_fom_iter_counter", 0
+                ),
             }
 
             output_array_map.update(qoi_data)

@@ -184,5 +184,6 @@ def init_solver_param(args,input_param):
     solver_param['multi_samp']            = eval(input_param['multi_samp'])
     solver_param['parameter_adapt']       = eval(input_param['parameter_adapt'])
     solver_param['force_FOM']             = eval(input_param['force_FOM'])
+    solver_param['stencil']               = int(input_param['stencil'])
 
     return solver_param

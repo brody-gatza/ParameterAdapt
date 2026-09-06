@@ -3,7 +3,7 @@ import scipy as sc
 
 from compflowlab.utils import reshape_func
 
-def hyper_precompute(solver_param,rom_param,static_basis=True,):
+def hyper_precompute(solver_param,rom_param,state,physics,static_basis=True,):
 
     num_cell     = solver_param['cell_number']
     num_samples  = int(solver_param['sampling_rate'] * num_cell / 100)
@@ -36,7 +36,7 @@ def hyper_precompute(solver_param,rom_param,static_basis=True,):
 
         ref_state   = rom_param['Q_bar']
 
-        S_indx_user = FGS_sample_point_finder(basis,num_samples,num_cell,ref_state,num_state_var)
+        S_indx_user = FGS_sample_point_finder(basis,num_samples,num_cell,ref_state,num_state_var,solver_param,state,physics)
     
     S_indx_solver = reshape_func.user2solver_indx_converter(S_indx_user,
                                                             num_state_var,
@@ -230,7 +230,7 @@ def ECSW_sample_point_finder(solver_param,rom_param):
             # update samples in solver scale
             S_indx_solver = np.add.outer(S_indx_user ,(state_var_indx * solver_param['cell_number'])).ravel()
 
-def FGS_sample_point_finder(basis,num_samples,num_cell,ref_state,num_state_var):
+def FGS_sample_point_finder(basis,num_samples,num_cell,ref_state,num_state_var,solver_param,state,physics):
 
     S_indx_user = QDEIM_sample_point_finder(basis,num_cell)
 
@@ -240,16 +240,14 @@ def FGS_sample_point_finder(basis,num_samples,num_cell,ref_state,num_state_var):
 
         return S_indx_user
 
-    Q_future            = ref_state
-    # Q_future_int_solver = reshape_func.solver_eliminate_ghost(num_cell,num_state_var,Q_future)
-    Q_future_solver_user= reshape_func.results_solver2user_converter(num_state_var,num_cell,Q_future)
-    Q_future_int_user   = Q_future_solver_user[:,2:-2]
+    Q_future = physics.cons2prim_converter_FGS(solver_param, state, ref_state)
+    Q_future_user = np.reshape(Q_future,(solver_param['num_prim_var'],num_cell+4))
+    Q_future_int_user   = Q_future_user[:,2:-2]
     
     ### future shock ###
-    # This is placed based on the gradient of the energy conservative terms?
-    rho_bar_shock = Q_future_int_user[2,:]
+    pressure_field = Q_future_int_user[2,:]
 
-    first_derv_density  = np.abs(np.gradient(rho_bar_shock))
+    first_derv_density  = np.abs(np.gradient(pressure_field))
 
     high_grad_area_indx = np.argsort(first_derv_density)[::-1]
     high_grad_area_indx = high_grad_area_indx[~np.isin(high_grad_area_indx,S_indx_user)]
@@ -259,5 +257,14 @@ def FGS_sample_point_finder(basis,num_samples,num_cell,ref_state,num_state_var):
     S_indx_user = np.append(S_indx_user,fgs_selected_samples)
     
     S_indx_user = np.sort(S_indx_user)
+
+    if solver_param['stencil'] != 0:
+        num_layers = solver_param['stencil']
+        offsets = np.arange(-num_layers, num_layers + 1)
+
+
+        S_indx_user = np.unique((S_indx_user[:, None] + offsets).ravel())
+
+        S_indx_user = S_indx_user[(S_indx_user >= 0) & (S_indx_user < num_cell)]
 
     return S_indx_user

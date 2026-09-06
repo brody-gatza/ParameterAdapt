@@ -78,6 +78,38 @@ def cons2prim_converter(solver_param, state):
 
     return state
 
+def cons2prim_converter_FGS(solver_param, state, Q_cons):
+
+    vol         = solver_param['vol']
+
+    Q_cons_user = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
+
+    mass        = Q_cons_user[0,:]
+    momx        = Q_cons_user[1,:]
+    energy      = Q_cons_user[2,:]
+    mass_species= Q_cons_user[3:,:]
+
+    rho = mass / vol
+    vx  = momx / rho / vol
+    MF  = mass_species / rho / vol
+
+    Y_full=reshape_func.find_mass_fraction_full(MF)
+
+    Cp_mix    = state['gas_lookup_table']['cp']
+    MW_mix    = state['gas_lookup_table']['MW']
+    R_mix     = state['gas_lookup_table']['R_univ'] / MW_mix
+    Cv_mix    = Cp_mix - R_mix
+    h_ref     = np.array(state['gas_lookup_table']['href'])[:,np.newaxis]
+    h_f_mix   = np.sum(h_ref * Y_full, axis=0)
+
+    T  = (energy/rho/vol - (0.5 *(vx**2)) - h_f_mix) / Cv_mix
+
+    P = rho * R_mix * T
+ 
+    Q_prim = np.vstack((rho,vx,P,T,MF)).ravel()
+
+    return Q_prim
+
 def cache_cantera(solver_param,state):
 
 
@@ -881,6 +913,7 @@ def d_flux_dx_calculator(solver_param,rom_param,state):
         range_flux_left  = S_indx_user
 
         d_flux_dx = -(flux[:, range_flux_right] - flux[:, range_flux_left])
+        state['Q_cons_inj_samp'][:,S_indx_user-2] += d_flux_dx*solver_param['dt']
 
     else:
 
@@ -890,7 +923,7 @@ def d_flux_dx_calculator(solver_param,rom_param,state):
     
     return state
 
-def injection_correction(solver_param,state):
+def injection_correction(solver_param,state,rom_param):
     # read current states
     Q_prim      = state['Q_prim']
     Q_prim_user = reshape_func.results_solver2user_converter(solver_param['num_prim_var'],solver_param['cell_number'],Q_prim)
@@ -1086,8 +1119,12 @@ def injection_correction(solver_param,state):
 
     if solver_param['error_check']:
         Q_inj = copy.deepcopy(state['Q_cons']) - Q_pre
-        Q_inj = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_inj)
-        Q_inj = np.sum(Q_inj[:,2:-2], axis=1)
+        Q_inj = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_inj)[:,2:-2]
+
+        if solver_param['hyper'] == True:
+            state['Q_cons_inj_samp'][:,rom_param['S_indx_user']] += copy.deepcopy(Q_inj[:,rom_param['S_indx_user']])
+
+        Q_inj = np.sum(Q_inj, axis=1)
         state['Q_cons_inj'] += Q_inj
 
     return state
@@ -1158,12 +1195,14 @@ def source_calculator(solver_param,rom_param,state):
     state['d_flux_dx'] = state['d_flux_dx'] + state['source_terms']
 
     if solver_param['error_check']:
-        Q_inj = np.reshape(copy.deepcopy(state['source_terms']),[solver_param['num_state_var'],-1])
+        Q_inj = np.reshape(copy.deepcopy(state['source_terms']),[solver_param['num_state_var'],-1])*solver_param['dt']
         if solver_param['hyper'] == True:
-            Q_inj = np.sum(Q_inj, axis=1)*solver_param['dt']
+            state['Q_cons_inj_samp'][:,rom_param['S_indx_user']] += Q_inj
+            Q_inj = np.sum(Q_inj, axis=1)
         else:
-            Q_inj = np.sum(Q_inj[:,2:-2], axis=1)*solver_param['dt']
+            Q_inj = np.sum(Q_inj[:,2:-2], axis=1)
         state['Q_cons_inj'] += Q_inj
+
 
     return state
 

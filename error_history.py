@@ -886,12 +886,18 @@ def plot_error_signals_to_pdf(
     primitive_field_names,
     error_directory,
     pdf,
+    fom_rerun_iterations=None,
     short_window=1000,
     long_window=5000,
     delimiter=",",
 ):
-    """Append raw signals, two moving averages, L2 error, and correlation."""
+    """Append signals, moving averages, metrics, and FOM-rerun markers."""
     error_directory = Path(error_directory)
+    if fom_rerun_iterations is None:
+        fom_rerun_iterations = np.array([], dtype=float)
+    else:
+        fom_rerun_iterations = np.asarray(fom_rerun_iterations, dtype=float)
+
     if short_window <= 0 or long_window <= 0:
         raise ValueError("Moving-average windows must be positive integers.")
 
@@ -934,18 +940,48 @@ def plot_error_signals_to_pdf(
                 correlation_axis.patch.set_visible(False)
 
                 lines = []
-                lines += signal_axis.plot(
-                    signal_iterations, raw, color="0.55", linewidth=0.8,
-                    alpha=0.55, label="Raw error signal", zorder=2
+                rerun_mask = get_fom_rerun_mask(
+                    signal_iterations, fom_rerun_iterations
                 )
-                lines += signal_axis.plot(
-                    signal_iterations, short_average, color="tab:orange",
-                    linewidth=2.0, label=f"Moving average ({short_window})", zorder=4
+                finite_raw = np.isfinite(raw)
+                regular_mask = finite_raw & ~rerun_mask
+                highlighted_mask = finite_raw & rerun_mask
+
+                raw_artist = signal_axis.scatter(
+                    signal_iterations[regular_mask], raw[regular_mask],
+                    color="0.55", s=10, alpha=0.55,
+                    label="Raw error signal", zorder=2,
+                    rasterized=True,
                 )
+                lines.append(raw_artist)
+                if np.any(highlighted_mask):
+                    rerun_artist = signal_axis.scatter(
+                        signal_iterations[highlighted_mask],
+                        raw[highlighted_mask], color="black",
+                        edgecolors="black", s=38, alpha=1.0,
+                        label="FOM-rerun iteration", zorder=9,
+                        rasterized=True,
+                    )
+                    lines.append(rerun_artist)
                 lines += signal_axis.plot(
-                    signal_iterations, long_average, color="tab:green",
-                    linewidth=2.2, linestyle="-.",
-                    label=f"Moving average ({long_window})", zorder=5
+                    signal_iterations,
+                    short_average,
+                    color="tab:orange",
+                    linewidth=2.8,
+                    alpha=1.0,
+                    label=f"Moving average ({short_window})",
+                    zorder=20,
+                )
+
+                lines += signal_axis.plot(
+                    signal_iterations,
+                    long_average,
+                    color="tab:green",
+                    linewidth=3.0,
+                    linestyle="-.",
+                    alpha=1.0,
+                    label=f"Moving average ({long_window})",
+                    zorder=21,
                 )
 
                 if variable_index < relative_l2.shape[0]:
@@ -1010,282 +1046,436 @@ def plot_error_signals_to_pdf(
     print("Finished appending error-signal plots.")
 
 
+def load_fom_rerun_counter(counter_filename, delimiter=","):
+    """Load the cumulative rerun counter and per-variable trigger records.
+
+    Numeric rows have this format:
+        iteration,cumulative_count
+
+    Optional comment rows have this format:
+        # threshold_exceeded,iteration=I,variables=...,mask=1|0|1|0
+
+    Returns:
+        counter_iterations
+        counter_values
+        rerun_iterations
+        rerun_iterations_by_variable
+
+    rerun_iterations_by_variable is a tuple. Entry i contains only the
+    iterations at which conservative variable i exceeded the threshold.
+    """
+    counter_filename = Path(counter_filename)
+
+    counter_iterations, columns = load_error_signal_file(
+        counter_filename,
+        delimiter=delimiter,
+    )
+
+    if columns.shape[1] != 1:
+        raise ValueError(
+            f"Expected one counter column in {counter_filename}; "
+            f"received {columns.shape[1]}."
+        )
+
+    values_float = np.asarray(columns[:, 0], dtype=float)
+    if not np.all(np.isfinite(values_float)):
+        raise ValueError(
+            f"Counter contains non-finite values: {counter_filename}"
+        )
+
+    rounded = np.rint(values_float)
+    if not np.allclose(
+        values_float,
+        rounded,
+        rtol=0.0,
+        atol=1.0e-12,
+    ):
+        raise ValueError(
+            f"Counter contains non-integer values: {counter_filename}"
+        )
+
+    counter_values = rounded.astype(np.int64)
+    changes = np.diff(counter_values, prepend=counter_values[0])
+
+    if np.any(counter_values < 0) or np.any(changes < 0):
+        raise ValueError(
+            f"Counter must be nonnegative and nondecreasing: "
+            f"{counter_filename}"
+        )
+
+    rerun_iterations = counter_iterations[changes > 0]
+
+    comment_pattern = re.compile(
+        r"^\s*#\s*threshold_exceeded,"
+        r"iteration=(?P<iteration>[^,]+),"
+        r"variables=(?P<variables>[^,]*),"
+        r"mask=(?P<mask>[01](?:\|[01])*)\s*$"
+    )
+
+    trigger_records = {}
+    maximum_mask_length = 0
+
+    with counter_filename.open("r", encoding="utf-8") as file:
+        for line_number, line in enumerate(file, start=1):
+            match = comment_pattern.match(line)
+            if match is None:
+                continue
+
+            try:
+                iteration = float(match.group("iteration"))
+            except ValueError as error:
+                raise ValueError(
+                    f"Invalid threshold-comment iteration on line "
+                    f"{line_number} of {counter_filename}: "
+                    f"{match.group('iteration')}"
+                ) from error
+
+            mask = np.asarray(
+                [
+                    value == "1"
+                    for value in match.group("mask").split("|")
+                ],
+                dtype=bool,
+            )
+
+            maximum_mask_length = max(maximum_mask_length, len(mask))
+
+            iteration_key = int(np.rint(iteration))
+            if not np.isclose(
+                iteration,
+                iteration_key,
+                rtol=0.0,
+                atol=1.0e-9,
+            ):
+                raise ValueError(
+                    f"Non-integer threshold-comment iteration on line "
+                    f"{line_number} of {counter_filename}: {iteration}"
+                )
+
+            if iteration_key in trigger_records:
+                existing = trigger_records[iteration_key]
+                if len(existing) < len(mask):
+                    existing = np.pad(
+                        existing,
+                        (0, len(mask) - len(existing)),
+                        constant_values=False,
+                    )
+                elif len(mask) < len(existing):
+                    mask = np.pad(
+                        mask,
+                        (0, len(existing) - len(mask)),
+                        constant_values=False,
+                    )
+                trigger_records[iteration_key] = existing | mask
+            else:
+                trigger_records[iteration_key] = mask
+
+    # Four is the expected mass, momentum, energy, species field count.
+    number_of_trigger_variables = max(4, maximum_mask_length)
+    per_variable_lists = [
+        []
+        for _ in range(number_of_trigger_variables)
+    ]
+
+    for iteration_key, mask in sorted(trigger_records.items()):
+        for variable_index, exceeded in enumerate(mask):
+            if exceeded:
+                per_variable_lists[variable_index].append(
+                    float(iteration_key)
+                )
+
+    rerun_iterations_by_variable = tuple(
+        np.asarray(values, dtype=float)
+        for values in per_variable_lists
+    )
+
+    print(f"Loaded FOM-rerun counter: {counter_filename.resolve()}")
+    print(f"Final count: {int(counter_values[-1])}")
+    print(f"Recorded increases: {len(rerun_iterations)}")
+    print(f"Threshold-comment records: {len(trigger_records)}")
+
+    for variable_index, values in enumerate(
+        rerun_iterations_by_variable
+    ):
+        print(
+            f"Variable {variable_index} trigger count: {len(values)}"
+        )
+
+    return (
+        counter_iterations,
+        counter_values,
+        rerun_iterations,
+        rerun_iterations_by_variable,
+    )
+
+
+
+def compute_fom_reruns_per_window(counter_iterations, counter_values, window=1000):
+    """Count reruns in (t-window, t], returning NaN until the window is full."""
+    x = np.asarray(counter_iterations, dtype=float)
+    counter = np.asarray(counter_values, dtype=np.int64)
+    if x.ndim != 1 or counter.ndim != 1 or x.shape != counter.shape or len(x) == 0:
+        raise ValueError("Counter arrays must be nonempty, one-dimensional, and matching.")
+    if not np.isfinite(window) or window <= 0:
+        raise ValueError("The FOM-rerun window must be positive and finite.")
+    if not np.all(np.isfinite(x)) or np.any(np.diff(x) <= 0.0):
+        raise ValueError("Counter iterations must be finite and strictly increasing.")
+    if np.any(counter < 0) or np.any(np.diff(counter) < 0):
+        raise ValueError("Counter values must be nonnegative and nondecreasing.")
+
+    increments = np.diff(counter, prepend=counter[0])
+    prefix = np.concatenate(([0], np.cumsum(increments, dtype=np.int64)))
+    reruns_per_window = np.full(x.shape, np.nan, dtype=float)
+    window = float(window)
+
+    for index, current_iteration in enumerate(x):
+        if current_iteration - x[0] < window:
+            continue
+        first_included = np.searchsorted(
+            x, current_iteration - window, side="right"
+        )
+        reruns_per_window[index] = (
+            prefix[index + 1] - prefix[first_included]
+        )
+
+    return reruns_per_window
+
+
+def plot_fom_rerun_counter_to_pdf(
+    counter_iterations,
+    counter_values,
+    rerun_iterations,
+    pdf,
+    rerun_window=1000,
+):
+    """Plot the cumulative counter and full-window rerun count together."""
+    x = np.asarray(counter_iterations, dtype=float)
+    counter = np.asarray(counter_values, dtype=np.int64)
+    recent = compute_fom_reruns_per_window(x, counter, rerun_window)
+
+    fig, counter_axis = plt.subplots(figsize=(12, 7))
+    window_axis = counter_axis.twinx()
+
+    cumulative_line, = counter_axis.step(
+        x, counter, where="post", color="tab:blue", linewidth=2.0,
+        label="Cumulative FOM reruns", zorder=3,
+    )
+    window_line, = window_axis.plot(
+        x, recent, color="tab:purple", linewidth=2.0,
+        label=f"Reruns in previous {rerun_window:g} iterations", zorder=4,
+    )
+
+    counter_axis.set_xlabel("Iteration")
+    counter_axis.set_ylabel(
+        "Cumulative number of FOM reruns", color="tab:blue"
+    )
+    window_axis.set_ylabel(
+        f"FOM reruns in previous {rerun_window:g} iterations",
+        color="tab:purple",
+    )
+    counter_axis.tick_params(axis="y", labelcolor="tab:blue")
+    window_axis.tick_params(axis="y", labelcolor="tab:purple")
+    counter_axis.set_title("Conservation-Error FOM Rerun History")
+    counter_axis.set_ylim(bottom=0)
+    window_axis.set_ylim(bottom=0)
+    counter_axis.minorticks_on()
+    counter_axis.grid(which="major", axis="both", linestyle="-", alpha=0.35)
+    counter_axis.grid(which="minor", axis="x", linestyle=":", alpha=0.20)
+    counter_axis.legend(handles=[cumulative_line, window_line], loc="best")
+
+    fig.tight_layout()
+    pdf.savefig(fig, bbox_inches="tight")
+    plt.close(fig)
+
+    print("Added combined cumulative and trailing-window FOM-rerun page.")
+    print(
+        f"Full trailing-window samples: "
+        f"{np.count_nonzero(np.isfinite(recent))}"
+    )
+
+
+def get_fom_rerun_mask(value_iterations, rerun_iterations):
+    # Vectorized matching for integer-valued iteration numbers.
+    value_iterations = np.asarray(value_iterations, dtype=float)
+    rerun_iterations = np.asarray(rerun_iterations, dtype=float)
+
+    if value_iterations.ndim != 1 or rerun_iterations.ndim != 1:
+        raise ValueError("Iteration arrays must be one-dimensional.")
+
+    mask = np.zeros(value_iterations.shape, dtype=bool)
+    if len(rerun_iterations) == 0:
+        return mask
+
+    valid_values = np.isfinite(value_iterations)
+    valid_reruns = np.isfinite(rerun_iterations)
+    if not np.any(valid_values) or not np.any(valid_reruns):
+        return mask
+
+    value_int = np.rint(value_iterations[valid_values]).astype(np.int64)
+    rerun_int = np.unique(
+        np.rint(rerun_iterations[valid_reruns]).astype(np.int64)
+    )
+    mask[valid_values] = np.isin(value_int, rerun_int)
+    return mask
+
+
 def plot_fom_rom_conservation_errors_to_pdf(
     fom_error_directory,
     rom_error_directory,
     pdf,
+    fom_rerun_iterations=None,
+    fom_rerun_iterations_by_variable=None,
     short_window=1000,
     long_window=5000,
     delimiter=",",
 ):
-    """
-    Append ROM conservation-error plots with short and long moving averages.
-
-    Four pages are created for each conservative variable:
-        1. line plot with logarithmic y-axis
-        2. line plot with linear y-axis
-        3. scatter plot with logarithmic y-axis
-        4. scatter plot with linear y-axis
-
-    FOM conservation-error data is still loaded and validated against the ROM
-    variable count, but the FOM plotting block is retained as comments and no
-    FOM conservation-error pages are added to the PDF.
-    """
-    fom_error_directory = Path(fom_error_directory)
+    """Plot only ROM percent conservation errors using the saved moving average."""
+    del fom_error_directory, short_window, long_window
     rom_error_directory = Path(rom_error_directory)
 
-    if short_window <= 0 or long_window <= 0:
-        raise ValueError("Moving-average windows must be positive integers.")
+    if fom_rerun_iterations is None:
+        fom_rerun_iterations = np.array([], dtype=float)
+    else:
+        fom_rerun_iterations = np.asarray(fom_rerun_iterations, dtype=float)
 
-    fom_error_iterations, fom_error_values = load_error_signal_file(
-        fom_error_directory / "error_cons.txt",
-        delimiter=delimiter,
-    )
-    rom_error_iterations, rom_error_values = load_error_signal_file(
-        rom_error_directory / "error_cons.txt",
-        delimiter=delimiter,
-    )
-
-    fom_percent_iterations, fom_percent_values = load_error_signal_file(
-        fom_error_directory / "error_cons_perct.txt",
-        delimiter=delimiter,
-    )
-    rom_percent_iterations, rom_percent_values = load_error_signal_file(
-        rom_error_directory / "error_cons_perct.txt",
-        delimiter=delimiter,
-    )
-
-    if fom_error_values.shape[1] != rom_error_values.shape[1]:
-        raise ValueError(
-            "FOM and ROM conservation-error files contain different numbers "
-            "of conservative variables: "
-            f"{fom_error_values.shape[1]} versus {rom_error_values.shape[1]}"
+    if fom_rerun_iterations_by_variable is None:
+        fom_rerun_iterations_by_variable = tuple()
+    else:
+        fom_rerun_iterations_by_variable = tuple(
+            np.asarray(values, dtype=float)
+            for values in fom_rerun_iterations_by_variable
         )
 
-    if fom_percent_values.shape[1] != rom_percent_values.shape[1]:
+    percent_file = rom_error_directory / "error_cons_perct.txt"
+    moving_average_file = rom_error_directory / "error_cons_perct_ma.txt"
+
+    percent_iterations, percent_values = load_error_signal_file(
+        percent_file, delimiter=delimiter
+    )
+    ma_iterations, ma_values = load_error_signal_file(
+        moving_average_file, delimiter=delimiter
+    )
+
+    if percent_values.shape[1] != ma_values.shape[1]:
         raise ValueError(
-            "FOM and ROM percent conservation-error files contain different "
-            "numbers of conservative variables: "
-            f"{fom_percent_values.shape[1]} versus "
-            f"{rom_percent_values.shape[1]}"
+            "Percent-error and moving-average files have different field counts: "
+            f"{percent_values.shape[1]} versus {ma_values.shape[1]}"
+        )
+    if percent_iterations.shape != ma_iterations.shape:
+        raise ValueError(
+            "Percent-error and moving-average files have different row counts: "
+            f"{len(percent_iterations)} versus {len(ma_iterations)}"
+        )
+    if not np.allclose(percent_iterations, ma_iterations, rtol=0.0, atol=1e-9):
+        bad = np.flatnonzero(
+            ~np.isclose(percent_iterations, ma_iterations, rtol=0.0, atol=1e-9)
+        )
+        index = int(bad[0])
+        raise ValueError(
+            "Percent-error and moving-average iterations are not aligned. "
+            f"First mismatch at row {index}: "
+            f"{percent_iterations[index]} versus {ma_iterations[index]}"
         )
 
-    if rom_error_values.shape[1] != rom_percent_values.shape[1]:
-        raise ValueError(
-            "ROM absolute and percent conservation-error files contain "
-            "different numbers of conservative variables: "
-            f"{rom_error_values.shape[1]} versus "
-            f"{rom_percent_values.shape[1]}"
-        )
-
-    # Conservation errors are plotted as magnitudes. This also ensures that
-    # valid nonzero samples can be displayed on logarithmic axes.
-    fom_error_values = np.abs(fom_error_values)
-    rom_error_values = np.abs(rom_error_values)
-    fom_percent_values = np.abs(fom_percent_values)
-    rom_percent_values = np.abs(rom_percent_values)
-
+    percent_values = np.abs(percent_values)
+    ma_values = np.abs(ma_values)
+    number_of_variables = percent_values.shape[1]
     default_names = ["Mass", "Momentum", "Energy", "Species"]
-    number_of_variables = rom_error_values.shape[1]
-    field_names = (
-        default_names
-        if number_of_variables == len(default_names)
-        else [
-            f"Conservative field {index + 1}"
-            for index in range(number_of_variables)
-        ]
-    )
-
-    plot_variants = (
-        ("Scatter, logarithmic y-axis", "scatter", True),
-        ("Scatter, linear y-axis", "scatter", False),
-    )
-
-    def add_rom_page(
-        field_name,
-        values,
-        short_average,
-        long_average,
-        plot_label,
-        plot_kind,
-        use_log_y,
-        value_iterations=None,
-        y_label="Conservation error magnitude",
-        title_prefix="ROM Conservation Error History",
-    ):
-        """Add one ROM raw-error scatter plot and two moving averages."""
-        if value_iterations is None:
-            value_iterations = rom_error_iterations
-        fig, value_axis = plt.subplots(figsize=(12, 7))
-
-        if use_log_y:
-            raw_plot_values = np.where(
-                np.isfinite(values) & (values > 0.0), values, np.nan
-            )
-            short_plot_values = np.where(
-                np.isfinite(short_average) & (short_average > 0.0),
-                short_average,
-                np.nan,
-            )
-            long_plot_values = np.where(
-                np.isfinite(long_average) & (long_average > 0.0),
-                long_average,
-                np.nan,
-            )
-        else:
-            raw_plot_values = values
-            short_plot_values = short_average
-            long_plot_values = long_average
-
-        if plot_kind == "scatter":
-            raw_artist = value_axis.scatter(
-                value_iterations,
-                raw_plot_values,
-                color="tab:red",
-                s=10,
-                alpha=0.50,
-                label="ROM value",
-                zorder=2,
-            )
-        else:
-            raw_artist, = value_axis.plot(
-                value_iterations,
-                raw_plot_values,
-                color="tab:red",
-                linestyle="-",
-                linewidth=1.0,
-                alpha=0.60,
-                label="ROM value",
-                zorder=2,
-            )
-
-        short_line, = value_axis.plot(
-            value_iterations,
-            short_plot_values,
-            color="darkblue",
-            linestyle="-",
-            linewidth=2.0,
-            label=f"Moving average ({short_window})",
-            zorder=4,
-        )
-        long_line, = value_axis.plot(
-            value_iterations,
-            long_plot_values,
-            color="tab:green",
-            linestyle="-.",
-            linewidth=2.2,
-            label=f"Moving average ({long_window})",
-            zorder=5,
-        )
-
-        value_axis.set_xlabel("Iteration")
-        value_axis.set_ylabel(y_label)
-        value_axis.set_title(
-            f"ROM Conservation Error History: {field_name}\n{plot_label}"
-        )
-        if use_log_y:
-            value_axis.set_yscale("log")
-
-        value_axis.minorticks_on()
-        value_axis.tick_params(axis="x", which="major", length=6)
-        value_axis.tick_params(axis="x", which="minor", length=3)
-        value_axis.grid(
-            which="major",
-            axis="both",
-            linestyle="-",
-            alpha=0.35,
-        )
-        value_axis.grid(
-            which="minor",
-            axis="both",
-            linestyle=":",
-            alpha=0.20,
-        )
-        value_axis.legend(
-            handles=[raw_artist, short_line, long_line],
-            loc="best",
-            fontsize=9,
-        )
-
-        fig.tight_layout()
-        pdf.savefig(fig, bbox_inches="tight")
-        plt.close(fig)
-
+    field_names = default_names if number_of_variables == 4 else [
+        f"Conservative field {i + 1}" for i in range(number_of_variables)
+    ]
+    variants = (("Scatter, logarithmic y-axis", True),
+                ("Scatter, linear y-axis", False))
     print("============================================================")
-    print("Appending ROM conservation-error histories")
-    print("FOM conservation-error plotting is commented out")
+    print("Appending ROM percent conservation-error histories")
+    print(f"Percent file: {percent_file.resolve()}")
+    print(f"Saved moving-average file: {moving_average_file.resolve()}")
     print(f"ROM variables: {number_of_variables}")
-    print(f"Pages per ROM variable: {len(plot_variants)}")
-    print(f"Moving-average windows: {short_window}, {long_window}")
+    print("Only percent-error pages will be produced")
     print("============================================================")
-
-    # FOM conservation-error plots are intentionally disabled.
-    # The former FOM plotting loop would be placed here. FOM data continues
-    # to be loaded above so the input files and conservative-variable counts
-    # are still checked.
-    #
-    # for variable_index, field_name in enumerate(field_names):
-    #     add_model_page(
-    #         model_name="FOM",
-    #         field_name=field_name,
-    #         value_iterations=fom_error_iterations,
-    #         values=fom_error_values[:, variable_index],
-    #         value_color="darkblue",
-    #     )
 
     for variable_index, field_name in enumerate(field_names):
-        values = rom_error_values[:, variable_index]
-        short_average = compute_moving_average_ignore_nan(
-            values, short_window
-        )
-        long_average = compute_moving_average_ignore_nan(
-            values, long_window
+        raw = percent_values[:, variable_index]
+        saved_ma = ma_values[:, variable_index]
+
+        if variable_index < len(fom_rerun_iterations_by_variable):
+            variable_rerun_iterations = (
+                fom_rerun_iterations_by_variable[variable_index]
+            )
+        else:
+            variable_rerun_iterations = np.array([], dtype=float)
+
+        variable_rerun_mask = get_fom_rerun_mask(
+            percent_iterations,
+            variable_rerun_iterations,
         )
 
-        for plot_label, plot_kind, use_log_y in plot_variants:
-            add_rom_page(
-                field_name=field_name,
-                values=values,
-                short_average=short_average,
-                long_average=long_average,
-                plot_label=plot_label,
-                plot_kind=plot_kind,
-                use_log_y=use_log_y,
+        for plot_label, use_log_y in variants:
+            if use_log_y:
+                raw_plot = np.where(np.isfinite(raw) & (raw > 0.0), raw, np.nan)
+                ma_plot = np.where(
+                    np.isfinite(saved_ma) & (saved_ma > 0.0), saved_ma, np.nan
+                )
+            else:
+                raw_plot = np.where(np.isfinite(raw), raw, np.nan)
+                ma_plot = np.where(np.isfinite(saved_ma), saved_ma, np.nan)
+
+            finite = np.isfinite(raw_plot)
+            regular = finite & ~variable_rerun_mask
+            highlighted = finite & variable_rerun_mask
+            fig, axis = plt.subplots(figsize=(12, 7))
+
+            raw_artist = axis.scatter(
+                percent_iterations[regular], raw_plot[regular],
+                color="tab:red", s=10, alpha=0.45,
+                label="ROM percent conservation error", zorder=2,
+                rasterized=True,
             )
+            rerun_artist = None
+            if np.any(highlighted):
+                rerun_artist = axis.scatter(
+                    percent_iterations[highlighted], raw_plot[highlighted],
+                    color="black", edgecolors="black", s=38, alpha=1.0,
+                    label="FOM-rerun iteration", zorder=10,
+                    rasterized=True,
+                )
+
+            ma_line, = axis.plot(
+                ma_iterations, ma_plot,
+                color="darkblue", linestyle="-", linewidth=3.0,
+                alpha=1.0, label="Saved conservation-error moving average",
+                zorder=30,
+            )
+
+            axis.set_xlabel("Iteration")
+            axis.set_ylabel("Conservation error [%]")
+            axis.set_title(
+                f"ROM Percent Conservation Error History: {field_name}\n{plot_label}"
+            )
+            if use_log_y:
+                axis.set_yscale("log")
+            axis.minorticks_on()
+            axis.grid(which="major", axis="both", linestyle="-", alpha=0.35, zorder=0)
+            axis.grid(which="minor", axis="both", linestyle=":", alpha=0.20, zorder=0)
+
+            handles = [raw_artist]
+            if rerun_artist is not None:
+                handles.append(rerun_artist)
+            handles.append(ma_line)
+            axis.legend(handles=handles, loc="best", fontsize=9)
+
             print(
-                f"Added ROM conservation-error page "
-                f"{variable_index + 1}/{number_of_variables}: "
-                f"{field_name}, {plot_label}"
+                f"Writing percent page {variable_index + 1}/{number_of_variables}: "
+                f"{field_name}, {plot_label}; visible MA points="
+                f"{np.count_nonzero(np.isfinite(ma_plot)):,}",
+                flush=True,
             )
+            fig.tight_layout()
+            pdf.savefig(fig, bbox_inches="tight", dpi=150)
+            plt.close(fig)
 
-        percent_values = rom_percent_values[:, variable_index]
-        percent_short_average = compute_moving_average_ignore_nan(
-            percent_values, short_window
-        )
-        percent_long_average = compute_moving_average_ignore_nan(
-            percent_values, long_window
-        )
+    print("Finished appending ROM percent conservation-error histories.")
 
-        for plot_label, plot_kind, use_log_y in plot_variants:
-            add_rom_page(
-                field_name=field_name,
-                values=percent_values,
-                short_average=percent_short_average,
-                long_average=percent_long_average,
-                plot_label=plot_label,
-                plot_kind=plot_kind,
-                use_log_y=use_log_y,
-                value_iterations=rom_percent_iterations,
-                y_label="Conservation error [%]",
-                title_prefix="ROM Percent Conservation Error History",
-            )
-            print(
-                f"Added ROM percent conservation-error page "
-                f"{variable_index + 1}/{number_of_variables}: "
-                f"{field_name}, {plot_label}"
-            )
-
-    print("Finished appending ROM conservation-error histories.")
 
 
 def parse_arguments():
@@ -1338,6 +1528,13 @@ def parse_arguments():
     parser.add_argument(
         "--error-delimiter", default=",",
         help="Error-signal file delimiter (default: comma)."
+    )
+    parser.add_argument(
+        "--fom-rerun-window", type=int, default=1000,
+        help=(
+            "Trailing iteration window for FOM-rerun frequency. A normalized "
+            "running average is used during startup (default: 1000)."
+        ),
     )
 
     return parser.parse_args()
@@ -1396,6 +1593,10 @@ def main():
         rom_data=rom_data
     )
 
+    print("Releasing primitive FOM and ROM arrays from memory.", flush=True)
+    del fom_data
+    del rom_data
+
 
     fom_conservative_data, rom_conservative_data = (
         load_common_conservative_data(
@@ -1412,13 +1613,75 @@ def main():
         )
     )
 
+    print("Releasing conservative FOM and ROM arrays from memory.", flush=True)
+    del fom_conservative_data
+    del rom_conservative_data
+
     # Each error directory is a sibling of its corresponding results directory.
     fom_error_directory = Path(fom_dir) / "error"
     rom_error_directory = Path(rom_dir).parent / "error"
     error_directory = rom_error_directory
 
+    # This input is optional. Missing or invalid counter data does not stop
+    # existing PDF generation.
+    fom_rerun_counter_file = rom_error_directory / "error_cons_fom_iter_counter.txt"
+    fom_rerun_counter_iterations = None
+    fom_rerun_counter_values = None
+    fom_rerun_iterations = np.array([], dtype=float)
+    fom_rerun_iterations_by_variable = tuple(
+        np.array([], dtype=float)
+        for _ in range(4)
+    )
+
+    if fom_rerun_counter_file.is_file():
+        try:
+            (
+                fom_rerun_counter_iterations,
+                fom_rerun_counter_values,
+                fom_rerun_iterations,
+                fom_rerun_iterations_by_variable,
+            ) = load_fom_rerun_counter(
+                fom_rerun_counter_file,
+                delimiter=args.error_delimiter,
+            )
+        except (OSError, ValueError) as error:
+            print(
+                "Warning: counter file could not be used; continuing with "
+                "the original plotting behavior."
+            )
+            print(f"  File: {fom_rerun_counter_file}")
+            print(f"  Reason: {error}")
+            fom_rerun_counter_iterations = None
+            fom_rerun_counter_values = None
+            fom_rerun_iterations = np.array([], dtype=float)
+            fom_rerun_iterations_by_variable = tuple(
+                np.array([], dtype=float)
+                for _ in range(4)
+            )
+    else:
+        print(
+            "Warning: counter file not found; continuing with the original "
+            "plotting behavior."
+        )
+        print(f"  Expected file: {fom_rerun_counter_file}")
+
+    os.makedirs(
+        os.path.dirname(os.path.abspath(pdf_filename)),
+        exist_ok=True,
+    )
+
     # Open the output PDF exactly once so every figure is written to the same file.
     with PdfPages(pdf_filename) as pdf:
+        # Save this first so it becomes the first PDF page when available.
+        if fom_rerun_counter_iterations is not None:
+            plot_fom_rerun_counter_to_pdf(
+                counter_iterations=fom_rerun_counter_iterations,
+                counter_values=fom_rerun_counter_values,
+                rerun_iterations=fom_rerun_iterations,
+                pdf=pdf,
+                rerun_window=args.fom_rerun_window,
+            )
+
         plot_histories_to_pdf(
             iterations=iterations,
             relative_l2=relative_l2,
@@ -1440,6 +1703,10 @@ def main():
             fom_error_directory=fom_error_directory,
             rom_error_directory=rom_error_directory,
             pdf=pdf,
+            fom_rerun_iterations=fom_rerun_iterations,
+            fom_rerun_iterations_by_variable=(
+                fom_rerun_iterations_by_variable
+            ),
             short_window=args.error_short_window,
             long_window=args.error_long_window,
             delimiter=args.error_delimiter,
@@ -1452,6 +1719,7 @@ def main():
             primitive_field_names=field_names,
             error_directory=error_directory,
             pdf=pdf,
+            fom_rerun_iterations=fom_rerun_iterations,
             short_window=args.error_short_window,
             long_window=args.error_long_window,
             delimiter=args.error_delimiter,
