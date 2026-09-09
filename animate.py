@@ -2,6 +2,7 @@ from multiprocessing import Pool
 import numpy as np
 import os
 from tqdm import tqdm
+import argparse
 
 import matplotlib
 matplotlib.use('Agg')  # HPC-safe non-interactive backend
@@ -353,11 +354,34 @@ if __name__ == '__main__':
     # Inputs
     # ============================================================
 
-    directory = '/kuhpc/scratch/capl/b323g408/1D_RDE_matrix/stencil'
+    default_rom_dir = '/kuhpc/scratch/capl/b323g408/1D_RDE_matrix'
 
-    # Single FOM path
-    # fom_result_dir = '/kuhpc/scratch/capl/b323g408/1D_RDE/FOM_results_every'
-    fom_result_dir = '/kuhpc/work/mi210/b323g408/1D_RDE/results/single'
+    default_fom_dir = '/kuhpc/work/mi210/b323g408/1D_RDE/results/single'
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        '--case',
+        default='all',
+        help="ROM case name to process. Use 'all' for every case."
+    )
+
+    parser.add_argument(
+        '--rom-dir',
+        default=default_rom_dir,
+        help='Base directory containing ROM case folders.'
+    )
+
+    parser.add_argument(
+        '--fom-dir',
+        default=default_fom_dir,
+        help='Directory containing FOM iteration files.'
+    )
+
+    args = parser.parse_args()
+
+    directory = args.rom_dir
+    fom_result_dir = args.fom_dir
 
     # ============================================================
     # ROM case list settings
@@ -432,6 +456,16 @@ if __name__ == '__main__':
     s_list = [0.5, 1, 2]
     u_list = [2, 5, 10, 20, 40]
     rom_case_names = [f's{s_num}_u{u_num}' for s_num in s_list for u_num in u_list]
+
+    if args.case.lower() != "all":
+
+        if args.case not in rom_case_names:
+            raise ValueError(
+                f"Requested case '{args.case}' not found in generated case list."
+            )
+
+        rom_case_names = [args.case]
+
 
     # ------------------------------------------------------------
     # Option 3: generate ms-style cases automatically.

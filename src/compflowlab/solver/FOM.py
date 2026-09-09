@@ -47,9 +47,18 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
     # time integrate
     state = time_integration.advance_time(solver_param,rom_param,state,physics)
 
+    # # update prim state
+    # state = physics.cons2prim_converter(solver_param,state)
+
+    # # update the ghost cells
+    # state = bc_func.update_ghost_cell(solver_param,state)
+
+    # # update prim state
+    # state = physics.prim2cons_converter(solver_param,state)
+
     if solver_param['injection']:
 
-        state = physics.injection_correction(solver_param,state)
+        state = physics.injection_correction(solver_param,state,rom_param)
 
     # update prim state
     state = physics.cons2prim_converter(solver_param,state)

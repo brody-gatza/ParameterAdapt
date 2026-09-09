@@ -400,6 +400,15 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
                 # post process part
                 if solver_param['injection']:
 
+                    # # update prim state
+                    # state = physics.cons2prim_converter(solver_param,state)
+
+                    # # update the ghost cells
+                    # state = bc_func.update_ghost_cell(solver_param,state)
+
+                    # # update prim state
+                    # state = physics.prim2cons_converter(solver_param,state)
+
                     state = physics.injection_correction(solver_param,state,rom_param)
 
             Q_bar_star_new = state['Q_cons']
@@ -445,6 +454,15 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
         state = time_integration.advance_time(solver_param,rom_param,state,physics)
 
         if solver_param['injection']:
+
+            # # update prim state
+            # state = physics.cons2prim_converter(solver_param,state)
+
+            # # update the ghost cells
+            # state = bc_func.update_ghost_cell(solver_param,state)
+
+            # # update prim state
+            # state = physics.prim2cons_converter(solver_param,state)
 
             state = physics.injection_correction(solver_param,state,rom_param)
 
@@ -498,6 +516,15 @@ def update_sampling_points(solver_param,state,physics,time_integration,rom_param
         state = time_integration.advance_time(solver_param,rom_param,state,physics)
 
         if solver_param['injection']:
+
+            # # update prim state
+            # state = physics.cons2prim_converter(solver_param,state)
+
+            # # update the ghost cells
+            # state = bc_func.update_ghost_cell(solver_param,state)
+
+            # # update prim state
+            # state = physics.prim2cons_converter(solver_param,state)
 
             state = physics.injection_correction(solver_param,state,rom_param)
 
@@ -568,6 +595,15 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
         # post process part
         if solver_param['injection']:
+
+            # # update prim state
+            # state = physics.cons2prim_converter(solver_param,state)
+
+            # # update the ghost cells
+            # state = bc_func.update_ghost_cell(solver_param,state)
+
+            # # update prim state
+            # state = physics.prim2cons_converter(solver_param,state)
 
             state = physics.injection_correction(solver_param,state,rom_param)
 
@@ -720,6 +756,15 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             # post process part
             if solver_param['injection']:
 
+                # # update prim state
+                # state = physics.cons2prim_converter(solver_param,state)
+
+                # # update the ghost cells
+                # state = bc_func.update_ghost_cell(solver_param,state)
+
+                # # update prim state
+                # state = physics.prim2cons_converter(solver_param,state)
+
                 state = physics.injection_correction(solver_param,state,rom_param)
 
             # Calculate the primitive variables for the FOM FOM solution
@@ -798,6 +843,16 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             state['Q_cons'] = copy.deepcopy(Q_bar_new_solver_full)
 
             if solver_param['injection']:
+
+                # # update prim state
+                # state = physics.cons2prim_converter(solver_param,state)
+
+                # # update the ghost cells
+                # state = bc_func.update_ghost_cell(solver_param,state)
+
+                # # update prim state
+                # state = physics.prim2cons_converter(solver_param,state)
+
                 state = physics.injection_correction(solver_param,state,rom_param)
                 Q_bar_new_solver_full = copy.deepcopy(state['Q_cons'])
 
@@ -834,6 +889,15 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             # # post process part
             # if solver_param['injection']:
 
+            # # update prim state
+            # state = physics.cons2prim_converter(solver_param,state)
+
+            # # update the ghost cells
+            # state = bc_func.update_ghost_cell(solver_param,state)
+
+            # # update prim state
+            # state = physics.prim2cons_converter(solver_param,state)
+
             #     state = physics.injection_correction(solver_param,state,rom_param)
 
             # update prim state
@@ -862,8 +926,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
             error_cons = np.abs(np.sum(Q_cons_reshape,axis=1) - (np.sum(Q_cons_pre_reshape,axis=1) + state['Q_cons_inj']))
             error_cons_perct = 100.0 * error_cons / np.abs(np.sum(Q_cons_reshape,axis=1))
             error_cons_samp_perct = 100.0 * np.abs((Q_cons_reshape[:,rom_param['S_indx_user']] - (Q_cons_pre_reshape[:,rom_param['S_indx_user']] + state['Q_cons_inj_samp'][:,rom_param['S_indx_user']])) / Q_cons_reshape[:,rom_param['S_indx_user']])
-            print(np.max(state['Q_cons_inj_samp'][:,rom_param['S_indx_user']],axis=1))
-            breakpoint()
+            # print(np.max(state['Q_cons_inj_samp'][:,rom_param['S_indx_user']],axis=1))
 
             # Calculate the interpolation error
             # Not technically interpolation error, more like overall ROM error
@@ -885,6 +948,15 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
             # # post process part
             # if solver_param['injection']:
+
+            # # update prim state
+            # state = physics.cons2prim_converter(solver_param,state)
+
+            # # update the ghost cells
+            # state = bc_func.update_ghost_cell(solver_param,state)
+
+            # # update prim state
+            # state = physics.prim2cons_converter(solver_param,state)
 
             #     state = physics.injection_correction(solver_param,state,rom_param)
 
@@ -1053,6 +1125,15 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                         state = time_integration.advance_time(solver_param,rom_param,state,physics)
 
                         if solver_param['injection']:
+
+                            # # update prim state
+                            # state = physics.cons2prim_converter(solver_param,state)
+
+                            # # update the ghost cells
+                            # state = bc_func.update_ghost_cell(solver_param,state)
+
+                            # # update prim state
+                            # state = physics.prim2cons_converter(solver_param,state)
 
                             state = physics.injection_correction(solver_param,state,rom_param)
 
