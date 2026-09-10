@@ -949,14 +949,10 @@ def injection_correction(solver_param,state,rom_param):
 
     # HR          = state['heat_release']
 
-    # indx_init   = np.argmax(np.abs(u[2:-2])) - sub_indx + 2
-    indx_init   = np.argmax(np.abs(u)) - sub_indx
+    indx_init   = np.argmax(np.abs(u[2:-2])) - sub_indx + 2
     indx_final  = indx_init + add_indx
-    # detonation  = (np.arange(indx_init,indx_final) - 2)%(solver_param['cell_number']) + 2
-    # inj_indx    = np.arange(2,solver_param['cell_number']+2)
-    # To keep it faithful, I think inj_indx should include ghost cells but use the new detonation finder
-    detonation  = np.arange(indx_init,indx_final)%(solver_param['cell_number']+4)
-    inj_indx    = np.arange(0,solver_param['cell_number']+4,1)
+    detonation  = (np.arange(indx_init,indx_final) - 2)%(solver_param['cell_number']) + 2
+    inj_indx    = np.arange(2,solver_param['cell_number']+2)
     inj_indx    = inj_indx[~np.isin(inj_indx,detonation)]
 
     # compute injected fluid properties 
@@ -1063,11 +1059,9 @@ def injection_correction(solver_param,state,rom_param):
     
     # Define smoothing region (10 cells on each side of detonation)
     smoothing_width = 10
-    # smoothing_start = (detonation[0] - 2 - smoothing_width) % ncell_interior
-    # smoothing_end = (detonation[0] - 2 + smoothing_width) % ncell_interior
-    # THis should be divided by ncell total!!
-    smoothing_start = (detonation[0] - smoothing_width) % ncell_interior
-    smoothing_end = (detonation[0] + smoothing_width) % ncell_interior
+    smoothing_start = (detonation[0] - 2 - smoothing_width) % ncell_interior
+    smoothing_end = (detonation[0] - 2 + smoothing_width) % ncell_interior
+
     # Get the actual smoothing length (accounts for periodic wrapping)
     if smoothing_start <= smoothing_end:
         smoothing_length = smoothing_end - smoothing_start
@@ -1085,12 +1079,9 @@ def injection_correction(solver_param,state,rom_param):
     
     # Get the boundary values for interpolation
     # Make sure we're using interior cells, not ghost cells
-    # q_left_idx = interior_start + smoothing_start
-    # q_right_idx = interior_start + smoothing_end
-    # Same here, should be divided by ncell total
-    q_left_idx = interior_start + ((detonation[0] - smoothing_width) % ncell_interior)
-    q_right_idx = interior_start + ((detonation[0] + smoothing_width) % ncell_interior)
-    
+    q_left_idx = interior_start + smoothing_start
+    q_right_idx = interior_start + smoothing_end
+
     q_left = Q_cons_user[:, q_left_idx]
     q_right = Q_cons_user[:, q_right_idx]
     

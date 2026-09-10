@@ -458,12 +458,6 @@ if __name__ == '__main__':
     rom_case_names = [f's{s_num}_u{u_num}' for s_num in s_list for u_num in u_list]
 
     if args.case.lower() != "all":
-
-        if args.case not in rom_case_names:
-            raise ValueError(
-                f"Requested case '{args.case}' not found in generated case list."
-            )
-
         rom_case_names = [args.case]
 
 
@@ -550,7 +544,7 @@ if __name__ == '__main__':
     # ============================================================
 
     start_iter = 0
-    step_iter  = 100
+    step_iter  = 1
     end_iter   = 500000
 
     step_plot  = 1
@@ -561,7 +555,7 @@ if __name__ == '__main__':
 
     x_0      = 0
     x_f      = 0.288
-    cell_num = 2000
+    cell_num = 500
 
     x_label = 'x [m]'
 

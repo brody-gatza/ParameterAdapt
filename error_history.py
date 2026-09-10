@@ -22,6 +22,56 @@ from matplotlib.backends.backend_pdf import PdfPages
 CELL_VOLUME = 1
 
 
+# Inclusive iteration ranges to include in the plots.
+# Add or remove ranges as needed. Overlapping ranges are allowed.
+# Use None or [] to include every available iteration.
+PLOT_ITERATION_RANGES = [
+    (0, 100000),
+    (0, 2500),
+]
+
+
+# Set internally while each range-specific PDF is generated.
+ACTIVE_PLOT_ITERATION_RANGE = None
+
+
+def get_plot_iteration_mask(iterations):
+    """Return the iterations selected by PLOT_ITERATION_RANGES."""
+    iterations = np.asarray(iterations)
+
+    if ACTIVE_PLOT_ITERATION_RANGE is None:
+        return np.ones(iterations.shape, dtype=bool)
+
+    mask = np.zeros(iterations.shape, dtype=bool)
+
+    for range_index, iteration_range in enumerate(
+        [ACTIVE_PLOT_ITERATION_RANGE]
+    ):
+        if len(iteration_range) != 2:
+            raise ValueError(
+                "Each PLOT_ITERATION_RANGES entry must contain exactly "
+                f"two values. Entry {range_index}: {iteration_range}"
+            )
+
+        start, stop = iteration_range
+
+        if not np.isfinite(start) or not np.isfinite(stop):
+            raise ValueError(
+                "Plot-range limits must be finite. "
+                f"Entry {range_index}: {iteration_range}"
+            )
+
+        if start > stop:
+            raise ValueError(
+                "A plot-range start cannot exceed its stop. "
+                f"Entry {range_index}: {iteration_range}"
+            )
+
+        mask |= (iterations >= start) & (iterations <= stop)
+
+    return mask
+
+
 def load_common_data(fom_dir, rom_dir):
     """
     Load FOM and ROM files for all common iterations.
@@ -70,6 +120,15 @@ def load_common_data(fom_dir, rom_dir):
         sorted(set(fom_files) & set(rom_files)),
         dtype=int
     )
+
+    plot_mask = get_plot_iteration_mask(iterations)
+    iterations = iterations[plot_mask]
+
+    if len(iterations) == 0:
+        raise RuntimeError(
+            "No common FOM and ROM iterations fall within "
+            "PLOT_ITERATION_RANGES."
+        )
 
     if len(iterations) == 0:
         raise RuntimeError(
@@ -512,11 +571,9 @@ def load_common_conservative_data(fom_dir, rom_dir, iterations):
             f"Iterations: {len(iterations)}"
         )
 
-    if fom_conservative_data.shape[1] < 4:
+    if fom_conservative_data.shape[1] < 1:
         raise ValueError(
-            "The conservative data must contain at least four fields "
-            "in this order: density, momentum density, total energy "
-            "density, and species density.\n"
+            "The conservative data must contain at least one field.\n"
             f"Received {fom_conservative_data.shape[1]} fields."
         )
 
@@ -559,18 +616,21 @@ def compute_conservative_integral_histories(
             f"ROM shape: {rom_conservative_data.shape}"
         )
 
+    default_names = ["mass", "momentum", "energy", "species"]
     conservative_fields = {
-        "mass": 0,
-        "momentum": 1,
-        "energy": 2,
-        "species": 3,
+        (
+            default_names[variable_index]
+            if variable_index < len(default_names)
+            else f"conservative_field_{variable_index + 1}"
+        ): variable_index
+        for variable_index in range(fom_conservative_data.shape[1])
     }
 
     def integrate(data, data_name):
-        if data.ndim != 3 or data.shape[1] < 4:
+        if data.ndim != 3 or data.shape[1] < 1:
             raise ValueError(
                 f"{data_name} conservative data must have shape "
-                "(time, at_least_four_variables, cell). "
+                "(time, conservative_variable, cell). "
                 f"Received shape: {data.shape}"
             )
 
@@ -636,11 +696,19 @@ def plot_conservative_integral_histories_to_pdf(
     relative error is set to NaN to avoid division by zero or by a value
     too close to zero.
     """
-    plot_definitions = (
-        ("mass", "Domain-integrated mass", "Total mass"),
-        ("momentum", "Domain-integrated momentum", "Total momentum"),
-        ("energy", "Domain-integrated energy", "Total energy"),
-        ("species", "Domain-integrated species mass", "Total species mass"),
+    display_names = {
+        "mass": "mass",
+        "momentum": "momentum",
+        "energy": "energy",
+        "species": "species mass",
+    }
+    plot_definitions = tuple(
+        (
+            key,
+            f"Domain-integrated {display_names.get(key, key.replace('_', ' '))}",
+            f"Total {display_names.get(key, key.replace('_', ' '))}",
+        )
+        for key in fom_integrals
     )
 
     if not np.isfinite(tolerance) or tolerance < 0.0:
@@ -844,6 +912,17 @@ def load_error_signal_file(filename, delimiter=","):
 
     if np.any(np.diff(iterations) == 0.0):
         raise ValueError(f"Duplicate iterations were found in {filename}.")
+
+    plot_mask = get_plot_iteration_mask(iterations)
+    iterations = iterations[plot_mask]
+    signals = signals[plot_mask]
+
+    if len(iterations) == 0:
+        raise ValueError(
+            f"No iterations in {filename} fall within "
+            "PLOT_ITERATION_RANGES."
+        )
+
     return iterations, signals
 
 
@@ -1540,9 +1619,9 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def main():
+def run_active_plot_range():
     """
-    Main program.
+    Generate the PDF for the currently active iteration range.
     """
 
     args = parse_arguments()
@@ -1563,6 +1642,16 @@ def main():
     else:
         pdf_filename = os.path.abspath(
             os.path.expanduser(args.output)
+        )
+
+    if ACTIVE_PLOT_ITERATION_RANGE is not None:
+        range_start, range_stop = ACTIVE_PLOT_ITERATION_RANGE
+        output_path = Path(pdf_filename)
+        pdf_filename = str(
+            output_path.with_name(
+                f"{output_path.stem}_{range_start:g}_to_{range_stop:g}"
+                f"{output_path.suffix}"
+            )
         )
 
     field_names = [
@@ -1724,6 +1813,51 @@ def main():
             long_window=args.error_long_window,
             delimiter=args.error_delimiter,
         )
+
+
+def main():
+    """Generate one separate PDF for every configured iteration range."""
+    global ACTIVE_PLOT_ITERATION_RANGE
+
+    if PLOT_ITERATION_RANGES is None or len(PLOT_ITERATION_RANGES) == 0:
+        ranges_to_plot = [None]
+    else:
+        ranges_to_plot = list(PLOT_ITERATION_RANGES)
+
+    for range_index, iteration_range in enumerate(ranges_to_plot):
+        if iteration_range is not None:
+            if len(iteration_range) != 2:
+                raise ValueError(
+                    "Each PLOT_ITERATION_RANGES entry must contain exactly "
+                    f"two values. Entry {range_index}: {iteration_range}"
+                )
+
+            start, stop = iteration_range
+
+            if not np.isfinite(start) or not np.isfinite(stop):
+                raise ValueError(
+                    "Plot-range limits must be finite. "
+                    f"Entry {range_index}: {iteration_range}"
+                )
+
+            if start > stop:
+                raise ValueError(
+                    "A plot-range start cannot exceed its stop. "
+                    f"Entry {range_index}: {iteration_range}"
+                )
+
+            ACTIVE_PLOT_ITERATION_RANGE = (start, stop)
+            print("============================================================")
+            print(
+                f"Generating PDF for inclusive iteration range "
+                f"{start:g} to {stop:g}"
+            )
+            print("============================================================")
+        else:
+            ACTIVE_PLOT_ITERATION_RANGE = None
+            print("Generating one PDF containing all available iterations.")
+
+        run_active_plot_range()
 
 
 if __name__ == "__main__":

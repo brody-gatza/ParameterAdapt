@@ -50,6 +50,26 @@ def cons2prim_converter(solver_param, state):
 
     return state
 
+def cons2prim_converter_FGS(solver_param, state, Q_cons):
+
+    vol         = solver_param['vol']
+    gamma       = 1.4
+
+    Q_cons_user = reshape_func.results_solver2user_converter(solver_param['num_state_var'],solver_param['cell_number'],Q_cons)
+
+    mass        = Q_cons_user[0,:]
+    momx        = Q_cons_user[1,:]
+    energy      = Q_cons_user[2,:]
+    
+    rho = mass / vol
+    vx  = momx / rho / vol
+    P   = (energy/vol - (0.5 * rho * (vx**2))) * (gamma-1)
+    T   = P / rho / (ct.gas_constant / state['MW_gas']) 
+
+    Q_prim = np.vstack((rho,vx,P,T)).ravel()
+
+    return Q_prim
+
 def second_order_roe_inviscid_flux_calculator(solver_param,rom_param,state):
     
     state            = cons2prim_converter(solver_param,state)

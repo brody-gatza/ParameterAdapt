@@ -786,8 +786,8 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 results_recorder_FOM_error(solver_param,state,rom_param)
 
             # Store the FOM solution
-            Q_cons_FOM = state['Q_cons'].copy()
-            Q_prim_FOM = state['Q_prim'].copy()
+            Q_cons_FOM = copy.deepcopy(state['Q_cons'])
+            Q_prim_FOM = copy.deepcopy(state['Q_prim'])
 
             # Restore the states
             # state = restore_state
@@ -854,6 +854,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 # state = physics.prim2cons_converter(solver_param,state)
 
                 state = physics.injection_correction(solver_param,state,rom_param)
+
                 Q_bar_new_solver_full = copy.deepcopy(state['Q_cons'])
 
                 Q_bar_new_solver_int  = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],
@@ -945,20 +946,6 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
             # Convert the projected FOM to primitive variables
             state['Q_cons'] = Q_cons_FOM_proj
-
-            # # post process part
-            # if solver_param['injection']:
-
-            # # update prim state
-            # state = physics.cons2prim_converter(solver_param,state)
-
-            # # update the ghost cells
-            # state = bc_func.update_ghost_cell(solver_param,state)
-
-            # # update prim state
-            # state = physics.prim2cons_converter(solver_param,state)
-
-            #     state = physics.injection_correction(solver_param,state,rom_param)
 
             # update prim state
             state = physics.cons2prim_converter(solver_param,state)
@@ -1137,7 +1124,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
                             state = physics.injection_correction(solver_param,state,rom_param)
 
-                        Q_bar_star_new = state['Q_cons'].copy()
+                        Q_bar_star_new = copy.deepcopy(state['Q_cons'])
                         Q_bar_star_new_solver_int = reshape_func.solver_eliminate_ghost(solver_param['cell_number'],solver_param['num_state_var'],Q_bar_star_new)
 
                         # some sampling methods (ex. FGS) need this for sampling
