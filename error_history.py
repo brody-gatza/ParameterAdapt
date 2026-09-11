@@ -1,889 +1,92 @@
+#!/usr/bin/env python3
+"""Generate FOM/ROM comparison and conservation-error plots.
+
+All plot families are controlled by hard-coded True/False switches in the
+USER CONFIGURATION section. Validation routines are grouped separately from
+loading, numerical analysis, plotting, and orchestration routines.
+"""
+
+from __future__ import annotations
+
 import argparse
-import os
 import re
+from collections import deque
 from contextlib import nullcontext
 from pathlib import Path
-
-import numpy as np
+from typing import Iterable, Sequence
 
 import matplotlib
-matplotlib.use("Agg")  # HPC-safe non-interactive backend
-
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 
 
+# =============================================================================
+# USER CONFIGURATION
+# =============================================================================
 
+# Plot-family switches. Set any entry to False to omit that page type.
+PLOT_ENABLED = {
+    "fom_rerun_history": False,
+    "primitive_metrics": True,
+    "conservative_integrals": False,
+    "rom_conservation_error_log": False,
+    "rom_conservation_error_linear": False,
+    "baseline_comparison": True,
+    "winsorized_mean_comparison": True,
+    "winsorized_residual_metrics": True,
+    "winsorized_standard_deviation": True,
+    "winsorized_coefficient_of_variation": True,
+    "adaptive_valley_band": False,
+    "histogram_density_band": True,
+    "variable_outlier_count": True,
+    "rolling_rms": True,
+    "rolling_cv": True,
+    "rolling_standard_deviation": False,
+    "rolling_log_ratio": True,
+    "interpolation_error_signals": False,
+}
 
-# Uniform computational-cell volume.
-# Change this value if the computational-cell volume changes.
-# CELL_VOLUME = 0.000144
-# Reported values are already multiplied by volume
-CELL_VOLUME = 1
+# Reported conservative values are already multiplied by volume.
+CELL_VOLUME = 1.0
 
+# Inclusive ranges. Use None or [] for one PDF containing all iterations.
+PLOT_ITERATION_RANGES = [(0, 100_000), [0, 1_000_000]]
 
-# Inclusive iteration ranges to include in the plots.
-# Add or remove ranges as needed. Overlapping ranges are allowed.
-# Use None or [] to include every available iteration.
-PLOT_ITERATION_RANGES = [
-    (0, 100000),
-    (0, 1000000),
+PRIMITIVE_FIELD_NAMES = [
+    "Density", "Velocity", "Pressure", "Temperature", "Reactant",
+    "Heat release rate",
 ]
+CONSERVATIVE_FIELD_NAMES = ["Mass", "Momentum", "Energy", "Species"]
 
+ROLLING_CV_WINDOWS = (1000,)
+ROLLING_CV_MIN_MEAN_MAGNITUDE = 1.0e-30
+ROLLING_CV_LOGY = False
 
-# Set internally while each range-specific PDF is generated.
-ACTIVE_PLOT_ITERATION_RANGE = None
+ROLLING_STD_WINDOWS = (1000,)
+ROLLING_STD_BASELINE_WINDOW = 5000
+ROLLING_STD_LOGY = False
 
-
-# Rolling coefficient-of-variation settings.
-# Windows are trailing sample counts and expand during startup.
-ROLLING_COEFFICIENT_OF_VARIATION_WINDOWS = (1000,)
-ROLLING_COEFFICIENT_OF_VARIATION_MIN_MEAN_MAGNITUDE = 1.0e-30
-ROLLING_COEFFICIENT_OF_VARIATION_LOGY = False
-
-
-# Rolling standard-deviation settings.
-# The baseline is removed before measuring the fluctuation magnitude.
-ROLLING_STANDARD_DEVIATION_WINDOWS = (1000,)
-ROLLING_STANDARD_DEVIATION_BASELINE_WINDOW = 5000
-ROLLING_STANDARD_DEVIATION_LOGY = False
-
-# Rolling log-ratio fluctuation settings.
-# The metric is the rolling population standard deviation of
-# log10(raw / local_baseline). Only positive raw and baseline values are used.
 ROLLING_LOG_RATIO_WINDOWS = (1000,)
 ROLLING_LOG_RATIO_BASELINE_WINDOW = 5000
 ROLLING_LOG_RATIO_LOGY = False
 
-
-def get_plot_iteration_mask(iterations):
-    """Return the iterations selected by PLOT_ITERATION_RANGES."""
-    iterations = np.asarray(iterations)
-
-    if ACTIVE_PLOT_ITERATION_RANGE is None:
-        return np.ones(iterations.shape, dtype=bool)
-
-    mask = np.zeros(iterations.shape, dtype=bool)
-
-    for range_index, iteration_range in enumerate(
-        [ACTIVE_PLOT_ITERATION_RANGE]
-    ):
-        if len(iteration_range) != 2:
-            raise ValueError(
-                "Each PLOT_ITERATION_RANGES entry must contain exactly "
-                f"two values. Entry {range_index}: {iteration_range}"
-            )
-
-        start, stop = iteration_range
-
-        if not np.isfinite(start) or not np.isfinite(stop):
-            raise ValueError(
-                "Plot-range limits must be finite. "
-                f"Entry {range_index}: {iteration_range}"
-            )
-
-        if start > stop:
-            raise ValueError(
-                "A plot-range start cannot exceed its stop. "
-                f"Entry {range_index}: {iteration_range}"
-            )
-
-        mask |= (iterations >= start) & (iterations <= stop)
-
-    return mask
-
-
-def load_common_data(fom_dir, rom_dir):
-    """
-    Load FOM and ROM files for all common iterations.
-
-    Expected filename:
-        {iteration}iteration_prim.npy
-
-    Expected shape of each file:
-        (variable, cell)
-
-    Returned data shape:
-        (time, variable, cell)
-    """
-
-    pattern = re.compile(r"^(\d+)iteration_prim\.npy$")
-
-    def find_files(directory):
-        files = {}
-
-        for filename in os.listdir(directory):
-            match = pattern.match(filename)
-
-            if match:
-                iteration = int(match.group(1))
-                files[iteration] = os.path.join(
-                    directory,
-                    filename
-                )
-
-        return files
-
-    if not os.path.isdir(fom_dir):
-        raise NotADirectoryError(
-            f"FOM directory does not exist:\n{fom_dir}"
-        )
-
-    if not os.path.isdir(rom_dir):
-        raise NotADirectoryError(
-            f"ROM directory does not exist:\n{rom_dir}"
-        )
-
-    fom_files = find_files(fom_dir)
-    rom_files = find_files(rom_dir)
-
-    iterations = np.array(
-        sorted(set(fom_files) & set(rom_files)),
-        dtype=int
-    )
-
-    plot_mask = get_plot_iteration_mask(iterations)
-    iterations = iterations[plot_mask]
-
-    if len(iterations) == 0:
-        raise RuntimeError(
-            "No common FOM and ROM iterations fall within "
-            "PLOT_ITERATION_RANGES."
-        )
-
-    if len(iterations) == 0:
-        raise RuntimeError(
-            "No common FOM and ROM iteration files were found.\n"
-            f"FOM directory: {fom_dir}\n"
-            f"ROM directory: {rom_dir}"
-        )
-
-    fom_data = np.array([
-        np.load(fom_files[iteration])
-        for iteration in iterations
-    ])
-
-    rom_data = np.array([
-        np.load(rom_files[iteration])
-        for iteration in iterations
-    ])
-
-    if fom_data.shape != rom_data.shape:
-        raise ValueError(
-            "FOM and ROM data shapes do not match.\n"
-            f"FOM shape: {fom_data.shape}\n"
-            f"ROM shape: {rom_data.shape}"
-        )
-
-    if fom_data.ndim != 3:
-        raise ValueError(
-            "Expected assembled data shape "
-            "(time, variable, cell).\n"
-            f"Received shape: {fom_data.shape}"
-        )
-
-    print("============================================================")
-    print("Loaded FOM and ROM data")
-    print(f"Common iterations: {len(iterations)}")
-    print(f"First iteration:   {iterations[0]}")
-    print(f"Last iteration:    {iterations[-1]}")
-    print(f"Data shape:        {fom_data.shape}")
-    print("============================================================")
-
-    return fom_data, rom_data, iterations
-
-
-def compute_histories(
-    fom_data,
-    rom_data,
-    tolerance=1.0e-14
-):
-    """
-    Compute the relative L2 error and Pearson correlation at every
-    time step for every field.
-
-    FOM is treated as the truth value.
-
-    Relative L2 error:
-
-        ||ROM - FOM||_2 / ||FOM||_2
-
-    Metrics are computed across the spatial cells.
-
-    Returned array shapes:
-        relative_l2: (variable, time)
-        correlation: (variable, time)
-    """
-
-    number_of_times = fom_data.shape[0]
-    number_of_variables = fom_data.shape[1]
-
-    relative_l2 = np.full(
-        (number_of_variables, number_of_times),
-        np.nan
-    )
-
-    correlation = np.full(
-        (number_of_variables, number_of_times),
-        np.nan
-    )
-
-    for time_index in range(number_of_times):
-
-        for variable_index in range(number_of_variables):
-
-            fom = fom_data[
-                time_index,
-                variable_index,
-                :
-            ]
-
-            rom = rom_data[
-                time_index,
-                variable_index,
-                :
-            ]
-
-            valid = np.isfinite(fom) & np.isfinite(rom)
-
-            if not np.any(valid):
-                continue
-
-            fom_valid = fom[valid]
-            rom_valid = rom[valid]
-
-            # Relative L2 error
-            fom_norm = np.linalg.norm(fom_valid)
-
-            if fom_norm > tolerance:
-                relative_l2[
-                    variable_index,
-                    time_index
-                ] = (
-                    np.linalg.norm(rom_valid - fom_valid)
-                    / fom_norm
-                )
-
-            # Pearson correlation
-            if (
-                len(fom_valid) >= 2
-                and np.std(fom_valid) > tolerance
-                and np.std(rom_valid) > tolerance
-            ):
-                correlation[
-                    variable_index,
-                    time_index
-                ] = np.corrcoef(
-                    fom_valid,
-                    rom_valid
-                )[0, 1]
-
-    print("Computed error and correlation histories.")
-
-    return relative_l2, correlation
-
-
-def plot_histories_to_pdf(
-    iterations,
-    relative_l2,
-    correlation,
-    field_names,
-    pdf_filename,
-    pdf=None
-):
-    """
-    Save all variable histories to one multipage PDF.
-
-    Each variable receives one PDF page with:
-        Left y-axis:  relative L2 error in percent
-        Right y-axis: Pearson correlation
-        x-axis:       iteration
-
-    Major and minor ticks are shown on the x-axis.
-    """
-
-    number_of_variables = relative_l2.shape[0]
-
-    if len(field_names) != number_of_variables:
-        print(
-            "Warning: field-name count does not match "
-            "the number of variables."
-        )
-        print("Using generic field names.")
-
-        field_names = [
-            f"Field {index}"
-            for index in range(number_of_variables)
-        ]
-
-    output_directory = os.path.dirname(
-        os.path.abspath(pdf_filename)
-    )
-
-    os.makedirs(
-        output_directory,
-        exist_ok=True
-    )
-
-    print("============================================================")
-    print("Creating metric plots")
-    print(f"Number of variables: {number_of_variables}")
-    print(f"Output PDF: {os.path.abspath(pdf_filename)}")
-    print("============================================================")
-
-    with (PdfPages(pdf_filename) if pdf is None else nullcontext(pdf)) as pdf:
-
-        for variable_index, field_name in enumerate(field_names):
-
-            print(
-                f"Plotting variable "
-                f"{variable_index + 1}/{number_of_variables}: "
-                f"{field_name}"
-            )
-
-            # Create one plot with two y-axes.
-            fig, error_axis = plt.subplots(
-                figsize=(10, 6)
-            )
-
-            correlation_axis = error_axis.twinx()
-
-            # ----------------------------------------------------
-            # Relative L2 error on the left axis
-            # ----------------------------------------------------
-
-            error_line, = error_axis.plot(
-                iterations,
-                100.0 * relative_l2[variable_index],
-                color="tab:red",
-                linestyle="-",
-                linewidth=1.5,
-                label=r"Relative $L_2$ error"
-            )
-
-            error_axis.set_xlabel(
-                "Iteration"
-            )
-
-            error_axis.set_ylabel(
-                r"Relative $L_2$ error [%]",
-                color="tab:red"
-            )
-
-            error_axis.tick_params(
-                axis="y",
-                labelcolor="tab:red"
-            )
-
-            # ----------------------------------------------------
-            # Major and minor x-axis ticks
-            # ----------------------------------------------------
-
-            error_axis.minorticks_on()
-
-            error_axis.tick_params(
-                axis="x",
-                which="major",
-                length=6
-            )
-
-            error_axis.tick_params(
-                axis="x",
-                which="minor",
-                length=3
-            )
-
-            # Major grid lines on both axes.
-            error_axis.grid(
-                which="major",
-                axis="both",
-                linestyle="-",
-                alpha=0.35
-            )
-
-            # Minor grid lines on the x-axis only.
-            error_axis.grid(
-                which="minor",
-                axis="x",
-                linestyle=":",
-                alpha=0.20
-            )
-
-            # ----------------------------------------------------
-            # Pearson correlation on the right axis
-            # ----------------------------------------------------
-
-            correlation_line, = correlation_axis.plot(
-                iterations,
-                correlation[variable_index],
-                color="tab:blue",
-                linestyle="-",
-                linewidth=1.5,
-                label="Pearson correlation"
-            )
-
-            correlation_axis.set_ylabel(
-                "Pearson correlation",
-                color="tab:blue"
-            )
-
-            correlation_axis.tick_params(
-                axis="y",
-                labelcolor="tab:blue"
-            )
-
-            correlation_axis.set_ylim(
-                1.00,
-                0.00
-            )
-
-            correlation_axis.axhline(
-                y=1.0,
-                color="tab:blue",
-                linestyle="--",
-                linewidth=0.8,
-                alpha=0.5
-            )
-
-            correlation_axis.axhline(
-                y=0.0,
-                color="tab:blue",
-                linestyle=":",
-                linewidth=0.8,
-                alpha=0.5
-            )
-
-            # ----------------------------------------------------
-            # Title and legend
-            # ----------------------------------------------------
-
-            error_axis.set_title(
-                field_name
-            )
-
-            error_axis.legend(
-                handles=[
-                    error_line,
-                    correlation_line
-                ],
-                loc="best"
-            )
-
-            fig.tight_layout()
-
-            # Add the current figure as one page in the PDF.
-            pdf.savefig(
-                fig,
-                bbox_inches="tight"
-            )
-
-            plt.close(fig)
-
-            print(
-                f"Finished variable "
-                f"{variable_index + 1}/{number_of_variables}: "
-                f"{field_name}"
-            )
-
-    print("============================================================")
-    print("Finished creating all metric plots.")
-    print("Saved multipage PDF:")
-    print(f"  {os.path.abspath(pdf_filename)}")
-    print("============================================================")
-
-
-
-
-
-
-def load_common_conservative_data(fom_dir, rom_dir, iterations):
-    """
-    Load FOM and ROM conservative-state files for the supplied iterations.
-
-    Expected filename:
-        {iteration}iteration_cons.npy
-
-    Expected shape of each file:
-        (conservative_variable, cell)
-
-    Returned data shape:
-        (time, conservative_variable, cell)
-    """
-    pattern = re.compile(r"^(\d+)iteration_cons\.npy$")
-
-    def find_files(directory):
-        files = {}
-        for filename in os.listdir(directory):
-            match = pattern.match(filename)
-            if match:
-                iteration = int(match.group(1))
-                files[iteration] = os.path.join(directory, filename)
-        return files
-
-    fom_files = find_files(fom_dir)
-    rom_files = find_files(rom_dir)
-
-    missing_fom = [
-        int(iteration)
-        for iteration in iterations
-        if int(iteration) not in fom_files
-    ]
-    missing_rom = [
-        int(iteration)
-        for iteration in iterations
-        if int(iteration) not in rom_files
-    ]
-
-    if missing_fom or missing_rom:
-        message = [
-            "Conservative files are not available for every common "
-            "primitive-data iteration."
-        ]
-        if missing_fom:
-            message.append(
-                "Missing FOM conservative iterations: "
-                + ", ".join(str(value) for value in missing_fom[:20])
-            )
-            if len(missing_fom) > 20:
-                message.append(
-                    f"Also missing {len(missing_fom) - 20} additional "
-                    "FOM conservative files."
-                )
-        if missing_rom:
-            message.append(
-                "Missing ROM conservative iterations: "
-                + ", ".join(str(value) for value in missing_rom[:20])
-            )
-            if len(missing_rom) > 20:
-                message.append(
-                    f"Also missing {len(missing_rom) - 20} additional "
-                    "ROM conservative files."
-                )
-        raise FileNotFoundError("\n".join(message))
-
-    fom_conservative_data = np.array([
-        np.load(fom_files[int(iteration)])
-        for iteration in iterations
-    ])
-    rom_conservative_data = np.array([
-        np.load(rom_files[int(iteration)])
-        for iteration in iterations
-    ])
-
-    if fom_conservative_data.shape != rom_conservative_data.shape:
-        raise ValueError(
-            "FOM and ROM conservative data shapes do not match.\n"
-            f"FOM conservative shape: {fom_conservative_data.shape}\n"
-            f"ROM conservative shape: {rom_conservative_data.shape}"
-        )
-
-    if fom_conservative_data.ndim != 3:
-        raise ValueError(
-            "Expected assembled conservative data shape "
-            "(time, conservative_variable, cell).\n"
-            f"Received shape: {fom_conservative_data.shape}"
-        )
-
-    if fom_conservative_data.shape[0] != len(iterations):
-        raise ValueError(
-            "The number of conservative time steps does not match the "
-            "number of supplied iterations.\n"
-            f"Conservative time steps: {fom_conservative_data.shape[0]}\n"
-            f"Iterations: {len(iterations)}"
-        )
-
-    if fom_conservative_data.shape[1] < 1:
-        raise ValueError(
-            "The conservative data must contain at least one field.\n"
-            f"Received {fom_conservative_data.shape[1]} fields."
-        )
-
-    print("============================================================")
-    print("Loaded FOM and ROM conservative data")
-    print(f"Common iterations:       {len(iterations)}")
-    print(f"First iteration:         {iterations[0]}")
-    print(f"Last iteration:          {iterations[-1]}")
-    print(f"Conservative data shape: {fom_conservative_data.shape}")
-    print("============================================================")
-
-    return fom_conservative_data, rom_conservative_data
-
-
-def compute_conservative_integral_histories(
-    fom_conservative_data,
-    rom_conservative_data,
-):
-    """
-    Compute domain-integrated conservative quantities.
-
-    Fixed conservative field order:
-        index 0: density
-        index 1: momentum density
-        index 2: total energy density
-        index 3: species density
-
-    Integration is performed across all cells at each time step.
-    """
-    if not np.isfinite(CELL_VOLUME) or CELL_VOLUME <= 0.0:
-        raise ValueError(
-            "CELL_VOLUME must be a positive finite value. "
-            f"Received: {CELL_VOLUME}"
-        )
-
-    if fom_conservative_data.shape != rom_conservative_data.shape:
-        raise ValueError(
-            "FOM and ROM conservative data shapes do not match.\n"
-            f"FOM shape: {fom_conservative_data.shape}\n"
-            f"ROM shape: {rom_conservative_data.shape}"
-        )
-
-    default_names = ["mass", "momentum", "energy", "species"]
-    conservative_fields = {
-        (
-            default_names[variable_index]
-            if variable_index < len(default_names)
-            else f"conservative_field_{variable_index + 1}"
-        ): variable_index
-        for variable_index in range(fom_conservative_data.shape[1])
-    }
-
-    def integrate(data, data_name):
-        if data.ndim != 3 or data.shape[1] < 1:
-            raise ValueError(
-                f"{data_name} conservative data must have shape "
-                "(time, conservative_variable, cell). "
-                f"Received shape: {data.shape}"
-            )
-
-        histories = {}
-        for quantity_name, variable_index in conservative_fields.items():
-            field = np.asarray(data[:, variable_index, :], dtype=np.float64)
-
-            if not np.all(np.isfinite(field)):
-                bad_times = np.flatnonzero(
-                    np.any(~np.isfinite(field), axis=1)
-                )
-                raise ValueError(
-                    f"{data_name} {quantity_name} contains non-finite "
-                    f"values at {len(bad_times)} time steps. "
-                    f"First affected time index: {int(bad_times[0])}."
-                )
-
-            histories[quantity_name] = CELL_VOLUME * np.sum(
-                field,
-                axis=1,
-                dtype=np.float64,
-            )
-
-        return histories
-
-    fom_integrals = integrate(fom_conservative_data, "FOM")
-    rom_integrals = integrate(rom_conservative_data, "ROM")
-
-    number_of_cells = fom_conservative_data.shape[2]
-    represented_volume = CELL_VOLUME * number_of_cells
-
-    print("============================================================")
-    print("Computed domain-integrated conservative quantities")
-    print(f"Cell volume:              {CELL_VOLUME:.16g}")
-    print(f"Number of cells:          {number_of_cells}")
-    print(f"Total represented volume: {represented_volume:.16g}")
-    print("Conservative variable order:")
-    print("  0: density")
-    print("  1: momentum density")
-    print("  2: total energy density")
-    print("  3: species density")
-    print("============================================================")
-
-    return fom_integrals, rom_integrals
-
-
-def plot_conservative_integral_histories_to_pdf(
-    iterations,
-    fom_integrals,
-    rom_integrals,
-    pdf,
-    tolerance=1.0e-14,
-):
-    """
-    Append integrated mass, momentum, energy, and species plots.
-
-    The left axis shows the FOM and ROM integrated quantities.
-    The right axis shows the relative error in percent:
-
-        100 * abs(ROM - FOM) / abs(FOM)
-
-    If the absolute FOM value is less than or equal to tolerance, the
-    relative error is set to NaN to avoid division by zero or by a value
-    too close to zero.
-    """
-    display_names = {
-        "mass": "mass",
-        "momentum": "momentum",
-        "energy": "energy",
-        "species": "species mass",
-    }
-    plot_definitions = tuple(
-        (
-            key,
-            f"Domain-integrated {display_names.get(key, key.replace('_', ' '))}",
-            f"Total {display_names.get(key, key.replace('_', ' '))}",
-        )
-        for key in fom_integrals
-    )
-
-    if not np.isfinite(tolerance) or tolerance < 0.0:
-        raise ValueError(
-            "The conserved-quantity error tolerance must be a finite, "
-            f"nonnegative value. Received: {tolerance}"
-        )
-
-    iterations = np.asarray(iterations, dtype=float)
-
-    print("============================================================")
-    print("Appending domain-integrated conservative histories")
-    print("The right axis shows relative FOM-ROM error in percent")
-    print("============================================================")
-
-    with nullcontext(pdf) as pdf:
-        for key, title, y_label in plot_definitions:
-            fom_values = np.asarray(fom_integrals[key], dtype=float)
-            rom_values = np.asarray(rom_integrals[key], dtype=float)
-
-            if fom_values.shape != iterations.shape:
-                raise ValueError(
-                    f"FOM {key} history shape {fom_values.shape} does not "
-                    f"match iteration shape {iterations.shape}."
-                )
-
-            if rom_values.shape != iterations.shape:
-                raise ValueError(
-                    f"ROM {key} history shape {rom_values.shape} does not "
-                    f"match iteration shape {iterations.shape}."
-                )
-
-            valid = (
-                np.isfinite(fom_values)
-                & np.isfinite(rom_values)
-                & (np.abs(fom_values) > tolerance)
-            )
-
-            relative_error_percent = np.full(
-                fom_values.shape,
-                np.nan,
-                dtype=float,
-            )
-
-            relative_error_percent[valid] = (
-                100.0
-                * np.abs(rom_values[valid] - fom_values[valid])
-                / np.abs(fom_values[valid])
-            )
-
-            invalid_count = np.count_nonzero(~valid)
-            if invalid_count:
-                print(
-                    f"Warning: {invalid_count} {key} error values were set "
-                    "to NaN because the FOM value was non-finite or too "
-                    "close to zero, or the ROM value was non-finite."
-                )
-
-            fig, quantity_axis = plt.subplots(figsize=(10, 6))
-            error_axis = quantity_axis.twinx()
-
-            fom_line, = quantity_axis.plot(
-                iterations,
-                fom_values,
-                color="black",
-                linestyle="-",
-                linewidth=1.8,
-                label="FOM",
-            )
-
-            rom_line, = quantity_axis.plot(
-                iterations,
-                rom_values,
-                color="tab:orange",
-                linestyle="--",
-                linewidth=1.8,
-                label="ROM",
-            )
-
-            error_line, = error_axis.plot(
-                iterations,
-                relative_error_percent,
-                color="tab:red",
-                linestyle=":",
-                linewidth=1.8,
-                label="Relative error",
-            )
-
-            quantity_axis.set_xlabel("Iteration")
-            quantity_axis.set_ylabel(y_label)
-            error_axis.set_ylabel("Relative error [%]", color="tab:red")
-            error_axis.tick_params(axis="y", labelcolor="tab:red")
-
-            quantity_axis.set_title(title)
-            quantity_axis.minorticks_on()
-            quantity_axis.tick_params(axis="x", which="major", length=6)
-            quantity_axis.tick_params(axis="x", which="minor", length=3)
-
-            quantity_axis.grid(
-                which="major",
-                axis="both",
-                linestyle="-",
-                alpha=0.35,
-            )
-
-            quantity_axis.grid(
-                which="minor",
-                axis="x",
-                linestyle=":",
-                alpha=0.20,
-            )
-
-            quantity_axis.ticklabel_format(
-                axis="y",
-                style="sci",
-                scilimits=(-3, 3),
-                useMathText=True,
-            )
-
-            error_axis.ticklabel_format(
-                axis="y",
-                style="sci",
-                scilimits=(-3, 3),
-                useMathText=True,
-            )
-
-            quantity_axis.legend(
-                handles=[fom_line, rom_line, error_line],
-                loc="best",
-            )
-
-            fig.tight_layout()
-            pdf.savefig(fig, bbox_inches="tight")
-            plt.close(fig)
-
-            finite_error = relative_error_percent[
-                np.isfinite(relative_error_percent)
-            ]
-
-            if len(finite_error):
-                print(
-                    f"Added: {title}; maximum relative error: "
-                    f"{np.max(finite_error):.6e}%"
-                )
-            else:
-                print(
-                    f"Added: {title}; no finite relative-error values"
-                )
-
-    print(
-        "Finished appending domain-integrated conservative histories."
-    )
-
-
+BASELINE_COMPARISON_WINDOW = 1000
+WINSORIZED_MEAN_WINDOW = 1000
+WINSORIZED_TAIL_FRACTIONS = (0.05, 0.10, 0.20)
+WINSORIZED_RESIDUAL_AVERAGE_WINDOW = 1000
+WINSORIZED_RATIO_MIN_DENOMINATOR = 1.0e-30
+WINSORIZED_STD_CV_WINDOW = 1000
+WINSORIZED_CV_MIN_BASELINE_MAGNITUDE = 1.0e-30
+WINSORIZED_STD_LOGY = True
+WINSORIZED_CV_LOGY = True
+ASYMMETRIC_MAD_LOWER_MULTIPLIER = 2.5
+ASYMMETRIC_MAD_UPPER_MULTIPLIER = 2.5
+ASYMMETRIC_MAD_NORMAL_SCALE = 1.4826
+
+# Trailing sample count for the sliding-window density-histogram band.
+HISTOGRAM_DENSITY_BAND_WINDOW = 1000
 
 ERROR_SIGNAL_GROUPS = (
     ("Primitive Variables - Maximum Error", "prim_interp_max.txt", "primitive"),
@@ -892,172 +95,585 @@ ERROR_SIGNAL_GROUPS = (
     ("Conservative Variables - Average Error", "cons_interp_avg.txt", "conservative"),
 )
 
-
-def compute_moving_average_ignore_nan(values, window):
-    """Compute a trailing moving average, ignoring non-finite samples."""
-    values = np.asarray(values, dtype=float)
-    if window <= 0:
-        raise ValueError("Moving-average windows must be positive integers.")
-
-    finite = np.isfinite(values)
-    sums = np.concatenate(([0.0], np.cumsum(np.where(finite, values, 0.0))))
-    counts = np.concatenate(([0], np.cumsum(finite.astype(int))))
-    end = np.arange(1, len(values) + 1)
-    start = np.maximum(0, end - window)
-    window_sums = sums[end] - sums[start]
-    window_counts = counts[end] - counts[start]
-
-    average = np.full(len(values), np.nan)
-    valid = window_counts > 0
-    average[valid] = window_sums[valid] / window_counts[valid]
-    return average
+PRIMITIVE_FILE_PATTERN = re.compile(r"^(\d+)iteration_prim\.npy$")
+CONSERVATIVE_FILE_PATTERN = re.compile(r"^(\d+)iteration_cons\.npy$")
 
 
-def compute_exponential_moving_average_ignore_nan(values, span):
-    """Compute a causal EMA, carrying its last value across missing samples."""
-    values = np.asarray(values, dtype=float)
-    if span <= 0:
-        raise ValueError("Exponential-moving-average spans must be positive.")
+# =============================================================================
+# VALIDATION AND CHECKING ROUTINES
+# =============================================================================
 
-    alpha = 2.0 / (float(span) + 1.0)
-    average = np.full(len(values), np.nan, dtype=float)
-    previous = np.nan
-    for index, value in enumerate(values):
-        if np.isfinite(value):
-            if np.isfinite(previous):
-                previous = alpha * value + (1.0 - alpha) * previous
-            else:
-                previous = value
-        if np.isfinite(previous):
-            average[index] = previous
-    return average
+def require_positive(value: float, name: str) -> None:
+    if not np.isfinite(value) or value <= 0:
+        raise ValueError(f"{name} must be positive and finite; received {value!r}.")
 
 
-def compute_moving_median_ignore_nan(values, window):
-    """Compute a causal trailing moving median, ignoring non-finite samples."""
-    values = np.asarray(values, dtype=float)
-    if window <= 0:
-        raise ValueError("Moving-median windows must be positive integers.")
-
-    median = np.full(len(values), np.nan, dtype=float)
-    for index in range(len(values)):
-        start = max(0, index - window + 1)
-        current = values[start:index + 1]
-        current = current[np.isfinite(current)]
-        if current.size:
-            median[index] = np.median(current)
-    return median
+def require_nonnegative(value: float, name: str) -> None:
+    if not np.isfinite(value) or value < 0:
+        raise ValueError(f"{name} must be nonnegative and finite; received {value!r}.")
 
 
-def compute_moving_shorth_ignore_nan(values, window):
-    """Compute a causal trailing shorth location, ignoring non-finite samples.
+def validate_directory(directory: Path, label: str) -> None:
+    if not directory.is_dir():
+        raise NotADirectoryError(f"{label} directory does not exist:\n{directory}")
 
-    At each sample, sort the finite values in the trailing window, find the
-    narrowest interval containing ceil(n / 2) samples, and return the mean of
-    the samples in that interval. Ties are resolved by the first interval in
-    sorted order.
-    """
-    values = np.asarray(values, dtype=float)
-    if window <= 0:
-        raise ValueError("Moving-shorth windows must be positive integers.")
 
-    shorth = np.full(len(values), np.nan, dtype=float)
-    for index in range(len(values)):
-        start = max(0, index - window + 1)
-        current = values[start:index + 1]
-        current = np.sort(current[np.isfinite(current)])
-        number_of_values = current.size
-        if number_of_values == 0:
-            continue
+def validate_iteration_range(iteration_range, index: int = 0):
+    if iteration_range is None:
+        return None
+    if len(iteration_range) != 2:
+        raise ValueError(
+            f"Iteration-range entry {index} must contain exactly two values: "
+            f"{iteration_range!r}"
+        )
+    start, stop = iteration_range
+    if not np.isfinite(start) or not np.isfinite(stop):
+        raise ValueError(f"Iteration-range entry {index} must be finite: {iteration_range!r}")
+    if start > stop:
+        raise ValueError(f"Iteration-range start exceeds stop: {iteration_range!r}")
+    return float(start), float(stop)
 
-        subset_size = (number_of_values + 1) // 2
-        widths = current[subset_size - 1:] - current[:number_of_values - subset_size + 1]
-        interval_start = int(np.argmin(widths))
-        shorth[index] = np.mean(
-            current[interval_start:interval_start + subset_size],
-            dtype=np.float64,
+
+def validate_configuration() -> None:
+    unknown = set(PLOT_ENABLED) - {
+        "fom_rerun_history", "primitive_metrics", "conservative_integrals",
+        "rom_conservation_error_log", "rom_conservation_error_linear",
+        "baseline_comparison", "winsorized_mean_comparison",
+        "winsorized_residual_metrics", "winsorized_standard_deviation",
+        "winsorized_coefficient_of_variation", "adaptive_valley_band",
+        "histogram_density_band", "variable_outlier_count",
+        "rolling_rms",
+        "rolling_cv", "rolling_standard_deviation", "rolling_log_ratio",
+        "interpolation_error_signals",
+    }
+    if unknown:
+        raise ValueError(f"Unknown PLOT_ENABLED keys: {sorted(unknown)}")
+    if not all(isinstance(value, bool) for value in PLOT_ENABLED.values()):
+        raise TypeError("Every PLOT_ENABLED value must be exactly True or False.")
+    require_positive(CELL_VOLUME, "CELL_VOLUME")
+    for index, item in enumerate(configured_ranges()):
+        validate_iteration_range(item, index)
+    for window in (*ROLLING_CV_WINDOWS, *ROLLING_STD_WINDOWS, *ROLLING_LOG_RATIO_WINDOWS):
+        require_positive(window, "rolling window")
+    require_positive(ROLLING_STD_BASELINE_WINDOW, "ROLLING_STD_BASELINE_WINDOW")
+    require_positive(ROLLING_LOG_RATIO_BASELINE_WINDOW, "ROLLING_LOG_RATIO_BASELINE_WINDOW")
+    require_positive(BASELINE_COMPARISON_WINDOW, "BASELINE_COMPARISON_WINDOW")
+    require_positive(HISTOGRAM_DENSITY_BAND_WINDOW, "HISTOGRAM_DENSITY_BAND_WINDOW")
+    require_positive(WINSORIZED_MEAN_WINDOW, "WINSORIZED_MEAN_WINDOW")
+    require_positive(
+        WINSORIZED_RESIDUAL_AVERAGE_WINDOW,
+        "WINSORIZED_RESIDUAL_AVERAGE_WINDOW",
+    )
+    require_nonnegative(
+        WINSORIZED_RATIO_MIN_DENOMINATOR,
+        "WINSORIZED_RATIO_MIN_DENOMINATOR",
+    )
+    require_positive(WINSORIZED_STD_CV_WINDOW, "WINSORIZED_STD_CV_WINDOW")
+    require_nonnegative(
+        WINSORIZED_CV_MIN_BASELINE_MAGNITUDE,
+        "WINSORIZED_CV_MIN_BASELINE_MAGNITUDE",
+    )
+    if not isinstance(WINSORIZED_STD_LOGY, bool):
+        raise TypeError("WINSORIZED_STD_LOGY must be True or False.")
+    if not isinstance(WINSORIZED_CV_LOGY, bool):
+        raise TypeError("WINSORIZED_CV_LOGY must be True or False.")
+    if not WINSORIZED_TAIL_FRACTIONS:
+        raise ValueError("WINSORIZED_TAIL_FRACTIONS must not be empty.")
+    for fraction in WINSORIZED_TAIL_FRACTIONS:
+        if not np.isfinite(fraction) or not 0.0 <= fraction < 0.5:
+            raise ValueError(f"Invalid winsorized tail fraction: {fraction!r}")
+    require_nonnegative(ROLLING_CV_MIN_MEAN_MAGNITUDE, "ROLLING_CV_MIN_MEAN_MAGNITUDE")
+
+
+def validate_matching_3d_arrays(fom: np.ndarray, rom: np.ndarray, label: str) -> None:
+    if fom.shape != rom.shape:
+        raise ValueError(f"FOM and ROM {label} shapes differ: {fom.shape} versus {rom.shape}")
+    if fom.ndim != 3:
+        raise ValueError(
+            f"Expected {label} shape (time, variable, cell); received {fom.shape}."
         )
 
-    return shorth
+
+def validate_history_shape(values, iterations, label: str) -> None:
+    if np.asarray(values).shape != np.asarray(iterations).shape:
+        raise ValueError(
+            f"{label} shape {np.asarray(values).shape} does not match iteration "
+            f"shape {np.asarray(iterations).shape}."
+        )
 
 
-def _modified_zscore_candidate(gaps_so_far, candidate_gap):
-    """Return the candidate gap's robust modified z-score."""
-    accepted = np.asarray(gaps_so_far, dtype=float)
-    if accepted.size == 0:
-        return 0.0
-
-    center = np.median(accepted)
-    mad = np.median(np.abs(accepted - center))
-    if mad > 0.0:
-        return 0.6745 * (candidate_gap - center) / mad
-
-    # Repeated or quantized accepted gaps can give MAD == 0. In that case,
-    # equal gaps are ordinary and any larger gap is an unbounded anomaly.
-    if candidate_gap <= center:
-        return 0.0
-    return np.inf
+def validate_windows(*named_windows) -> None:
+    for name, value in named_windows:
+        require_positive(value, name)
 
 
-def _walk_valley_direction(
-    sorted_values,
-    start_index,
-    step,
-    cutoff=3.5,
-    min_gaps_before_testing=4,
-):
-    """Walk away from the median and stop before an anomalous sorted gap."""
-    accepted_gaps = []
-    index = start_index
-    number_of_values = len(sorted_values)
+# =============================================================================
+# GENERAL HELPERS
+# =============================================================================
 
-    while True:
-        next_index = index + step
-        if next_index < 0 or next_index >= number_of_values:
-            break
+def configured_ranges():
+    return [None] if not PLOT_ITERATION_RANGES else list(PLOT_ITERATION_RANGES)
 
-        candidate_gap = abs(sorted_values[next_index] - sorted_values[index])
-        should_test = len(accepted_gaps) >= min_gaps_before_testing
-        if should_test:
-            modified_zscore = _modified_zscore_candidate(
-                accepted_gaps,
-                candidate_gap,
+
+def is_plot_enabled(name: str) -> bool:
+    return PLOT_ENABLED[name]
+
+
+def print_section(title: str, **items) -> None:
+    print("=" * 68)
+    print(title)
+    for name, value in items.items():
+        print(f"{name.replace('_', ' ').title()}: {value}")
+    print("=" * 68, flush=True)
+
+
+def iteration_mask(iterations, active_range):
+    iterations = np.asarray(iterations)
+    if active_range is None:
+        return np.ones(iterations.shape, dtype=bool)
+    start, stop = validate_iteration_range(active_range)
+    return (iterations >= start) & (iterations <= stop)
+
+
+def discover_iteration_files(directory: Path, pattern: re.Pattern):
+    return {
+        int(match.group(1)): path
+        for path in directory.iterdir()
+        if path.is_file() and (match := pattern.match(path.name))
+    }
+
+
+def output_filename(base_filename: Path, active_range):
+    if active_range is None:
+        return base_filename
+    start, stop = active_range
+    return base_filename.with_name(
+        f"{base_filename.stem}_{start:g}_to_{stop:g}{base_filename.suffix}"
+    )
+
+
+def positive_or_nan(values):
+    values = np.asarray(values, dtype=float)
+    return np.where(np.isfinite(values) & (values > 0), values, np.nan)
+
+
+def apply_standard_axes(axis, xlabel="Iteration") -> None:
+    axis.set_xlabel(xlabel)
+    axis.minorticks_on()
+    axis.grid(which="major", axis="both", linestyle="-", alpha=0.35)
+    axis.grid(which="minor", axis="x", linestyle=":", alpha=0.20)
+
+
+def save_figure(pdf, fig, dpi=None) -> None:
+    fig.tight_layout()
+    pdf.savefig(fig, bbox_inches="tight", dpi=dpi)
+    plt.close(fig)
+
+
+# =============================================================================
+# DATA LOADING
+# =============================================================================
+
+def load_common_npy_data(fom_dir, rom_dir, pattern, active_range, label):
+    fom_dir, rom_dir = Path(fom_dir), Path(rom_dir)
+    validate_directory(fom_dir, "FOM")
+    validate_directory(rom_dir, "ROM")
+    fom_files = discover_iteration_files(fom_dir, pattern)
+    rom_files = discover_iteration_files(rom_dir, pattern)
+    common = np.array(sorted(fom_files.keys() & rom_files.keys()), dtype=int)
+    if common.size == 0:
+        raise RuntimeError(f"No common FOM and ROM {label} files were found.")
+    iterations = common[iteration_mask(common, active_range)]
+    if iterations.size == 0:
+        raise RuntimeError(f"No common {label} iterations fall in {active_range}.")
+    fom = np.asarray([np.load(fom_files[int(i)]) for i in iterations])
+    rom = np.asarray([np.load(rom_files[int(i)]) for i in iterations])
+    validate_matching_3d_arrays(fom, rom, label)
+    print_section(
+        f"Loaded {label} data", common_iterations=len(iterations),
+        first_iteration=iterations[0], last_iteration=iterations[-1], shape=fom.shape,
+    )
+    return fom, rom, iterations
+
+
+def load_conservative_data_for_iterations(fom_dir, rom_dir, iterations):
+    fom_files = discover_iteration_files(Path(fom_dir), CONSERVATIVE_FILE_PATTERN)
+    rom_files = discover_iteration_files(Path(rom_dir), CONSERVATIVE_FILE_PATTERN)
+    missing_fom = [int(i) for i in iterations if int(i) not in fom_files]
+    missing_rom = [int(i) for i in iterations if int(i) not in rom_files]
+    if missing_fom or missing_rom:
+        parts = ["Conservative files are missing for selected primitive iterations."]
+        if missing_fom:
+            parts.append(f"Missing FOM iterations (first 20): {missing_fom[:20]}")
+        if missing_rom:
+            parts.append(f"Missing ROM iterations (first 20): {missing_rom[:20]}")
+        raise FileNotFoundError("\n".join(parts))
+    fom = np.asarray([np.load(fom_files[int(i)]) for i in iterations])
+    rom = np.asarray([np.load(rom_files[int(i)]) for i in iterations])
+    validate_matching_3d_arrays(fom, rom, "conservative data")
+    return fom, rom
+
+
+def load_error_signal_file(filename, active_range, delimiter=","):
+    filename = Path(filename)
+    if not filename.is_file():
+        raise FileNotFoundError(f"Error-signal file does not exist:\n{filename}")
+    data = np.loadtxt(filename, delimiter=delimiter, ndmin=2)
+    if data.ndim != 2 or data.shape[1] < 2:
+        raise ValueError(f"Expected iteration plus signal columns in {filename}.")
+    order = np.argsort(data[:, 0], kind="stable")
+    iterations = np.asarray(data[order, 0], dtype=float)
+    signals = np.asarray(data[order, 1:], dtype=float)
+    if np.any(np.diff(iterations) == 0):
+        raise ValueError(f"Duplicate iterations found in {filename}.")
+    mask = iteration_mask(iterations, active_range)
+    if not np.any(mask):
+        raise ValueError(f"No iterations in {filename} fall in {active_range}.")
+    return iterations[mask], signals[mask]
+
+
+# =============================================================================
+# NUMERICAL ANALYSIS
+# =============================================================================
+
+def compute_metric_histories(fom_data, rom_data, tolerance=1.0e-14):
+    validate_matching_3d_arrays(fom_data, rom_data, "primitive data")
+    n_time, n_variables, _ = fom_data.shape
+    relative_l2 = np.full((n_variables, n_time), np.nan)
+    correlation = np.full((n_variables, n_time), np.nan)
+    for time_index in range(n_time):
+        for variable_index in range(n_variables):
+            fom = fom_data[time_index, variable_index]
+            rom = rom_data[time_index, variable_index]
+            valid = np.isfinite(fom) & np.isfinite(rom)
+            if not np.any(valid):
+                continue
+            f, r = fom[valid], rom[valid]
+            norm = np.linalg.norm(f)
+            if norm > tolerance:
+                relative_l2[variable_index, time_index] = np.linalg.norm(r - f) / norm
+            if len(f) >= 2 and np.std(f) > tolerance and np.std(r) > tolerance:
+                correlation[variable_index, time_index] = np.corrcoef(f, r)[0, 1]
+    return relative_l2, correlation
+
+
+def compute_conservative_integrals(fom, rom):
+    validate_matching_3d_arrays(fom, rom, "conservative data")
+    names = [
+        CONSERVATIVE_FIELD_NAMES[i].lower() if i < len(CONSERVATIVE_FIELD_NAMES)
+        else f"conservative_field_{i + 1}"
+        for i in range(fom.shape[1])
+    ]
+    def integrate(data, label):
+        if not np.all(np.isfinite(data)):
+            raise ValueError(f"{label} conservative data contain non-finite values.")
+        return {
+            name: CELL_VOLUME * np.sum(data[:, i, :], axis=1, dtype=np.float64)
+            for i, name in enumerate(names)
+        }
+    return integrate(fom, "FOM"), integrate(rom, "ROM")
+
+
+def moving_average(values, window):
+    validate_windows(("moving-average window", window))
+    values = np.asarray(values, dtype=float)
+    finite = np.isfinite(values)
+    sums = np.r_[0.0, np.cumsum(np.where(finite, values, 0.0))]
+    counts = np.r_[0, np.cumsum(finite.astype(int))]
+    end = np.arange(1, len(values) + 1)
+    start = np.maximum(0, end - int(window))
+    result = np.full(len(values), np.nan)
+    valid = (counts[end] - counts[start]) > 0
+    result[valid] = (sums[end] - sums[start])[valid] / (counts[end] - counts[start])[valid]
+    return result
+
+
+def moving_winsorized_means(values, window, tail_fractions):
+    """Compute causal winsorized means and their rolling percentile bands.
+
+    For tail fraction f, the lower and upper band edges are the rolling
+    f and 1-f quantiles. Those same edges are used to clip the data before
+    calculating the corresponding winsorized mean.
+    """
+    validate_windows(("winsorized-mean window", window))
+    values = np.asarray(values, dtype=float)
+    fractions = np.asarray(tuple(tail_fractions), dtype=float)
+    if fractions.ndim != 1 or fractions.size == 0:
+        raise ValueError("tail_fractions must be a nonempty 1-D sequence.")
+    if np.any(~np.isfinite(fractions)) or np.any(fractions < 0.0) or np.any(fractions >= 0.5):
+        raise ValueError("Each tail fraction must satisfy 0 <= fraction < 0.5.")
+
+    means = np.full((fractions.size, len(values)), np.nan, dtype=float)
+    lower_bands = np.full_like(means, np.nan)
+    upper_bands = np.full_like(means, np.nan)
+    requested_quantiles = np.concatenate((fractions, 1.0 - fractions))
+
+    for index in range(1, len(values)):
+        # Exclude the current sample so it cannot move its own mean or band.
+        start = max(0, index - int(window))
+        current = values[start:index]
+        current = current[np.isfinite(current)]
+        if current.size == 0:
+            continue
+
+        limits = np.quantile(current, requested_quantiles)
+        lower_limits = limits[:fractions.size]
+        upper_limits = limits[fractions.size:]
+        lower_bands[:, index] = lower_limits
+        upper_bands[:, index] = upper_limits
+
+        for fraction_index, (lower, upper) in enumerate(
+            zip(lower_limits, upper_limits)
+        ):
+            means[fraction_index, index] = np.mean(
+                np.clip(current, lower, upper), dtype=np.float64
             )
-            if modified_zscore > cutoff:
-                break
 
-        accepted_gaps.append(candidate_gap)
-        index = next_index
-
-    return index
+    return means, lower_bands, upper_bands
 
 
-def compute_moving_valley_band_ignore_nan(
+def moving_average_selected(values, selected, window):
+    """Compute a rolling mean using only samples selected by a Boolean mask."""
+    values = np.asarray(values, dtype=float)
+    selected = np.asarray(selected, dtype=bool)
+    if values.shape != selected.shape:
+        raise ValueError("Selected-value mask must match the value-array shape.")
+    return moving_average(np.where(selected, values, np.nan), window)
+
+
+def compute_winsorized_residual_metrics(
+    values,
+    winsorized_means,
+    lower_bands,
+    upper_bands,
+    average_window,
+    minimum_denominator,
+):
+    """Compute rolling tail and interior residual metrics.
+
+    All residuals are nonnegative magnitudes, so upper and lower deviations
+    cannot cancel one another.
+
+    Mean-referenced metrics:
+      tail:     abs(raw - winsorized mean), for points outside the band
+      interior: abs(raw - winsorized mean), for points inside the band
+
+    Limit-referenced metrics:
+      tail: distance beyond the breached lower or upper band limit
+      interior: distance to the nearest lower or upper band limit
+    """
+    validate_windows(("winsorized residual average window", average_window))
+    require_nonnegative(minimum_denominator, "minimum residual-ratio denominator")
+
+    values = np.asarray(values, dtype=float)
+    means = np.asarray(winsorized_means, dtype=float)
+    lower = np.asarray(lower_bands, dtype=float)
+    upper = np.asarray(upper_bands, dtype=float)
+
+    expected_shape = (means.shape[0], values.size)
+    if means.ndim != 2 or lower.shape != expected_shape or upper.shape != expected_shape:
+        raise ValueError(
+            "Winsorized means and bands must have matching shape "
+            "(number_of_fractions, number_of_samples)."
+        )
+
+    number_of_fractions = means.shape[0]
+    output_shape = (number_of_fractions, values.size)
+    tail_mean_residual = np.full(output_shape, np.nan)
+    interior_mean_residual = np.full(output_shape, np.nan)
+    mean_residual_ratio = np.full(output_shape, np.nan)
+    tail_limit_residual = np.full(output_shape, np.nan)
+    interior_limit_residual = np.full(output_shape, np.nan)
+    limit_residual_ratio = np.full(output_shape, np.nan)
+
+    for fraction_index in range(number_of_fractions):
+        baseline = means[fraction_index]
+        lower_limit = lower[fraction_index]
+        upper_limit = upper[fraction_index]
+
+        valid = (
+            np.isfinite(values)
+            & np.isfinite(baseline)
+            & np.isfinite(lower_limit)
+            & np.isfinite(upper_limit)
+            & (lower_limit <= upper_limit)
+        )
+        below = valid & (values < lower_limit)
+        above = valid & (values > upper_limit)
+        tail = below | above
+        interior = valid & ~tail
+
+        residual_from_mean = np.abs(values - baseline)
+        tail_mean_residual[fraction_index] = moving_average_selected(
+            residual_from_mean, tail, average_window
+        )
+        interior_mean_residual[fraction_index] = moving_average_selected(
+            residual_from_mean, interior, average_window
+        )
+
+        valid_mean_ratio = (
+            np.isfinite(tail_mean_residual[fraction_index])
+            & np.isfinite(interior_mean_residual[fraction_index])
+            & (interior_mean_residual[fraction_index] > minimum_denominator)
+        )
+        mean_residual_ratio[fraction_index, valid_mean_ratio] = (
+            tail_mean_residual[fraction_index, valid_mean_ratio]
+            / interior_mean_residual[fraction_index, valid_mean_ratio]
+        )
+
+        residual_from_limit = np.full(values.shape, np.nan)
+        residual_from_limit[below] = lower_limit[below] - values[below]
+        residual_from_limit[above] = values[above] - upper_limit[above]
+        residual_from_limit[interior] = np.minimum(
+            values[interior] - lower_limit[interior],
+            upper_limit[interior] - values[interior],
+        )
+
+        tail_limit_residual[fraction_index] = moving_average_selected(
+            residual_from_limit, tail, average_window
+        )
+        interior_limit_residual[fraction_index] = moving_average_selected(
+            residual_from_limit, interior, average_window
+        )
+
+        valid_limit_ratio = (
+            np.isfinite(tail_limit_residual[fraction_index])
+            & np.isfinite(interior_limit_residual[fraction_index])
+            & (interior_limit_residual[fraction_index] > minimum_denominator)
+        )
+        limit_residual_ratio[fraction_index, valid_limit_ratio] = (
+            tail_limit_residual[fraction_index, valid_limit_ratio]
+            / interior_limit_residual[fraction_index, valid_limit_ratio]
+        )
+
+    return {
+        "tail_mean_residual": tail_mean_residual,
+        "interior_mean_residual": interior_mean_residual,
+        "mean_residual_ratio": mean_residual_ratio,
+        "tail_limit_residual": tail_limit_residual,
+        "interior_limit_residual": interior_limit_residual,
+        "limit_residual_ratio": limit_residual_ratio,
+    }
+
+
+def rolling_winsorized_std_and_cv(
+    values,
+    winsorized_means,
+    window,
+    minimum_baseline_magnitude,
+):
+    """Compute rolling RMS spread about each causal winsorized mean and its CV.
+
+    For fraction j and sample i, the spread is
+        sqrt(mean((raw - winsorized_mean_j)**2))
+    over the requested rolling window. All original raw values are retained,
+    including tail values. The CV is that spread divided by the magnitude of
+    the corresponding winsorized mean at sample i.
+    """
+    validate_windows(("winsorized std/CV window", window))
+    require_nonnegative(
+        minimum_baseline_magnitude,
+        "minimum winsorized CV baseline magnitude",
+    )
+
+    values = np.asarray(values, dtype=float)
+    means = np.asarray(winsorized_means, dtype=float)
+    if means.ndim != 2 or means.shape[1] != values.size:
+        raise ValueError(
+            "winsorized_means must have shape "
+            "(number_of_fractions, number_of_samples)."
+        )
+
+    spread = np.full(means.shape, np.nan, dtype=float)
+    coefficient_of_variation = np.full(means.shape, np.nan, dtype=float)
+
+    for fraction_index in range(means.shape[0]):
+        baseline = means[fraction_index]
+        residual = values - baseline
+        spread[fraction_index] = np.sqrt(
+            moving_average(residual ** 2, window)
+        )
+
+        valid = (
+            np.isfinite(spread[fraction_index])
+            & np.isfinite(baseline)
+            & (np.abs(baseline) > minimum_baseline_magnitude)
+        )
+        coefficient_of_variation[fraction_index, valid] = (
+            spread[fraction_index, valid] / np.abs(baseline[valid])
+        )
+
+    return spread, coefficient_of_variation
+
+
+def exponential_moving_average(values, span):
+    validate_windows(("EMA span", span))
+    alpha = 2.0 / (float(span) + 1.0)
+    result = np.full(len(values), np.nan)
+    previous = np.nan
+    for i, value in enumerate(np.asarray(values, dtype=float)):
+        if np.isfinite(value):
+            previous = value if not np.isfinite(previous) else alpha * value + (1-alpha) * previous
+        result[i] = previous
+    return result
+
+
+def moving_median(values, window):
+    validate_windows(("moving-median window", window))
+    values = np.asarray(values, dtype=float)
+    result = np.full(len(values), np.nan)
+    for i in range(len(values)):
+        current = values[max(0, i-window+1):i+1]
+        current = current[np.isfinite(current)]
+        if current.size:
+            result[i] = np.median(current)
+    return result
+
+
+def moving_shorth(values, window):
+    validate_windows(("moving-shorth window", window))
+    values = np.asarray(values, dtype=float)
+    result = np.full(len(values), np.nan)
+    for i in range(len(values)):
+        current = np.sort(values[max(0, i-window+1):i+1])
+        current = current[np.isfinite(current)]
+        n = current.size
+        if not n:
+            continue
+        subset = (n + 1) // 2
+        widths = current[subset-1:] - current[:n-subset+1]
+        start = int(np.argmin(widths))
+        result[i] = np.mean(current[start:start+subset])
+    return result
+
+
+def moving_asymmetric_mad_band(
     values,
     window,
-    cutoff=3.5,
-    min_gaps_before_testing=4,
+    lower_multiplier=ASYMMETRIC_MAD_LOWER_MULTIPLIER,
+    upper_multiplier=ASYMMETRIC_MAD_UPPER_MULTIPLIER,
 ):
-    """Compute a causal median-centered dense band in log10 space.
+    """Compute a causal asymmetric median/MAD band in log10 space.
 
-    Each trailing window is filtered to finite positive values and transformed
-    to log10 space. Starting at the median rank, each side is walked outward
-    until the proposed adjacent gap is a modified-z-score outlier relative to
-    the gaps already accepted on that side. Returned edges and means are in
-    the original conservation-error units.
+    The lower and upper scales are estimated independently so the band can
+    follow different amounts of spread below and above the moving median.
+    Only finite positive samples are used because the calculation is done in
+    log10 space.
+
+    Returns values in the original signal units:
+        median, lower_edge, upper_edge, band_mean, band_count
     """
-    values = np.asarray(values, dtype=float)
-    if window <= 0:
-        raise ValueError("Moving valley-band windows must be positive integers.")
-    if cutoff <= 0.0 or not np.isfinite(cutoff):
-        raise ValueError("Valley-band modified-z cutoff must be positive and finite.")
-    if min_gaps_before_testing < 1:
-        raise ValueError("Valley-band minimum accepted-gap count must be positive.")
+    validate_windows(
+        ("asymmetric-MAD window", window),
+        ("asymmetric-MAD lower multiplier", lower_multiplier),
+        ("asymmetric-MAD upper multiplier", upper_multiplier),
+    )
 
+    values = np.asarray(values, dtype=float)
     number_of_samples = len(values)
     median = np.full(number_of_samples, np.nan, dtype=float)
-    left_edge = np.full(number_of_samples, np.nan, dtype=float)
-    right_edge = np.full(number_of_samples, np.nan, dtype=float)
+    lower_edge = np.full(number_of_samples, np.nan, dtype=float)
+    upper_edge = np.full(number_of_samples, np.nan, dtype=float)
     band_mean = np.full(number_of_samples, np.nan, dtype=float)
     band_count = np.zeros(number_of_samples, dtype=np.int64)
 
@@ -1068,1720 +684,929 @@ def compute_moving_valley_band_ignore_nan(
         if current.size == 0:
             continue
 
-        sorted_log = np.sort(np.log10(current))
-        count = sorted_log.size
-        median_log = np.median(sorted_log)
-        median[index] = 10.0 ** median_log
+        log_values = np.log10(current)
+        center_log = np.median(log_values)
 
-        # For even counts, begin at the upper central observation. The final
-        # reported center remains the conventional median of both central values.
-        center_index = count // 2
-        left_index = _walk_valley_direction(
-            sorted_log,
-            center_index,
-            -1,
-            cutoff=cutoff,
-            min_gaps_before_testing=min_gaps_before_testing,
-        )
-        right_index = _walk_valley_direction(
-            sorted_log,
-            center_index,
-            +1,
-            cutoff=cutoff,
-            min_gaps_before_testing=min_gaps_before_testing,
-        )
+        lower_deviations = center_log - log_values[log_values <= center_log]
+        upper_deviations = log_values[log_values >= center_log] - center_log
 
-        left_log = sorted_log[left_index]
-        right_log = sorted_log[right_index]
-        selected_log = sorted_log[left_index:right_index + 1]
+        lower_mad = np.median(lower_deviations)
+        upper_mad = np.median(upper_deviations)
 
-        left_edge[index] = 10.0 ** left_log
-        right_edge[index] = 10.0 ** right_log
-        band_mean[index] = np.mean(10.0 ** selected_log, dtype=np.float64)
-        band_count[index] = selected_log.size
+        lower_scale = ASYMMETRIC_MAD_NORMAL_SCALE * lower_mad
+        upper_scale = ASYMMETRIC_MAD_NORMAL_SCALE * upper_mad
 
-    return median, left_edge, right_edge, band_mean, band_count
+        lower_log = center_log - lower_multiplier * lower_scale
+        upper_log = center_log + upper_multiplier * upper_scale
+
+        selected = (log_values >= lower_log) & (log_values <= upper_log)
+        selected_values = current[selected]
+
+        median[index] = 10.0 ** center_log
+        lower_edge[index] = 10.0 ** lower_log
+        upper_edge[index] = 10.0 ** upper_log
+        band_count[index] = np.count_nonzero(selected)
+
+        if selected_values.size:
+            band_mean[index] = np.mean(selected_values, dtype=np.float64)
+
+    return median, lower_edge, upper_edge, band_mean, band_count
 
 
-def compute_rolling_rms_about_baseline(values, baseline, window):
-    """Compute trailing RMS magnitude of values minus a supplied baseline."""
-    values = np.asarray(values, dtype=float)
-    baseline = np.asarray(baseline, dtype=float)
-    if values.shape != baseline.shape:
-        raise ValueError("RMS values and baseline must have matching shapes.")
-    if window <= 0:
-        raise ValueError("Rolling-RMS windows must be positive integers.")
+def _freedman_diaconis_bin_edges(log_values):
+    """Choose histogram bin edges from the data's own spread (no hardcoding).
 
-    residual = values - baseline
-    residual_squared = np.where(
-        np.isfinite(residual), residual * residual, np.nan
-    )
-    mean_squared = compute_moving_average_ignore_nan(
-        residual_squared, window
-    )
-    return np.sqrt(mean_squared)
+    Bin width follows the Freedman-Diaconis rule (2*IQR / n^(1/3)), which
+    self-calibrates to how spread out and how numerous the samples are. This
+    keeps binning granularity a function of the data rather than a tuned
+    per-dataset constant.
+    """
+    log_values = log_values[np.isfinite(log_values)]
+    n = log_values.size
+    if n < 2:
+        raise ValueError("Need at least two finite values to build histogram bins.")
 
+    lo, hi = float(log_values.min()), float(log_values.max())
+    if hi <= lo:
+        # All samples land on the same value; use a single degenerate bin.
+        return np.array([lo, lo + 1.0])
 
-def plot_conservation_average_and_rms_to_pdf(
-    signal_iterations,
-    raw,
-    title,
-    field_name,
-    pdf,
-    baseline_window,
-    rms_window,
-):
-    """Append one log-baseline page and one RMS page with log raw data."""
-    signal_iterations = np.asarray(signal_iterations, dtype=float)
-    raw = np.asarray(raw, dtype=float)
-    if signal_iterations.shape != raw.shape:
-        raise ValueError(
-            "Conservation-error iterations and raw data must match."
-        )
-    if baseline_window <= 0 or rms_window <= 0:
-        raise ValueError("Baseline and RMS windows must be positive.")
-
-    moving_average = compute_moving_average_ignore_nan(raw, baseline_window)
-    exponential_average = compute_exponential_moving_average_ignore_nan(
-        raw, baseline_window
-    )
-    moving_median = compute_moving_median_ignore_nan(raw, baseline_window)
-    moving_shorth = compute_moving_shorth_ignore_nan(raw, baseline_window)
-    (
-        valley_median,
-        valley_left_edge,
-        valley_right_edge,
-        valley_band_mean,
-        valley_band_count,
-    ) = compute_moving_valley_band_ignore_nan(raw, baseline_window)
-    moving_average_rms = compute_rolling_rms_about_baseline(
-        raw, moving_average, rms_window
-    )
-    exponential_average_rms = compute_rolling_rms_about_baseline(
-        raw, exponential_average, rms_window
-    )
-
-    raw_log = np.where(np.isfinite(raw) & (raw > 0.0), raw, np.nan)
-    moving_average_log = np.where(
-        np.isfinite(moving_average) & (moving_average > 0.0),
-        moving_average,
-        np.nan,
-    )
-    exponential_average_log = np.where(
-        np.isfinite(exponential_average) & (exponential_average > 0.0),
-        exponential_average,
-        np.nan,
-    )
-    moving_median_log = np.where(
-        np.isfinite(moving_median) & (moving_median > 0.0),
-        moving_median,
-        np.nan,
-    )
-    moving_shorth_log = np.where(
-        np.isfinite(moving_shorth) & (moving_shorth > 0.0),
-        moving_shorth,
-        np.nan,
-    )
-
-    fig, axis = plt.subplots(figsize=(12, 7))
-    raw_artist = axis.scatter(
-        signal_iterations, raw_log, color="0.60", s=10, alpha=0.40,
-        label="ROM percent conservation error", zorder=2, rasterized=True,
-    )
-    moving_line, = axis.plot(
-        signal_iterations, moving_average_log,
-        color="tab:green", linewidth=2.6,
-        label=f"Moving average ({baseline_window})", zorder=20,
-    )
-    exponential_line, = axis.plot(
-        signal_iterations, exponential_average_log,
-        color="tab:blue", linewidth=2.6, linestyle="--",
-        label=f"Exponential moving average (span={baseline_window})", zorder=21,
-    )
-    median_line, = axis.plot(
-        signal_iterations, moving_median_log,
-        color="tab:purple", linewidth=2.6, linestyle=":",
-        label=f"Moving median ({baseline_window})", zorder=22,
-    )
-    shorth_line, = axis.plot(
-        signal_iterations, moving_shorth_log,
-        color="tab:orange", linewidth=2.6, linestyle="-.",
-        label=f"Moving shorth ({baseline_window})", zorder=23,
-    )
-    axis.set_xlabel("Iteration")
-    axis.set_ylabel("Conservation error [%]")
-    axis.set_yscale("log")
-    axis.set_title(
-        f"{title}: {field_name}\nMA, EMA, moving median, and moving shorth"
-    )
-    axis.minorticks_on()
-    axis.grid(which="major", axis="both", linestyle="-", alpha=0.35)
-    axis.grid(which="minor", axis="both", linestyle=":", alpha=0.20)
-    axis.legend(
-        handles=[
-            raw_artist,
-            moving_line,
-            exponential_line,
-            median_line,
-            shorth_line,
-        ],
-        loc="best",
-    )
-    fig.tight_layout()
-    pdf.savefig(fig, bbox_inches="tight", dpi=150)
-    plt.close(fig)
-
-    valley_median_plot = np.where(
-        np.isfinite(valley_median) & (valley_median > 0.0),
-        valley_median,
-        np.nan,
-    )
-    valley_left_plot = np.where(
-        np.isfinite(valley_left_edge) & (valley_left_edge > 0.0),
-        valley_left_edge,
-        np.nan,
-    )
-    valley_right_plot = np.where(
-        np.isfinite(valley_right_edge) & (valley_right_edge > 0.0),
-        valley_right_edge,
-        np.nan,
-    )
-    valley_mean_plot = np.where(
-        np.isfinite(valley_band_mean) & (valley_band_mean > 0.0),
-        valley_band_mean,
-        np.nan,
-    )
-
-    fig, valley_axis = plt.subplots(figsize=(12, 7))
-    valley_raw_artist = valley_axis.scatter(
-        signal_iterations,
-        raw_log,
-        color="0.65",
-        s=9,
-        alpha=0.30,
-        label="ROM percent conservation error",
-        zorder=2,
-        rasterized=True,
-    )
-    valley_fill = valley_axis.fill_between(
-        signal_iterations,
-        valley_left_plot,
-        valley_right_plot,
-        where=(
-            np.isfinite(valley_left_plot)
-            & np.isfinite(valley_right_plot)
-        ),
-        color="tab:cyan",
-        alpha=0.20,
-        label="Adaptive median-centered valley band",
-        zorder=5,
-    )
-    valley_left_line, = valley_axis.plot(
-        signal_iterations,
-        valley_left_plot,
-        color="tab:cyan",
-        linewidth=1.2,
-        linestyle="--",
-        label="Valley-band lower edge",
-        zorder=10,
-    )
-    valley_right_line, = valley_axis.plot(
-        signal_iterations,
-        valley_right_plot,
-        color="tab:cyan",
-        linewidth=1.2,
-        linestyle="--",
-        label="Valley-band upper edge",
-        zorder=10,
-    )
-    valley_median_line, = valley_axis.plot(
-        signal_iterations,
-        valley_median_plot,
-        color="tab:purple",
-        linewidth=2.4,
-        linestyle=":",
-        label=f"Moving median ({baseline_window})",
-        zorder=20,
-    )
-    valley_mean_line, = valley_axis.plot(
-        signal_iterations,
-        valley_mean_plot,
-        color="black",
-        linewidth=2.2,
-        label="Mean inside adaptive valley band",
-        zorder=21,
-    )
-    valley_axis.set_xlabel("Iteration")
-    valley_axis.set_ylabel("Conservation error [%]")
-    valley_axis.set_yscale("log")
-    valley_axis.set_title(
-        f"{title}: {field_name}\n"
-        "Median-centered adaptive valley band in log10 space"
-    )
-    valley_axis.minorticks_on()
-    valley_axis.grid(which="major", axis="both", linestyle="-", alpha=0.35)
-    valley_axis.grid(which="minor", axis="both", linestyle=":", alpha=0.20)
-    valley_axis.legend(
-        handles=[
-            valley_raw_artist,
-            valley_fill,
-            valley_left_line,
-            valley_right_line,
-            valley_median_line,
-            valley_mean_line,
-        ],
-        loc="best",
-        fontsize=9,
-    )
-    fig.tight_layout()
-    pdf.savefig(fig, bbox_inches="tight", dpi=150)
-    plt.close(fig)
-
-    finite_band_counts = valley_band_count[valley_band_count > 0]
-    if finite_band_counts.size:
-        print(
-            f"Added adaptive valley-band page: {field_name}; "
-            f"median selected count={np.median(finite_band_counts):.1f}; "
-            f"minimum={np.min(finite_band_counts)}; "
-            f"maximum={np.max(finite_band_counts)}",
-            flush=True,
-        )
-
-    fig, rms_axis = plt.subplots(figsize=(12, 7))
-    error_axis = rms_axis.twinx()
-    moving_rms_line, = rms_axis.plot(
-        signal_iterations, moving_average_rms, color="tab:green",
-        linewidth=2.4,
-        label=f"RMS about moving-average baseline ({rms_window})",
-        zorder=20,
-    )
-    exponential_rms_line, = rms_axis.plot(
-        signal_iterations, exponential_average_rms, color="tab:blue",
-        linewidth=2.4, linestyle="--",
-        label=f"RMS about EMA baseline ({rms_window})",
-        zorder=21,
-    )
-    raw_error_artist = error_axis.scatter(
-        signal_iterations, raw_log, color="0.55", s=9, alpha=0.30,
-        label="ROM percent conservation error", zorder=2, rasterized=True,
-    )
-    rms_axis.set_xlabel("Iteration")
-    rms_axis.set_ylabel("RMS fluctuation magnitude [percentage points]")
-    error_axis.set_ylabel(
-        "Conservation error [%]", color="0.35"
-    )
-    error_axis.tick_params(axis="y", labelcolor="0.35")
-    error_axis.set_yscale("log")
-    rms_axis.set_title(
-        f"{title}: {field_name}\n"
-        f"Baseline-relative rolling RMS [baseline={baseline_window}, "
-        f"RMS={rms_window}]"
-    )
-    rms_axis.minorticks_on()
-    rms_axis.grid(which="major", axis="both", linestyle="-", alpha=0.35)
-    rms_axis.grid(which="minor", axis="x", linestyle=":", alpha=0.20)
-    rms_axis.legend(
-        handles=[moving_rms_line, exponential_rms_line, raw_error_artist],
-        loc="best",
-    )
-    fig.tight_layout()
-    pdf.savefig(fig, bbox_inches="tight", dpi=150)
-    plt.close(fig)
-
-    print(
-        f"Added conservation averages and RMS pages: {field_name}; "
-        f"baseline={baseline_window}; RMS={rms_window}", flush=True,
-    )
-
-
-
-
-def compute_rolling_standard_deviation_about_baseline(
-    values,
-    fluctuation_window,
-    baseline_window,
-):
-    # Compute causal rolling standard deviation after removing a local baseline.
-    values = np.asarray(values, dtype=float)
-    if fluctuation_window <= 0 or baseline_window <= 0:
-        raise ValueError("Rolling-standard-deviation windows must be positive.")
-
-    baseline = compute_moving_average_ignore_nan(values, baseline_window)
-    residual = values - baseline
-    rolling_std = np.full(len(values), np.nan, dtype=float)
-
-    for index in range(len(values)):
-        start = max(0, index - fluctuation_window + 1)
-        current = residual[start:index + 1]
-        current = current[np.isfinite(current)]
-        if len(current) > 0:
-            rolling_std[index] = np.std(current, ddof=0)
-
-    return baseline, rolling_std
-
-
-def compute_rolling_log_ratio_fluctuation(
-    values,
-    fluctuation_window,
-    baseline_window,
-):
-    # Compute rolling std of log10(raw / local baseline).
-    values = np.asarray(values, dtype=float)
-    if fluctuation_window <= 0 or baseline_window <= 0:
-        raise ValueError("Rolling-log-ratio windows must be positive.")
-
-    baseline = compute_moving_average_ignore_nan(values, baseline_window)
-    log_ratio = np.full(len(values), np.nan, dtype=float)
-    valid = (
-        np.isfinite(values)
-        & np.isfinite(baseline)
-        & (values > 0.0)
-        & (baseline > 0.0)
-    )
-    log_ratio[valid] = np.log10(values[valid] / baseline[valid])
-
-    rolling_log_ratio_std = np.full(len(values), np.nan, dtype=float)
-    for index in range(len(values)):
-        start = max(0, index - fluctuation_window + 1)
-        current = log_ratio[start:index + 1]
-        current = current[np.isfinite(current)]
-        if len(current) > 0:
-            rolling_log_ratio_std[index] = np.std(current, ddof=0)
-
-    return baseline, log_ratio, rolling_log_ratio_std
-
-
-
-def compute_rolling_coefficient_of_variation(
-    values,
-    window,
-    min_mean_magnitude=1.0e-30,
-):
-    # Compute a causal trailing coefficient of variation.
-    values = np.asarray(values, dtype=float)
-
-    if window <= 0:
-        raise ValueError(
-            "Rolling coefficient-of-variation windows must be positive."
-        )
-    if min_mean_magnitude < 0.0:
-        raise ValueError(
-            "The rolling-CV minimum mean magnitude must be nonnegative."
-        )
-
-    rolling_cv = np.full(len(values), np.nan, dtype=float)
-
-    for index in range(len(values)):
-        window_start = max(0, index - window + 1)
-        window_values = values[window_start:index + 1]
-        window_values = window_values[np.isfinite(window_values)]
-
-        if len(window_values) == 0:
-            continue
-
-        window_mean = np.mean(window_values)
-        window_std = np.std(window_values, ddof=0)
-
-        if abs(window_mean) >= min_mean_magnitude:
-            rolling_cv[index] = window_std / abs(window_mean)
-
-    return rolling_cv
-
-def load_error_signal_file(filename, delimiter=","):
-    """Load iteration from column zero and error signals from later columns."""
-    filename = Path(filename)
-    if not filename.is_file():
-        raise FileNotFoundError(f"Error-signal file does not exist:\n{filename}")
-
-    data = np.loadtxt(filename, delimiter=delimiter, ndmin=2)
-    if data.ndim != 2 or data.shape[1] < 2:
-        raise ValueError(
-            f"Expected iteration plus at least one signal column in {filename}."
-        )
-
-    iterations = np.asarray(data[:, 0], dtype=float)
-    signals = np.asarray(data[:, 1:], dtype=float)
-    order = np.argsort(iterations, kind="stable")
-    iterations = iterations[order]
-    signals = signals[order]
-
-    if np.any(np.diff(iterations) == 0.0):
-        raise ValueError(f"Duplicate iterations were found in {filename}.")
-
-    plot_mask = get_plot_iteration_mask(iterations)
-    iterations = iterations[plot_mask]
-    signals = signals[plot_mask]
-
-    if len(iterations) == 0:
-        raise ValueError(
-            f"No iterations in {filename} fall within "
-            "PLOT_ITERATION_RANGES."
-        )
-
-    return iterations, signals
-
-
-def interpolate_metric_to_iterations(source_iterations, values, target_iterations):
-    """Interpolate a metric to signal iterations without extrapolation."""
-    source_iterations = np.asarray(source_iterations, dtype=float)
-    values = np.asarray(values, dtype=float)
-    target_iterations = np.asarray(target_iterations, dtype=float)
-    valid = np.isfinite(source_iterations) & np.isfinite(values)
-
-    if np.count_nonzero(valid) == 0:
-        return np.full(target_iterations.shape, np.nan)
-
-    x = source_iterations[valid]
-    y = values[valid]
-    order = np.argsort(x, kind="stable")
-    x = x[order]
-    y = y[order]
-    x, indices = np.unique(x, return_index=True)
-    y = y[indices]
-
-    if len(x) == 1:
-        result = np.full(target_iterations.shape, np.nan)
-        result[np.isclose(target_iterations, x[0])] = y[0]
-        return result
-    return np.interp(target_iterations, x, y, left=np.nan, right=np.nan)
-
-
-def get_error_signal_field_names(kind, count, primitive_field_names):
-    if kind == "primitive" and len(primitive_field_names) == count:
-        return list(primitive_field_names)
-    prefix = "Primitive" if kind == "primitive" else "Conservative"
-    return [f"{prefix} field {index + 1}" for index in range(count)]
-
-
-def plot_error_signals_to_pdf(
-    metric_iterations,
-    relative_l2,
-    correlation,
-    primitive_field_names,
-    error_directory,
-    pdf,
-    fom_rerun_iterations=None,
-    short_window=1000,
-    long_window=5000,
-    delimiter=",",
-):
-    """Append signals, moving averages, metrics, and FOM-rerun markers."""
-    error_directory = Path(error_directory)
-    if fom_rerun_iterations is None:
-        fom_rerun_iterations = np.array([], dtype=float)
+    q75, q25 = np.percentile(log_values, [75, 25])
+    iqr = q75 - q25
+    if iqr > 0.0:
+        bin_width = 2.0 * iqr / (n ** (1.0 / 3.0))
     else:
-        fom_rerun_iterations = np.asarray(fom_rerun_iterations, dtype=float)
+        bin_width = 0.0
 
-    if short_window <= 0 or long_window <= 0:
-        raise ValueError("Moving-average windows must be positive integers.")
+    if bin_width <= 0.0:
+        # Degenerate IQR (e.g. more than half the samples share one value);
+        # fall back to a data-driven bin count via Sturges' rule.
+        n_bins = max(10, int(np.ceil(np.log2(n) + 1)))
+    else:
+        n_bins = max(10, int(np.ceil((hi - lo) / bin_width)))
 
-    available = []
-    for title, basename, kind in ERROR_SIGNAL_GROUPS:
-        filename = error_directory / basename
-        if filename.is_file():
-            available.append((title, filename, kind))
-        else:
-            print(f"Warning: missing error-signal file: {filename}")
-
-    if not available:
-        print("No error-signal pages were created.")
-        return
-
-    print("============================================================")
-    print("Appending error-signal plots")
-    print(f"Error directory: {error_directory.resolve()}")
-    print(f"Moving-average windows: {short_window}, {long_window}")
-    print("============================================================")
-
-    with nullcontext(pdf) as pdf:
-        for title, filename, kind in available:
-            signal_iterations, signals = load_error_signal_file(
-                filename, delimiter=delimiter
-            )
-            names = get_error_signal_field_names(
-                kind, signals.shape[1], primitive_field_names
-            )
-
-            for variable_index, field_name in enumerate(names):
-                raw = signals[:, variable_index]
-                short_average = compute_moving_average_ignore_nan(raw, short_window)
-                long_average = compute_moving_average_ignore_nan(raw, long_window)
-
-                fig, signal_axis = plt.subplots(figsize=(12, 7))
-                l2_axis = signal_axis.twinx()
-                correlation_axis = signal_axis.twinx()
-                correlation_axis.spines["right"].set_position(("axes", 1.13))
-                correlation_axis.patch.set_visible(False)
-
-                lines = []
-                rerun_mask = get_fom_rerun_mask(
-                    signal_iterations, fom_rerun_iterations
-                )
-                finite_raw = np.isfinite(raw)
-                regular_mask = finite_raw & ~rerun_mask
-                highlighted_mask = finite_raw & rerun_mask
-
-                raw_artist = signal_axis.scatter(
-                    signal_iterations[regular_mask], raw[regular_mask],
-                    color="0.55", s=10, alpha=0.55,
-                    label="Raw error signal", zorder=2,
-                    rasterized=True,
-                )
-                lines.append(raw_artist)
-                if np.any(highlighted_mask):
-                    rerun_artist = signal_axis.scatter(
-                        signal_iterations[highlighted_mask],
-                        raw[highlighted_mask], color="black",
-                        edgecolors="black", s=38, alpha=1.0,
-                        label="FOM-rerun iteration", zorder=9,
-                        rasterized=True,
-                    )
-                    lines.append(rerun_artist)
-                lines += signal_axis.plot(
-                    signal_iterations,
-                    short_average,
-                    color="tab:orange",
-                    linewidth=2.8,
-                    alpha=1.0,
-                    label=f"Moving average ({short_window})",
-                    zorder=20,
-                )
-
-                lines += signal_axis.plot(
-                    signal_iterations,
-                    long_average,
-                    color="tab:green",
-                    linewidth=3.0,
-                    linestyle="-.",
-                    alpha=1.0,
-                    label=f"Moving average ({long_window})",
-                    zorder=21,
-                )
-
-                if variable_index < relative_l2.shape[0]:
-                    aligned_l2 = interpolate_metric_to_iterations(
-                        metric_iterations,
-                        100.0 * relative_l2[variable_index],
-                        signal_iterations,
-                    )
-                    aligned_correlation = interpolate_metric_to_iterations(
-                        metric_iterations,
-                        correlation[variable_index],
-                        signal_iterations,
-                    )
-                    lines += l2_axis.plot(
-                        signal_iterations, aligned_l2, color="tab:red",
-                        linewidth=1.5, alpha=0.90,
-                        label=r"Relative $L_2$ error [%]", zorder=7
-                    )
-                    lines += correlation_axis.plot(
-                        signal_iterations, aligned_correlation, color="tab:blue",
-                        linewidth=1.5, alpha=0.90,
-                        label="Pearson correlation", zorder=8
-                    )
-                else:
-                    print(
-                        f"Warning: no FOM/ROM metric field {variable_index + 1} "
-                        f"for {filename.name}."
-                    )
-
-                finite_raw = raw[np.isfinite(raw)]
-                if len(finite_raw) and np.all(finite_raw > 0.0):
-                    signal_axis.set_yscale("log")
-
-                signal_axis.set_xlabel("Iteration")
-                signal_axis.set_ylabel("Error signal")
-                l2_axis.set_ylabel(r"Relative $L_2$ error [%]", color="tab:red")
-                correlation_axis.set_ylabel(
-                    "Pearson correlation", color="tab:blue", labelpad=12
-                )
-                l2_axis.tick_params(axis="y", labelcolor="tab:red")
-                correlation_axis.tick_params(axis="y", labelcolor="tab:blue")
-                correlation_axis.set_ylim(1.00, 0.00)
-                signal_axis.minorticks_on()
-                signal_axis.grid(which="major", axis="both", linestyle="-", alpha=0.30)
-                signal_axis.grid(which="minor", axis="x", linestyle=":", alpha=0.18)
-                correlation_axis.axhline(
-                    1.0, color="tab:blue", linestyle="--", linewidth=0.8, alpha=0.4
-                )
-                correlation_axis.axhline(
-                    0.0, color="tab:blue", linestyle=":", linewidth=0.8, alpha=0.4
-                )
-                signal_axis.legend(
-                    lines, [line.get_label() for line in lines],
-                    loc="best", fontsize=9
-                )
-                signal_axis.set_title(f"{title}: {field_name}")
-                fig.subplots_adjust(right=0.80)
-                pdf.savefig(fig, bbox_inches="tight")
-                plt.close(fig)
-                print(f"Added: {title}: {field_name}")
-
-                # Write this CV page immediately after the corresponding
-                # raw-data and moving-average page.
+    return np.linspace(lo, hi, n_bins + 1)
 
 
+def moving_histogram_density_band(values, window):
+    """Track the densest cluster's edges with an incrementally updated
+    sliding-window histogram in log10 space.
 
-
-    print("Finished appending error-signal plots.")
-
-
-
-def plot_rolling_coefficient_of_variation_to_pdf(
-    signal_iterations,
-    raw,
-    title,
-    field_name,
-    pdf,
-    windows=ROLLING_COEFFICIENT_OF_VARIATION_WINDOWS,
-    min_mean_magnitude=(
-        ROLLING_COEFFICIENT_OF_VARIATION_MIN_MEAN_MAGNITUDE
-    ),
-    logy=ROLLING_COEFFICIENT_OF_VARIATION_LOGY,
-):
-    """Plot raw source data and rolling CV on separate y-axes."""
-    signal_iterations = np.asarray(signal_iterations, dtype=float)
-    raw = np.asarray(raw, dtype=float)
-
-    if signal_iterations.shape != raw.shape:
-        raise ValueError(
-            "Rolling-CV iterations and raw data must have matching shapes."
-        )
-
-    for window in windows:
-        if window <= 0:
-            raise ValueError(
-                "Rolling coefficient-of-variation windows must be positive."
-            )
-
-        rolling_cv = compute_rolling_coefficient_of_variation(
-            values=raw,
-            window=window,
-            min_mean_magnitude=min_mean_magnitude,
-        )
-        if logy:
-            rolling_cv_plot = np.where(
-                np.isfinite(rolling_cv) & (rolling_cv > 0.0),
-                rolling_cv,
-                np.nan,
-            )
-        else:
-            rolling_cv_plot = rolling_cv
-
-        fig, raw_axis = plt.subplots(figsize=(12, 7))
-        cv_axis = raw_axis.twinx()
-
-        raw_line, = raw_axis.plot(
-            signal_iterations,
-            raw,
-            color="0.55",
-            linewidth=1.0,
-            alpha=0.65,
-            label="Raw error signal",
-            rasterized=True,
-            zorder=2,
-        )
-        cv_line, = cv_axis.plot(
-            signal_iterations,
-            rolling_cv_plot,
-            color="tab:purple",
-            linewidth=2.0,
-            alpha=0.95,
-            label=f"Rolling CV ({window})",
-            rasterized=True,
-            zorder=4,
-        )
-
-        raw_axis.set_xlabel("Iteration")
-        raw_axis.set_ylabel("Raw error signal", color="0.35")
-        cv_axis.set_ylabel(
-            "Rolling coefficient of variation",
-            color="tab:purple",
-        )
-        raw_axis.tick_params(axis="y", labelcolor="0.35")
-        cv_axis.tick_params(axis="y", labelcolor="tab:purple")
-
-        finite_raw = raw[np.isfinite(raw)]
-        if len(finite_raw) and np.all(finite_raw > 0.0):
-            raw_axis.set_yscale("log")
-        if logy:
-            cv_axis.set_yscale("log")
-
-        raw_axis.set_title(
-            f"{title}: {field_name}\n"
-            f"Raw error signal and rolling coefficient of variation, "
-            f"window={window}"
-        )
-        raw_axis.minorticks_on()
-        raw_axis.grid(
-            which="major", axis="both", linestyle="-", alpha=0.35
-        )
-        raw_axis.grid(
-            which="minor", axis="x", linestyle=":", alpha=0.20
-        )
-        raw_axis.legend(handles=[raw_line, cv_line], loc="best")
-
-        fig.tight_layout()
-        pdf.savefig(fig, bbox_inches="tight", dpi=150)
-        plt.close(fig)
-        print(
-            f"Added rolling CV: {title}: {field_name}; window={window}",
-            flush=True,
-        )
-
-
-def plot_rolling_standard_deviation_to_pdf(
-    signal_iterations,
-    raw,
-    title,
-    field_name,
-    pdf,
-    windows=ROLLING_STANDARD_DEVIATION_WINDOWS,
-    baseline_window=ROLLING_STANDARD_DEVIATION_BASELINE_WINDOW,
-    logy=ROLLING_STANDARD_DEVIATION_LOGY,
-):
-    # Plot raw data, local baseline, and rolling residual standard deviation.
-    signal_iterations = np.asarray(signal_iterations, dtype=float)
-    raw = np.asarray(raw, dtype=float)
-    if signal_iterations.shape != raw.shape:
-        raise ValueError("Rolling-std iterations and raw data must match.")
-
-    for window in windows:
-        baseline, rolling_std = compute_rolling_standard_deviation_about_baseline(
-            raw, window, baseline_window
-        )
-        if logy:
-            rolling_std_plot = np.where(
-                np.isfinite(rolling_std) & (rolling_std > 0.0),
-                rolling_std,
-                np.nan,
-            )
-        else:
-            rolling_std_plot = rolling_std
-
-        fig, raw_axis = plt.subplots(figsize=(12, 7))
-        std_axis = raw_axis.twinx()
-        raw_line, = raw_axis.plot(
-            signal_iterations, raw, color="0.55", linewidth=1.0,
-            alpha=0.65, label="Raw error signal", rasterized=True,
-        )
-        baseline_line, = raw_axis.plot(
-            signal_iterations, baseline, color="tab:green", linewidth=2.2,
-            linestyle="-.", label=f"Local baseline ({baseline_window})",
-            rasterized=True,
-        )
-        std_line, = std_axis.plot(
-            signal_iterations, rolling_std_plot, color="tab:orange",
-            linewidth=2.0, alpha=0.95,
-            label=f"Rolling residual std ({window})", rasterized=True,
-        )
-
-        raw_axis.set_xlabel("Iteration")
-        raw_axis.set_ylabel("Raw error signal", color="0.35")
-        std_axis.set_ylabel(
-            "Rolling standard deviation about local baseline",
-            color="tab:orange",
-        )
-        raw_axis.tick_params(axis="y", labelcolor="0.35")
-        std_axis.tick_params(axis="y", labelcolor="tab:orange")
-        finite_raw = raw[np.isfinite(raw)]
-        if len(finite_raw) and np.all(finite_raw > 0.0):
-            raw_axis.set_yscale("log")
-        if logy:
-            std_axis.set_yscale("log")
-
-        raw_axis.set_title(
-            f"{title}: {field_name}\n"
-            f"Rolling standard deviation about baseline "
-            f"[std={window}, baseline={baseline_window}]"
-        )
-        raw_axis.minorticks_on()
-        raw_axis.grid(which="major", axis="both", linestyle="-", alpha=0.35)
-        raw_axis.grid(which="minor", axis="x", linestyle=":", alpha=0.20)
-        raw_axis.legend(handles=[raw_line, baseline_line, std_line], loc="best")
-        fig.tight_layout()
-        pdf.savefig(fig, bbox_inches="tight", dpi=150)
-        plt.close(fig)
-        print(
-            f"Added rolling standard deviation: {title}: {field_name}; "
-            f"window={window}; baseline={baseline_window}", flush=True
-        )
-
-
-def plot_rolling_log_ratio_fluctuation_to_pdf(
-    signal_iterations,
-    raw,
-    title,
-    field_name,
-    pdf,
-    windows=ROLLING_LOG_RATIO_WINDOWS,
-    baseline_window=ROLLING_LOG_RATIO_BASELINE_WINDOW,
-    logy=ROLLING_LOG_RATIO_LOGY,
-):
-    # Plot raw data, local baseline, and rolling log-ratio fluctuation.
-    signal_iterations = np.asarray(signal_iterations, dtype=float)
-    raw = np.asarray(raw, dtype=float)
-    if signal_iterations.shape != raw.shape:
-        raise ValueError("Rolling-log-ratio iterations and raw data must match.")
-
-    for window in windows:
-        baseline, _log_ratio, rolling_log_ratio_std = (
-            compute_rolling_log_ratio_fluctuation(
-                raw, window, baseline_window
-            )
-        )
-        if logy:
-            metric_plot = np.where(
-                np.isfinite(rolling_log_ratio_std)
-                & (rolling_log_ratio_std > 0.0),
-                rolling_log_ratio_std,
-                np.nan,
-            )
-        else:
-            metric_plot = rolling_log_ratio_std
-
-        fig, raw_axis = plt.subplots(figsize=(12, 7))
-        metric_axis = raw_axis.twinx()
-        raw_line, = raw_axis.plot(
-            signal_iterations, raw, color="0.55", linewidth=1.0,
-            alpha=0.65, label="Raw error signal", rasterized=True,
-        )
-        baseline_line, = raw_axis.plot(
-            signal_iterations, baseline, color="tab:green", linewidth=2.2,
-            linestyle="-.", label=f"Local baseline ({baseline_window})",
-            rasterized=True,
-        )
-        metric_line, = metric_axis.plot(
-            signal_iterations, metric_plot, color="tab:blue",
-            linewidth=2.0, alpha=0.95,
-            label=f"Rolling std of log10(raw / baseline) ({window})",
-            rasterized=True,
-        )
-
-        raw_axis.set_xlabel("Iteration")
-        raw_axis.set_ylabel("Raw error signal", color="0.35")
-        metric_axis.set_ylabel(
-            "Rolling std of log10(raw / local baseline) [decades]",
-            color="tab:blue",
-        )
-        raw_axis.tick_params(axis="y", labelcolor="0.35")
-        metric_axis.tick_params(axis="y", labelcolor="tab:blue")
-        finite_raw = raw[np.isfinite(raw)]
-        if len(finite_raw) and np.all(finite_raw > 0.0):
-            raw_axis.set_yscale("log")
-        if logy:
-            metric_axis.set_yscale("log")
-
-        raw_axis.set_title(
-            f"{title}: {field_name}\n"
-            f"Rolling log-ratio fluctuation "
-            f"[window={window}, baseline={baseline_window}]"
-        )
-        raw_axis.minorticks_on()
-        raw_axis.grid(which="major", axis="both", linestyle="-", alpha=0.35)
-        raw_axis.grid(which="minor", axis="x", linestyle=":", alpha=0.20)
-        raw_axis.legend(
-            handles=[raw_line, baseline_line, metric_line], loc="best"
-        )
-        fig.tight_layout()
-        pdf.savefig(fig, bbox_inches="tight", dpi=150)
-        plt.close(fig)
-        print(
-            f"Added rolling log-ratio fluctuation: {title}: {field_name}; "
-            f"window={window}; baseline={baseline_window}", flush=True
-        )
-
-
-
-def load_fom_rerun_counter(counter_filename, delimiter=","):
-    """Load the cumulative rerun counter and per-variable trigger records.
-
-    Numeric rows have this format:
-        iteration,cumulative_count
-
-    Optional comment rows have this format:
-        # threshold_exceeded,iteration=I,variables=...,mask=1|0|1|0
+    Bin edges are derived once (Freedman-Diaconis, see
+    _freedman_diaconis_bin_edges) from the full finite-positive history, so
+    no per-dataset threshold is hardcoded. At every sample, the trailing
+    window's histogram is updated in O(1) (one bin increment for the
+    entering sample, one bin decrement for the sample leaving the window).
+    The band is the contiguous run of nonempty bins around the tallest
+    (peak/mode) bin; walking outward stops naturally at the first empty
+    bin, which is where the dense cluster thins out. This costs O(1)
+    amortized per sample for the histogram update plus O(number_of_bins)
+    for the peak/valley search, versus O(window * log(window)) for
+    resorting the trailing window from scratch at every step.
 
     Returns:
-        counter_iterations
-        counter_values
-        rerun_iterations
-        rerun_iterations_by_variable
-
-    rerun_iterations_by_variable is a tuple. Entry i contains only the
-    iterations at which conservative variable i exceeded the threshold.
+        lower_edge, upper_edge, band_count (each shape (len(values),))
     """
-    counter_filename = Path(counter_filename)
+    validate_windows(("histogram-density-band window", window))
+    values = np.asarray(values, dtype=float)
+    n = len(values)
 
-    counter_iterations, columns = load_error_signal_file(
-        counter_filename,
-        delimiter=delimiter,
-    )
+    lower_edge = np.full(n, np.nan, dtype=float)
+    upper_edge = np.full(n, np.nan, dtype=float)
+    band_count = np.zeros(n, dtype=np.int64)
 
-    if columns.shape[1] != 1:
-        raise ValueError(
-            f"Expected one counter column in {counter_filename}; "
-            f"received {columns.shape[1]}."
-        )
+    finite_positive = values[np.isfinite(values) & (values > 0.0)]
+    if finite_positive.size < 2:
+        return lower_edge, upper_edge, band_count
 
-    values_float = np.asarray(columns[:, 0], dtype=float)
-    if not np.all(np.isfinite(values_float)):
-        raise ValueError(
-            f"Counter contains non-finite values: {counter_filename}"
-        )
+    bin_edges = _freedman_diaconis_bin_edges(np.log10(finite_positive))
+    n_bins = len(bin_edges) - 1
 
-    rounded = np.rint(values_float)
-    if not np.allclose(
-        values_float,
-        rounded,
-        rtol=0.0,
-        atol=1.0e-12,
-    ):
-        raise ValueError(
-            f"Counter contains non-integer values: {counter_filename}"
-        )
+    counts = np.zeros(n_bins, dtype=np.int64)
+    window_bins = deque()
 
-    counter_values = rounded.astype(np.int64)
-    changes = np.diff(counter_values, prepend=counter_values[0])
-
-    if np.any(counter_values < 0) or np.any(changes < 0):
-        raise ValueError(
-            f"Counter must be nonnegative and nondecreasing: "
-            f"{counter_filename}"
-        )
-
-    rerun_iterations = counter_iterations[changes > 0]
-
-    comment_pattern = re.compile(
-        r"^\s*#\s*threshold_exceeded,"
-        r"iteration=(?P<iteration>[^,]+),"
-        r"variables=(?P<variables>[^,]*),"
-        r"mask=(?P<mask>[01](?:\|[01])*)\s*$"
-    )
-
-    trigger_records = {}
-    maximum_mask_length = 0
-
-    with counter_filename.open("r", encoding="utf-8") as file:
-        for line_number, line in enumerate(file, start=1):
-            match = comment_pattern.match(line)
-            if match is None:
-                continue
-
-            try:
-                iteration = float(match.group("iteration"))
-            except ValueError as error:
-                raise ValueError(
-                    f"Invalid threshold-comment iteration on line "
-                    f"{line_number} of {counter_filename}: "
-                    f"{match.group('iteration')}"
-                ) from error
-
-            mask = np.asarray(
-                [
-                    value == "1"
-                    for value in match.group("mask").split("|")
-                ],
-                dtype=bool,
+    for index in range(n):
+        value = values[index]
+        entering_bin = None
+        if np.isfinite(value) and value > 0.0:
+            log_value = np.log10(value)
+            entering_bin = int(
+                np.clip(np.searchsorted(bin_edges, log_value, side="right") - 1,
+                        0, n_bins - 1)
             )
+            counts[entering_bin] += 1
+        window_bins.append(entering_bin)
 
-            maximum_mask_length = max(maximum_mask_length, len(mask))
+        if len(window_bins) > window:
+            leaving_bin = window_bins.popleft()
+            if leaving_bin is not None:
+                counts[leaving_bin] -= 1
 
-            iteration_key = int(np.rint(iteration))
-            if not np.isclose(
-                iteration,
-                iteration_key,
-                rtol=0.0,
-                atol=1.0e-9,
-            ):
-                raise ValueError(
-                    f"Non-integer threshold-comment iteration on line "
-                    f"{line_number} of {counter_filename}: {iteration}"
-                )
-
-            if iteration_key in trigger_records:
-                existing = trigger_records[iteration_key]
-                if len(existing) < len(mask):
-                    existing = np.pad(
-                        existing,
-                        (0, len(mask) - len(existing)),
-                        constant_values=False,
-                    )
-                elif len(mask) < len(existing):
-                    mask = np.pad(
-                        mask,
-                        (0, len(existing) - len(mask)),
-                        constant_values=False,
-                    )
-                trigger_records[iteration_key] = existing | mask
-            else:
-                trigger_records[iteration_key] = mask
-
-    # Four is the expected mass, momentum, energy, species field count.
-    number_of_trigger_variables = max(4, maximum_mask_length)
-    per_variable_lists = [
-        []
-        for _ in range(number_of_trigger_variables)
-    ]
-
-    for iteration_key, mask in sorted(trigger_records.items()):
-        for variable_index, exceeded in enumerate(mask):
-            if exceeded:
-                per_variable_lists[variable_index].append(
-                    float(iteration_key)
-                )
-
-    rerun_iterations_by_variable = tuple(
-        np.asarray(values, dtype=float)
-        for values in per_variable_lists
-    )
-
-    print(f"Loaded FOM-rerun counter: {counter_filename.resolve()}")
-    print(f"Final count: {int(counter_values[-1])}")
-    print(f"Recorded increases: {len(rerun_iterations)}")
-    print(f"Threshold-comment records: {len(trigger_records)}")
-
-    for variable_index, values in enumerate(
-        rerun_iterations_by_variable
-    ):
-        print(
-            f"Variable {variable_index} trigger count: {len(values)}"
-        )
-
-    return (
-        counter_iterations,
-        counter_values,
-        rerun_iterations,
-        rerun_iterations_by_variable,
-    )
-
-
-
-def compute_fom_reruns_per_window(counter_iterations, counter_values, window=1000):
-    """Count reruns in (t-window, t], returning NaN until the window is full."""
-    x = np.asarray(counter_iterations, dtype=float)
-    counter = np.asarray(counter_values, dtype=np.int64)
-    if x.ndim != 1 or counter.ndim != 1 or x.shape != counter.shape or len(x) == 0:
-        raise ValueError("Counter arrays must be nonempty, one-dimensional, and matching.")
-    if not np.isfinite(window) or window <= 0:
-        raise ValueError("The FOM-rerun window must be positive and finite.")
-    if not np.all(np.isfinite(x)) or np.any(np.diff(x) <= 0.0):
-        raise ValueError("Counter iterations must be finite and strictly increasing.")
-    if np.any(counter < 0) or np.any(np.diff(counter) < 0):
-        raise ValueError("Counter values must be nonnegative and nondecreasing.")
-
-    increments = np.diff(counter, prepend=counter[0])
-    prefix = np.concatenate(([0], np.cumsum(increments, dtype=np.int64)))
-    reruns_per_window = np.full(x.shape, np.nan, dtype=float)
-    window = float(window)
-
-    for index, current_iteration in enumerate(x):
-        if current_iteration - x[0] < window:
+        if not np.any(counts):
             continue
-        first_included = np.searchsorted(
-            x, current_iteration - window, side="right"
-        )
-        reruns_per_window[index] = (
-            prefix[index + 1] - prefix[first_included]
-        )
 
-    return reruns_per_window
+        peak_bin = int(np.argmax(counts))
 
+        left_bin = peak_bin
+        while left_bin > 0 and counts[left_bin - 1] > 0:
+            left_bin -= 1
 
-def plot_fom_rerun_counter_to_pdf(
-    counter_iterations,
-    counter_values,
-    rerun_iterations,
-    pdf,
-    rerun_window=1000,
-):
-    """Plot the cumulative counter and full-window rerun count together."""
-    x = np.asarray(counter_iterations, dtype=float)
-    counter = np.asarray(counter_values, dtype=np.int64)
-    recent = compute_fom_reruns_per_window(x, counter, rerun_window)
+        right_bin = peak_bin
+        while right_bin < n_bins - 1 and counts[right_bin + 1] > 0:
+            right_bin += 1
 
-    fig, counter_axis = plt.subplots(figsize=(12, 7))
-    window_axis = counter_axis.twinx()
+        lower_edge[index] = 10.0 ** bin_edges[left_bin]
+        upper_edge[index] = 10.0 ** bin_edges[right_bin + 1]
+        band_count[index] = int(counts[left_bin:right_bin + 1].sum())
 
-    cumulative_line, = counter_axis.step(
-        x, counter, where="post", color="tab:blue", linewidth=2.0,
-        label="Cumulative FOM reruns", zorder=3,
-    )
-    window_line, = window_axis.plot(
-        x, recent, color="tab:purple", linewidth=2.0,
-        label=f"Reruns in previous {rerun_window:g} iterations", zorder=4,
-    )
-
-    counter_axis.set_xlabel("Iteration")
-    counter_axis.set_ylabel(
-        "Cumulative number of FOM reruns", color="tab:blue"
-    )
-    window_axis.set_ylabel(
-        f"FOM reruns in previous {rerun_window:g} iterations",
-        color="tab:purple",
-    )
-    counter_axis.tick_params(axis="y", labelcolor="tab:blue")
-    window_axis.tick_params(axis="y", labelcolor="tab:purple")
-    counter_axis.set_title("Conservation-Error FOM Rerun History")
-    counter_axis.set_ylim(bottom=0)
-    window_axis.set_ylim(bottom=0)
-    counter_axis.minorticks_on()
-    counter_axis.grid(which="major", axis="both", linestyle="-", alpha=0.35)
-    counter_axis.grid(which="minor", axis="x", linestyle=":", alpha=0.20)
-    counter_axis.legend(handles=[cumulative_line, window_line], loc="best")
-
-    fig.tight_layout()
-    pdf.savefig(fig, bbox_inches="tight")
-    plt.close(fig)
-
-    print("Added combined cumulative and trailing-window FOM-rerun page.")
-    print(
-        f"Full trailing-window samples: "
-        f"{np.count_nonzero(np.isfinite(recent))}"
-    )
+    return lower_edge, upper_edge, band_count
 
 
-def get_fom_rerun_mask(value_iterations, rerun_iterations):
-    # Vectorized matching for integer-valued iteration numbers.
-    value_iterations = np.asarray(value_iterations, dtype=float)
-    rerun_iterations = np.asarray(rerun_iterations, dtype=float)
+def rolling_statistic(values, window, statistic):
+    validate_windows(("rolling window", window))
+    values = np.asarray(values, dtype=float)
+    result = np.full(len(values), np.nan)
+    for i in range(len(values)):
+        current = values[max(0, i-window+1):i+1]
+        current = current[np.isfinite(current)]
+        if current.size:
+            result[i] = statistic(current)
+    return result
 
-    if value_iterations.ndim != 1 or rerun_iterations.ndim != 1:
-        raise ValueError("Iteration arrays must be one-dimensional.")
 
-    mask = np.zeros(value_iterations.shape, dtype=bool)
-    if len(rerun_iterations) == 0:
-        return mask
+def rolling_rms_about_baseline(values, baseline, window):
+    values, baseline = np.asarray(values, float), np.asarray(baseline, float)
+    if values.shape != baseline.shape:
+        raise ValueError("RMS values and baseline must have matching shapes.")
+    return np.sqrt(moving_average((values-baseline)**2, window))
 
-    valid_values = np.isfinite(value_iterations)
-    valid_reruns = np.isfinite(rerun_iterations)
-    if not np.any(valid_values) or not np.any(valid_reruns):
-        return mask
 
-    value_int = np.rint(value_iterations[valid_values]).astype(np.int64)
-    rerun_int = np.unique(
-        np.rint(rerun_iterations[valid_reruns]).astype(np.int64)
-    )
-    mask[valid_values] = np.isin(value_int, rerun_int)
+def rolling_cv(values, window, minimum_mean):
+    require_nonnegative(minimum_mean, "minimum CV mean magnitude")
+    def calculate(x):
+        mean = np.mean(x)
+        return np.std(x, ddof=0) / abs(mean) if abs(mean) >= minimum_mean else np.nan
+    return rolling_statistic(values, window, calculate)
+
+
+def rolling_std_about_baseline(values, window, baseline_window):
+    baseline = moving_average(values, baseline_window)
+    return baseline, rolling_statistic(np.asarray(values)-baseline, window, lambda x: np.std(x))
+
+
+def rolling_log_ratio(values, window, baseline_window):
+    values = np.asarray(values, float)
+    baseline = moving_median(values, baseline_window)
+    ratio = np.full(len(values), np.nan)
+    valid = np.isfinite(values) & np.isfinite(baseline) & (values > 0) & (baseline > 0)
+    ratio[valid] = np.log10(values[valid] / baseline[valid])
+    metric = rolling_statistic(ratio, window, lambda x: np.std(x))
+    return baseline, ratio, metric
+
+
+def interpolate_without_extrapolation(source_iterations, values, target_iterations):
+    x, y = np.asarray(source_iterations, float), np.asarray(values, float)
+    target = np.asarray(target_iterations, float)
+    valid = np.isfinite(x) & np.isfinite(y)
+    if not np.any(valid):
+        return np.full(target.shape, np.nan)
+    x, y = x[valid], y[valid]
+    order = np.argsort(x, kind="stable")
+    x, indices = np.unique(x[order], return_index=True)
+    y = y[order][indices]
+    if len(x) == 1:
+        result = np.full(target.shape, np.nan)
+        result[np.isclose(target, x[0])] = y[0]
+        return result
+    return np.interp(target, x, y, left=np.nan, right=np.nan)
+
+
+def rerun_mask(iterations, rerun_iterations):
+    iterations = np.asarray(iterations, float)
+    reruns = np.asarray(rerun_iterations, float)
+    mask = np.zeros(iterations.shape, bool)
+    valid = np.isfinite(iterations)
+    valid_reruns = np.isfinite(reruns)
+    if np.any(valid) and np.any(valid_reruns):
+        mask[valid] = np.isin(np.rint(iterations[valid]).astype(np.int64),
+                              np.unique(np.rint(reruns[valid_reruns]).astype(np.int64)))
     return mask
 
 
-def plot_fom_rom_conservation_errors_to_pdf(
-    fom_error_directory,
-    rom_error_directory,
+# =============================================================================
+# PLOTTING ROUTINES
+# =============================================================================
+
+def plot_primitive_metrics(iterations, relative_l2, correlation, names, pdf):
+    if len(names) != relative_l2.shape[0]:
+        names = [f"Field {i+1}" for i in range(relative_l2.shape[0])]
+    for i, name in enumerate(names):
+        fig, error_axis = plt.subplots(figsize=(10, 6))
+        corr_axis = error_axis.twinx()
+        error_line, = error_axis.plot(iterations, 100*relative_l2[i], color="tab:red",
+                                      linewidth=1.5, label=r"Relative $L_2$ error")
+        corr_line, = corr_axis.plot(iterations, correlation[i], color="tab:blue",
+                                    linewidth=1.5, label="Pearson correlation")
+        error_axis.set_ylabel(r"Relative $L_2$ error [%]", color="tab:red")
+        corr_axis.set_ylabel("Pearson correlation", color="tab:blue")
+        error_axis.tick_params(axis="y", labelcolor="tab:red")
+        corr_axis.tick_params(axis="y", labelcolor="tab:blue")
+        corr_axis.set_ylim(1, 0)
+        error_axis.set_title(name)
+        apply_standard_axes(error_axis)
+        error_axis.legend(handles=[error_line, corr_line], loc="best")
+        save_figure(pdf, fig)
+
+
+def plot_conservative_integrals(iterations, fom_integrals, rom_integrals, pdf, tolerance=1e-14):
+    for key in fom_integrals:
+        fom, rom = np.asarray(fom_integrals[key]), np.asarray(rom_integrals[key])
+        validate_history_shape(fom, iterations, f"FOM {key}")
+        validate_history_shape(rom, iterations, f"ROM {key}")
+        error = np.full(fom.shape, np.nan)
+        valid = np.isfinite(fom) & np.isfinite(rom) & (np.abs(fom) > tolerance)
+        error[valid] = 100*np.abs(rom[valid]-fom[valid])/np.abs(fom[valid])
+        fig, axis = plt.subplots(figsize=(10, 6)); error_axis = axis.twinx()
+        fline, = axis.plot(iterations, fom, color="black", label="FOM")
+        rline, = axis.plot(iterations, rom, color="tab:orange", ls="--", label="ROM")
+        eline, = error_axis.plot(iterations, error, color="tab:red", ls=":", label="Relative error")
+        axis.set_ylabel(f"Total {key}"); error_axis.set_ylabel("Relative error [%]", color="tab:red")
+        axis.set_title(f"Domain-integrated {key}"); apply_standard_axes(axis)
+        axis.legend(handles=[fline, rline, eline], loc="best")
+        save_figure(pdf, fig)
+
+
+def plot_winsorized_metric_family(
+    iterations,
+    metric,
+    fractions,
+    title,
+    ylabel,
     pdf,
-    fom_rerun_iterations=None,
-    fom_rerun_iterations_by_variable=None,
-    short_window=1000,
-    long_window=5000,
-    delimiter=",",
+    logy=False,
 ):
-    """Plot ROM percent conservation errors and fluctuation metrics."""
-    del fom_error_directory
-    rom_error_directory = Path(rom_error_directory)
+    """Plot one rolling metric for every winsorized tail fraction."""
+    metric = np.asarray(metric, dtype=float)
+    fractions = tuple(fractions)
+    if metric.shape != (len(fractions), len(iterations)):
+        raise ValueError("Winsorized metric shape does not match iterations/fractions.")
 
-    if short_window <= 0 or long_window <= 0:
-        raise ValueError(
-            "Conservation-error baseline and RMS windows must be positive."
+    colors = ("tab:blue", "tab:orange", "tab:green", "tab:purple")
+    line_styles = ("-", "--", "-.", ":")
+    fig, axis = plt.subplots(figsize=(12, 7))
+
+    for index, fraction in enumerate(fractions):
+        plotted = positive_or_nan(metric[index]) if logy else metric[index]
+        axis.plot(
+            iterations,
+            plotted,
+            color=colors[index % len(colors)],
+            linestyle=line_styles[index % len(line_styles)],
+            linewidth=2.0,
+            label=f"{100 * fraction:g}% tails",
         )
 
-    if fom_rerun_iterations is None:
-        fom_rerun_iterations = np.array([], dtype=float)
-    else:
-        fom_rerun_iterations = np.asarray(fom_rerun_iterations, dtype=float)
+    if logy:
+        finite_positive = metric[np.isfinite(metric) & (metric > 0.0)]
+        if finite_positive.size:
+            axis.set_yscale("log")
+    axis.set_ylabel(ylabel)
+    axis.set_title(title)
+    apply_standard_axes(axis)
+    axis.legend(loc="best")
+    save_figure(pdf, fig, 150)
 
-    if fom_rerun_iterations_by_variable is None:
-        fom_rerun_iterations_by_variable = tuple()
-    else:
-        fom_rerun_iterations_by_variable = tuple(
-            np.asarray(values, dtype=float)
-            for values in fom_rerun_iterations_by_variable
-        )
 
-    percent_file = rom_error_directory / "error_cons_perct.txt"
-    moving_average_file = rom_error_directory / "error_cons_perct_ma.txt"
-
-    percent_iterations, percent_values = load_error_signal_file(
-        percent_file, delimiter=delimiter
+def plot_winsorized_residual_metric_pages(
+    iterations,
+    raw,
+    winsorized_means,
+    lower_bands,
+    upper_bands,
+    title,
+    name,
+    pdf,
+):
+    """Create four pages quantifying tail residual severity."""
+    metrics = compute_winsorized_residual_metrics(
+        raw,
+        winsorized_means,
+        lower_bands,
+        upper_bands,
+        WINSORIZED_RESIDUAL_AVERAGE_WINDOW,
+        WINSORIZED_RATIO_MIN_DENOMINATOR,
     )
-    ma_iterations, ma_values = load_error_signal_file(
-        moving_average_file, delimiter=delimiter
+    window_text = f"rolling average window={WINSORIZED_RESIDUAL_AVERAGE_WINDOW}"
+
+    plot_winsorized_metric_family(
+        iterations,
+        metrics["mean_residual_ratio"],
+        WINSORIZED_TAIL_FRACTIONS,
+        f"{title}: {name}\nTail/interior average absolute residual ratio about winsorized mean; {window_text}",
+        "Tail mean residual / interior mean residual",
+        pdf,
+        logy=True,
+    )
+    plot_winsorized_metric_family(
+        iterations,
+        metrics["tail_mean_residual"],
+        WINSORIZED_TAIL_FRACTIONS,
+        f"{title}: {name}\nAverage absolute tail residual about winsorized mean; {window_text}",
+        "Average tail residual [percentage points]",
+        pdf,
+        logy=True,
+    )
+    plot_winsorized_metric_family(
+        iterations,
+        metrics["limit_residual_ratio"],
+        WINSORIZED_TAIL_FRACTIONS,
+        f"{title}: {name}\nTail/interior average distance ratio relative to percentile limits; {window_text}",
+        "Tail excess / interior distance to nearest limit",
+        pdf,
+        logy=True,
+    )
+    plot_winsorized_metric_family(
+        iterations,
+        metrics["tail_limit_residual"],
+        WINSORIZED_TAIL_FRACTIONS,
+        f"{title}: {name}\nAverage tail excess beyond percentile limit; {window_text}",
+        "Average tail excess [percentage points]",
+        pdf,
+        logy=True,
     )
 
-    if percent_values.shape[1] != ma_values.shape[1]:
-        raise ValueError(
-            "Percent-error and moving-average files have different field counts: "
-            f"{percent_values.shape[1]} versus {ma_values.shape[1]}"
-        )
-    if percent_iterations.shape != ma_iterations.shape:
-        raise ValueError(
-            "Percent-error and moving-average files have different row counts: "
-            f"{len(percent_iterations)} versus {len(ma_iterations)}"
-        )
-    if not np.allclose(percent_iterations, ma_iterations, rtol=0.0, atol=1e-9):
-        bad = np.flatnonzero(
-            ~np.isclose(percent_iterations, ma_iterations, rtol=0.0, atol=1e-9)
-        )
-        index = int(bad[0])
-        raise ValueError(
-            "Percent-error and moving-average iterations are not aligned. "
-            f"First mismatch at row {index}: "
-            f"{percent_iterations[index]} versus {ma_iterations[index]}"
+
+def plot_winsorized_std_cv_pages(
+    iterations,
+    raw,
+    winsorized_means,
+    title,
+    name,
+    pdf,
+):
+    """Plot spread and coefficient of variation for all tail fractions."""
+    spread, coefficient_of_variation = rolling_winsorized_std_and_cv(
+        raw,
+        winsorized_means,
+        WINSORIZED_STD_CV_WINDOW,
+        WINSORIZED_CV_MIN_BASELINE_MAGNITUDE,
+    )
+
+    if is_plot_enabled("winsorized_standard_deviation"):
+        plot_winsorized_metric_family(
+            iterations,
+            spread,
+            WINSORIZED_TAIL_FRACTIONS,
+            f"{title}: {name}\nRolling spread about winsorized means "
+            f"(window={WINSORIZED_STD_CV_WINDOW})",
+            "Rolling spread [percentage points]",
+            pdf,
+            logy=WINSORIZED_STD_LOGY,
         )
 
-    percent_values = np.abs(percent_values)
-    ma_values = np.abs(ma_values)
-    number_of_variables = percent_values.shape[1]
-    default_names = ["Mass", "Momentum", "Energy", "Species"]
-    field_names = default_names if number_of_variables == 4 else [
-        f"Conservative field {i + 1}" for i in range(number_of_variables)
-    ]
-    variants = (("Scatter, logarithmic y-axis", True),
-                ("Scatter, linear y-axis", False))
-    print("============================================================")
-    print("Appending ROM percent conservation-error histories")
-    print(f"Percent file: {percent_file.resolve()}")
-    print(f"Saved moving-average file: {moving_average_file.resolve()}")
-    print(f"ROM variables: {number_of_variables}")
-    print("Only percent-error pages will be produced")
-    print("============================================================")
+    if is_plot_enabled("winsorized_coefficient_of_variation"):
+        plot_winsorized_metric_family(
+            iterations,
+            coefficient_of_variation,
+            WINSORIZED_TAIL_FRACTIONS,
+            f"{title}: {name}\nRolling coefficient of variation based on "
+            f"winsorized means (window={WINSORIZED_STD_CV_WINDOW})",
+            "Rolling CV = spread / |winsorized mean|",
+            pdf,
+            logy=WINSORIZED_CV_LOGY,
+        )
 
-    for variable_index, field_name in enumerate(field_names):
-        raw = percent_values[:, variable_index]
-        saved_ma = ma_values[:, variable_index]
 
-        if variable_index < len(fom_rerun_iterations_by_variable):
-            variable_rerun_iterations = (
-                fom_rerun_iterations_by_variable[variable_index]
+def plot_baseline_pages(iterations, raw, title, name, pdf, baseline_window, rms_window):
+    ma = moving_average(raw, baseline_window)
+    ema = exponential_moving_average(raw, baseline_window)
+    median = moving_median(raw, baseline_window)
+    shorth = moving_shorth(raw, baseline_window)
+    raw_log = positive_or_nan(raw)
+    if is_plot_enabled("baseline_comparison"):
+        fig, axis = plt.subplots(figsize=(12, 7))
+        axis.scatter(iterations, raw_log, c="0.60", s=10, alpha=.4,
+                     label="ROM percent conservation error", rasterized=True)
+        axis.plot(iterations, positive_or_nan(ma), lw=2.4, label=f"Moving average ({baseline_window})")
+        axis.plot(iterations, positive_or_nan(ema), lw=2.4, ls="--", label=f"EMA ({baseline_window})")
+        axis.plot(iterations, positive_or_nan(median), lw=2.4, ls=":", label=f"Median ({baseline_window})")
+        axis.plot(iterations, positive_or_nan(shorth), lw=2.4, ls="-.", label=f"Shorth ({baseline_window})")
+        axis.set_yscale("log"); axis.set_ylabel("Conservation error [%]")
+        axis.set_title(f"{title}: {name}\nCausal baseline comparison")
+        apply_standard_axes(axis); axis.legend(loc="best"); save_figure(pdf, fig, 150)
+    if is_plot_enabled("winsorized_mean_comparison"):
+        winsorized_means, lower_bands, upper_bands = moving_winsorized_means(
+            raw, WINSORIZED_MEAN_WINDOW, WINSORIZED_TAIL_FRACTIONS
+        )
+        fig, axis = plt.subplots(figsize=(12, 7))
+        raw_artist = axis.scatter(
+            iterations, raw_log, c="0.65", s=9, alpha=.22,
+            label="Raw conservation error", rasterized=True, zorder=1,
+        )
+        handles = [raw_artist]
+        colors = ("tab:blue", "tab:orange", "tab:green", "tab:purple")
+        line_styles = ("-", "--", "-.", ":")
+
+        # Draw widest bands first so narrower bands remain visible on top.
+        plot_order = np.argsort(WINSORIZED_TAIL_FRACTIONS)
+        for index in plot_order:
+            fraction = WINSORIZED_TAIL_FRACTIONS[index]
+            color = colors[index % len(colors)]
+            lower = positive_or_nan(lower_bands[index])
+            upper = positive_or_nan(upper_bands[index])
+            band = axis.fill_between(
+                iterations,
+                lower,
+                upper,
+                color=color,
+                alpha=.07,
+                linewidth=0.0,
+                label=(f"{100*fraction:g}% tail band "
+                       f"({100*fraction:g}th-{100*(1-fraction):g}th pct.)"),
+                zorder=2 + index,
             )
-        else:
-            variable_rerun_iterations = np.array([], dtype=float)
+            handles.append(band)
+            axis.plot(
+                iterations, lower, color=color, linewidth=.8,
+                linestyle=line_styles[index % len(line_styles)], alpha=.70,
+                zorder=6 + index,
+            )
+            axis.plot(
+                iterations, upper, color=color, linewidth=.8,
+                linestyle=line_styles[index % len(line_styles)], alpha=.70,
+                zorder=6 + index,
+            )
 
-        variable_rerun_mask = get_fom_rerun_mask(
-            percent_iterations,
-            variable_rerun_iterations,
+        for index, fraction in enumerate(WINSORIZED_TAIL_FRACTIONS):
+            line, = axis.plot(
+                iterations, positive_or_nan(winsorized_means[index]),
+                color=colors[index % len(colors)],
+                linestyle=line_styles[index % len(line_styles)], linewidth=2.2,
+                label=f"Winsorized mean: {100*fraction:g}% tails",
+                zorder=10 + index,
+            )
+            handles.append(line)
+
+        axis.set_yscale("log")
+        axis.set_ylabel("Conservation error [%]")
+        axis.set_title(
+            f"{title}: {name}\nCausal winsorized means and percentile bands "
+            f"(window={WINSORIZED_MEAN_WINDOW})"
+        )
+        apply_standard_axes(axis)
+        axis.legend(handles=handles, loc="best", fontsize=8, ncol=2)
+        save_figure(pdf, fig, 150)
+
+        if is_plot_enabled("winsorized_residual_metrics"):
+            plot_winsorized_residual_metric_pages(
+                iterations,
+                raw,
+                winsorized_means,
+                lower_bands,
+                upper_bands,
+                title,
+                name,
+                pdf,
+            )
+
+        if (
+            is_plot_enabled("winsorized_standard_deviation")
+            or is_plot_enabled("winsorized_coefficient_of_variation")
+        ):
+            plot_winsorized_std_cv_pages(
+                iterations,
+                raw,
+                winsorized_means,
+                title,
+                name,
+                pdf,
+            )
+    if is_plot_enabled("adaptive_valley_band"):
+        vm, left, right, mean, counts = moving_asymmetric_mad_band(raw, baseline_window)
+        fig, axis = plt.subplots(figsize=(12, 7))
+        axis.scatter(iterations, raw_log, c="0.65", s=9, alpha=.3, rasterized=True,
+                     label="ROM percent conservation error")
+        axis.fill_between(iterations, positive_or_nan(left), positive_or_nan(right),
+                          color="tab:cyan", alpha=.2, label="Asymmetric median/MAD band")
+        axis.plot(iterations, positive_or_nan(vm), color="tab:purple", ls=":", lw=2.4,
+                  label="Moving log-space median")
+        axis.plot(iterations, positive_or_nan(mean), color="black", lw=2.2,
+                  label="Mean inside asymmetric MAD band")
+        axis.set_yscale("log"); axis.set_ylabel("Conservation error [%]")
+        axis.set_title(f"{title}: {name}\nAsymmetric median/MAD band in log10 space")
+        apply_standard_axes(axis); axis.legend(loc="best"); save_figure(pdf, fig, 150)
+        finite = counts[counts > 0]
+        if finite.size:
+            print(f"Asymmetric MAD band {name}: selected count median={np.median(finite):.1f}")
+    if is_plot_enabled("rolling_rms"):
+        median_rms = rolling_rms_about_baseline(
+            raw,
+            median,
+            rms_window,
         )
 
-        for plot_label, use_log_y in variants:
-            if use_log_y:
-                raw_plot = np.where(np.isfinite(raw) & (raw > 0.0), raw, np.nan)
-                ma_plot = np.where(
-                    np.isfinite(saved_ma) & (saved_ma > 0.0), saved_ma, np.nan
-                )
-            else:
-                raw_plot = np.where(np.isfinite(raw), raw, np.nan)
-                ma_plot = np.where(np.isfinite(saved_ma), saved_ma, np.nan)
+        valid_median = (
+            np.isfinite(median_rms)
+            & np.isfinite(median)
+            & (np.abs(median) > 1.0e-30)
+        )
 
+        median_rms[valid_median] /= np.abs(median[valid_median])
+        median_rms[~valid_median] = np.nan        
+        fig, axis = plt.subplots(figsize=(12, 7)); raw_axis = axis.twinx()
+        rms_line, = axis.plot(
+            iterations, median_rms, color="tab:purple", lw=2.4,
+            label=f"RMS about moving median ({baseline_window})",
+        )
+        scat = raw_axis.scatter(iterations, raw_log, c="0.55", s=9, alpha=.3,
+                                label="Raw conservation error", rasterized=True)
+        raw_axis.set_yscale("log"); axis.set_ylabel("RMS [percentage points]")
+        raw_axis.set_ylabel("Conservation error [%]")
+        axis.set_title(
+            f"{title}: {name}\nRolling RMS about moving-median baseline"
+        )
+        apply_standard_axes(axis); axis.legend(handles=[rms_line, scat], loc="best")
+        save_figure(pdf, fig, 150)
+
+
+def plot_histogram_density_band_page(
+    iterations, raw, lower_edge, upper_edge, outside_band, title, name, pdf, window,
+):
+    """Plot raw data with the sliding-histogram density-band edges overlaid,
+    highlighting points that fall outside the band.
+    """
+    raw_log = positive_or_nan(raw)
+    lower_log = positive_or_nan(lower_edge)
+    upper_log = positive_or_nan(upper_edge)
+    inside = np.isfinite(raw_log) & ~outside_band
+    outside = np.isfinite(raw_log) & outside_band
+
+    fig, axis = plt.subplots(figsize=(12, 7))
+    band = axis.fill_between(
+        iterations, lower_log, upper_log,
+        where=np.isfinite(lower_log) & np.isfinite(upper_log),
+        color="tab:cyan", alpha=.20, label="Sliding-histogram density band",
+    )
+    inside_artist = axis.scatter(
+        iterations[inside], raw_log[inside], c="0.55", s=9, alpha=.35,
+        label="Inside band", rasterized=True,
+    )
+    handles = [band, inside_artist]
+    if np.any(outside):
+        outside_artist = axis.scatter(
+            iterations[outside], raw_log[outside], c="tab:red", s=16, alpha=.85,
+            label="Outside band", rasterized=True, zorder=5,
+        )
+        handles.append(outside_artist)
+    axis.plot(iterations, lower_log, color="tab:cyan", lw=1.0, ls="--", alpha=.8)
+    axis.plot(iterations, upper_log, color="tab:cyan", lw=1.0, ls="--", alpha=.8)
+    axis.set_yscale("log")
+    axis.set_ylabel("Conservation error [%]")
+    axis.set_title(
+        f"{title}: {name}\nSliding-histogram density band (window={window})"
+    )
+    apply_standard_axes(axis)
+    axis.legend(handles=handles, loc="best")
+    save_figure(pdf, fig, 150)
+
+
+def plot_variable_outlier_count(iterations, outlier_masks, names, title, pdf):
+    """Plot how many variables fall outside their own density band per
+    iteration -- a single severity indicator across all tracked variables.
+    """
+    stacked = np.vstack(outlier_masks)
+    count = stacked.sum(axis=0)
+    fig, axis = plt.subplots(figsize=(12, 7))
+    line, = axis.step(
+        iterations, count, where="post", color="tab:red", lw=1.6,
+        label="Variables outside density band",
+    )
+    axis.set_ylabel("Number of variables outside band")
+    axis.set_ylim(-0.5, stacked.shape[0] + 0.5)
+    axis.set_yticks(range(stacked.shape[0] + 1))
+    axis.set_title(
+        f"{title}\nOutlier severity: variables outside sliding-histogram band "
+        f"({', '.join(names)})"
+    )
+    apply_standard_axes(axis)
+    axis.legend(handles=[line], loc="best")
+    save_figure(pdf, fig, 150)
+
+
+def plot_single_rolling_metric(iterations, raw, baseline, metric, name, title,
+                               metric_label, line_label, color, pdf, logy=False):
+    fig, axis = plt.subplots(figsize=(12, 7)); metric_axis = axis.twinx()
+    raw_line, = axis.plot(iterations, raw, c="0.55", lw=1, alpha=.65, label="Raw error signal")
+    handles = [raw_line]
+    if baseline is not None:
+        baseline_line, = axis.plot(iterations, baseline, c="tab:green", lw=2.2, ls="-.",
+                                   label="Local baseline")
+        handles.append(baseline_line)
+    metric_plot = positive_or_nan(metric) if logy else metric
+    metric_line, = metric_axis.plot(iterations, metric_plot, color=color, lw=2,
+                                    label=line_label)
+    handles.append(metric_line)
+    finite = np.asarray(raw)[np.isfinite(raw)]
+    if finite.size and np.all(finite > 0):
+        axis.set_yscale("log")
+    if logy:
+        metric_axis.set_yscale("log")
+    axis.set_ylabel("Raw error signal"); metric_axis.set_ylabel(metric_label, color=color)
+    metric_axis.tick_params(axis="y", labelcolor=color)
+    axis.set_title(f"{title}: {name}\n{line_label}")
+    apply_standard_axes(axis); axis.legend(handles=handles, loc="best")
+    save_figure(pdf, fig, 150)
+
+
+def plot_rolling_metrics(iterations, raw, title, name, pdf):
+    if is_plot_enabled("rolling_cv"):
+        for window in ROLLING_CV_WINDOWS:
+            metric = rolling_cv(raw, window, ROLLING_CV_MIN_MEAN_MAGNITUDE)
+            plot_single_rolling_metric(iterations, raw, None, metric, name, title,
+                "Rolling coefficient of variation", f"Rolling CV ({window})",
+                "tab:purple", pdf, ROLLING_CV_LOGY)
+    if is_plot_enabled("rolling_standard_deviation"):
+        for window in ROLLING_STD_WINDOWS:
+            baseline, metric = rolling_std_about_baseline(raw, window, ROLLING_STD_BASELINE_WINDOW)
+            plot_single_rolling_metric(iterations, raw, baseline, metric, name, title,
+                "Rolling std about baseline", f"Rolling residual std ({window})",
+                "tab:orange", pdf, ROLLING_STD_LOGY)
+    if is_plot_enabled("rolling_log_ratio"):
+        for window in ROLLING_LOG_RATIO_WINDOWS:
+            baseline, _, metric = rolling_log_ratio(raw, window, ROLLING_LOG_RATIO_BASELINE_WINDOW)
+            plot_single_rolling_metric(iterations, raw, baseline, metric, name, title,
+                "Rolling std [decades]", f"Rolling std log10(raw/median baseline) ({window})",
+                "tab:blue", pdf, ROLLING_LOG_RATIO_LOGY)
+
+
+def plot_rom_conservation_errors(rom_error_dir, pdf, active_range, reruns_by_variable,
+                                 short_window, delimiter):
+    rom_error_dir = Path(rom_error_dir)
+    iterations, values = load_error_signal_file(
+        rom_error_dir / "error_cons_perct.txt", active_range, delimiter)
+    ma_iterations, saved_ma = load_error_signal_file(
+        rom_error_dir / "error_cons_perct_ma.txt", active_range, delimiter)
+    if values.shape != saved_ma.shape or not np.allclose(iterations, ma_iterations, atol=1e-9):
+        raise ValueError("Conservation percent-error and saved-MA files are not aligned.")
+    values, saved_ma = np.abs(values), np.abs(saved_ma)
+    names = CONSERVATIVE_FIELD_NAMES if values.shape[1] == 4 else [
+        f"Conservative field {i+1}" for i in range(values.shape[1])]
+    variants = []
+    if is_plot_enabled("rom_conservation_error_log"):
+        variants.append(("Logarithmic y-axis", True))
+    if is_plot_enabled("rom_conservation_error_linear"):
+        variants.append(("Linear y-axis", False))
+    outlier_masks = []
+    for i, name in enumerate(names):
+        raw, ma = values[:, i], saved_ma[:, i]
+        reruns = reruns_by_variable[i] if i < len(reruns_by_variable) else []
+        highlighted = rerun_mask(iterations, reruns)
+        for label, use_log in variants:
+            raw_plot = positive_or_nan(raw) if use_log else raw
+            ma_plot = positive_or_nan(ma) if use_log else ma
             finite = np.isfinite(raw_plot)
-            regular = finite & ~variable_rerun_mask
-            highlighted = finite & variable_rerun_mask
             fig, axis = plt.subplots(figsize=(12, 7))
+            regular_artist = axis.scatter(iterations[finite & ~highlighted], raw_plot[finite & ~highlighted],
+                c="tab:red", s=10, alpha=.45, label="ROM percent conservation error", rasterized=True)
+            handles = [regular_artist]
+            if np.any(finite & highlighted):
+                handles.append(axis.scatter(iterations[finite & highlighted], raw_plot[finite & highlighted],
+                    c="black", s=38, label="FOM-rerun iteration", rasterized=True))
+            ma_line, = axis.plot(iterations, ma_plot, c="darkblue", lw=3,
+                                 label="Saved moving average")
+            handles.append(ma_line)
+            if use_log:
+                axis.set_yscale("log")
+            axis.set_ylabel("Conservation error [%]")
+            axis.set_title(f"ROM Percent Conservation Error: {name}\n{label}")
+            apply_standard_axes(axis); axis.legend(handles=handles, loc="best")
+            save_figure(pdf, fig, 150)
+        plot_baseline_pages(iterations, raw, "ROM Percent Conservation Error", name,
+                            pdf, BASELINE_COMPARISON_WINDOW, short_window)
+        plot_rolling_metrics(iterations, raw, "ROM Percent Conservation Error", name, pdf)
 
-            raw_artist = axis.scatter(
-                percent_iterations[regular], raw_plot[regular],
-                color="tab:red", s=10, alpha=0.45,
-                label="ROM percent conservation error", zorder=2,
-                rasterized=True,
+        if is_plot_enabled("histogram_density_band") or is_plot_enabled("variable_outlier_count"):
+            lower_edge, upper_edge, _band_count = moving_histogram_density_band(
+                raw, HISTOGRAM_DENSITY_BAND_WINDOW
             )
-            rerun_artist = None
-            if np.any(highlighted):
-                rerun_artist = axis.scatter(
-                    percent_iterations[highlighted], raw_plot[highlighted],
-                    color="black", edgecolors="black", s=38, alpha=1.0,
-                    label="FOM-rerun iteration", zorder=10,
-                    rasterized=True,
+            band_valid = np.isfinite(raw) & np.isfinite(lower_edge) & np.isfinite(upper_edge)
+            outside_band = band_valid & ((raw < lower_edge) | (raw > upper_edge))
+            outlier_masks.append(outside_band)
+
+            if is_plot_enabled("histogram_density_band"):
+                plot_histogram_density_band_page(
+                    iterations, raw, lower_edge, upper_edge, outside_band,
+                    "ROM Percent Conservation Error", name, pdf,
+                    HISTOGRAM_DENSITY_BAND_WINDOW,
                 )
 
-            ma_line, = axis.plot(
-                ma_iterations, ma_plot,
-                color="darkblue", linestyle="-", linewidth=3.0,
-                alpha=1.0, label="Saved conservation-error moving average",
-                zorder=30,
-            )
-
-            axis.set_xlabel("Iteration")
-            axis.set_ylabel("Conservation error [%]")
-            axis.set_title(
-                f"ROM Percent Conservation Error History: {field_name}\n{plot_label}"
-            )
-            if use_log_y:
-                axis.set_yscale("log")
-            axis.minorticks_on()
-            axis.grid(which="major", axis="both", linestyle="-", alpha=0.35, zorder=0)
-            axis.grid(which="minor", axis="both", linestyle=":", alpha=0.20, zorder=0)
-
-            handles = [raw_artist]
-            if rerun_artist is not None:
-                handles.append(rerun_artist)
-            handles.append(ma_line)
-            axis.legend(handles=handles, loc="best", fontsize=9)
-
-            print(
-                f"Writing percent page {variable_index + 1}/{number_of_variables}: "
-                f"{field_name}, {plot_label}; visible MA points="
-                f"{np.count_nonzero(np.isfinite(ma_plot)):,}",
-                flush=True,
-            )
-            fig.tight_layout()
-            pdf.savefig(fig, bbox_inches="tight", dpi=150)
-            plt.close(fig)
-
-
-        plot_conservation_average_and_rms_to_pdf(
-            signal_iterations=percent_iterations,
-            raw=raw,
-            title="ROM Percent Conservation Error History",
-            field_name=field_name,
-            pdf=pdf,
-            baseline_window=1000,
-            rms_window=short_window,
+    if is_plot_enabled("variable_outlier_count") and outlier_masks:
+        plot_variable_outlier_count(
+            iterations, outlier_masks, names, "ROM Percent Conservation Error", pdf,
         )
 
-        # Analyze the ROM conservation-error percent data used above.
-        plot_rolling_coefficient_of_variation_to_pdf(
-            signal_iterations=percent_iterations,
-            raw=raw,
-            title="ROM Percent Conservation Error History",
-            field_name=field_name,
-            pdf=pdf,
-            windows=ROLLING_COEFFICIENT_OF_VARIATION_WINDOWS,
-            min_mean_magnitude=(
-                ROLLING_COEFFICIENT_OF_VARIATION_MIN_MEAN_MAGNITUDE
-            ),
-            logy=ROLLING_COEFFICIENT_OF_VARIATION_LOGY,
-        )
 
-        plot_rolling_standard_deviation_to_pdf(
-            signal_iterations=percent_iterations,
-            raw=raw,
-            title="ROM Percent Conservation Error History",
-            field_name=field_name,
-            pdf=pdf,
-            windows=ROLLING_STANDARD_DEVIATION_WINDOWS,
-            baseline_window=ROLLING_STANDARD_DEVIATION_BASELINE_WINDOW,
-            logy=ROLLING_STANDARD_DEVIATION_LOGY,
-        )
+def plot_interpolation_error_signals(metric_iterations, l2, correlation, names,
+                                     error_dir, pdf, active_range, reruns,
+                                     short_window, long_window, delimiter):
+    for title, basename, kind in ERROR_SIGNAL_GROUPS:
+        filename = Path(error_dir) / basename
+        if not filename.is_file():
+            print(f"Warning: missing error-signal file: {filename}")
+            continue
+        iterations, signals = load_error_signal_file(filename, active_range, delimiter)
+        field_names = names if kind == "primitive" and len(names) == signals.shape[1] else [
+            f"{kind.title()} field {i+1}" for i in range(signals.shape[1])]
+        for i, field_name in enumerate(field_names):
+            raw = signals[:, i]
+            fig, axis = plt.subplots(figsize=(12, 7)); l2_axis = axis.twinx()
+            corr_axis = axis.twinx(); corr_axis.spines["right"].set_position(("axes", 1.13))
+            mask = rerun_mask(iterations, reruns); finite = np.isfinite(raw)
+            handles = [axis.scatter(iterations[finite & ~mask], raw[finite & ~mask], c="0.55",
+                                    s=10, alpha=.55, label="Raw error signal", rasterized=True)]
+            if np.any(finite & mask):
+                handles.append(axis.scatter(iterations[finite & mask], raw[finite & mask], c="black",
+                                            s=38, label="FOM-rerun iteration", rasterized=True))
+            handles += axis.plot(iterations, moving_average(raw, short_window), c="tab:orange",
+                                 lw=2.8, label=f"Moving average ({short_window})")
+            handles += axis.plot(iterations, moving_average(raw, long_window), c="tab:green",
+                                 lw=3, ls="-.", label=f"Moving average ({long_window})")
+            if i < l2.shape[0]:
+                handles += l2_axis.plot(iterations, interpolate_without_extrapolation(
+                    metric_iterations, 100*l2[i], iterations), c="tab:red", label=r"Relative $L_2$ error [%]")
+                handles += corr_axis.plot(iterations, interpolate_without_extrapolation(
+                    metric_iterations, correlation[i], iterations), c="tab:blue", label="Pearson correlation")
+            axis.set_ylabel("Error signal"); l2_axis.set_ylabel(r"Relative $L_2$ error [%]")
+            corr_axis.set_ylabel("Pearson correlation"); corr_axis.set_ylim(1, 0)
+            axis.set_title(f"{title}: {field_name}"); apply_standard_axes(axis)
+            axis.legend(handles, [h.get_label() for h in handles], loc="best", fontsize=9)
+            fig.subplots_adjust(right=.80); pdf.savefig(fig, bbox_inches="tight"); plt.close(fig)
 
-        plot_rolling_log_ratio_fluctuation_to_pdf(
-            signal_iterations=percent_iterations,
-            raw=raw,
-            title="ROM Percent Conservation Error History",
-            field_name=field_name,
-            pdf=pdf,
-            windows=ROLLING_LOG_RATIO_WINDOWS,
-            baseline_window=ROLLING_LOG_RATIO_BASELINE_WINDOW,
-            logy=ROLLING_LOG_RATIO_LOGY,
-        )
 
-    print("Finished appending ROM percent conservation-error histories.")
+# =============================================================================
+# FOM-RERUN COUNTER
+# =============================================================================
+
+def load_fom_rerun_counter(filename, active_range, delimiter=","):
+    iterations, columns = load_error_signal_file(filename, active_range, delimiter)
+    if columns.shape[1] != 1:
+        raise ValueError("FOM-rerun counter must contain exactly one value column.")
+    values = columns[:, 0]
+    rounded = np.rint(values)
+    if not np.all(np.isfinite(values)) or not np.allclose(values, rounded, atol=1e-12):
+        raise ValueError("FOM-rerun counter values must be finite integers.")
+    counter = rounded.astype(np.int64)
+    if np.any(counter < 0) or np.any(np.diff(counter) < 0):
+        raise ValueError("FOM-rerun counter must be nonnegative and nondecreasing.")
+    changes = np.diff(counter, prepend=counter[0])
+    rerun_iterations = iterations[changes > 0]
+    pattern = re.compile(r"^\s*#\s*threshold_exceeded,iteration=([^,]+),variables=([^,]*),mask=([01](?:\|[01])*)\s*$")
+    records = {}
+    with Path(filename).open(encoding="utf-8") as stream:
+        for line_number, line in enumerate(stream, 1):
+            match = pattern.match(line)
+            if not match:
+                continue
+            iteration = float(match.group(1)); key = int(np.rint(iteration))
+            if not np.isclose(iteration, key, atol=1e-9):
+                raise ValueError(f"Noninteger trigger iteration on line {line_number}.")
+            mask = np.array([item == "1" for item in match.group(3).split("|")])
+            old = records.get(key, np.zeros(len(mask), bool))
+            size = max(len(old), len(mask)); old = np.pad(old, (0, size-len(old)))
+            mask = np.pad(mask, (0, size-len(mask))); records[key] = old | mask
+    n_variables = max(4, max((len(mask) for mask in records.values()), default=0))
+    per_variable = [[] for _ in range(n_variables)]
+    selected_min, selected_max = iterations[0], iterations[-1]
+    for key, mask in sorted(records.items()):
+        if selected_min <= key <= selected_max:
+            for i, exceeded in enumerate(mask):
+                if exceeded:
+                    per_variable[i].append(float(key))
+    return iterations, counter, rerun_iterations, tuple(np.asarray(v) for v in per_variable)
 
 
+def reruns_per_window(iterations, counter, window):
+    validate_windows(("FOM rerun window", window))
+    x, counter = np.asarray(iterations, float), np.asarray(counter, np.int64)
+    if x.ndim != 1 or x.shape != counter.shape or not len(x):
+        raise ValueError("Counter arrays must be nonempty, 1-D, and matching.")
+    increments = np.diff(counter, prepend=counter[0])
+    prefix = np.r_[0, np.cumsum(increments)]
+    result = np.full(x.shape, np.nan)
+    for i, current in enumerate(x):
+        if current-x[0] >= window:
+            first = np.searchsorted(x, current-window, side="right")
+            result[i] = prefix[i+1]-prefix[first]
+    return result
+
+
+def plot_fom_rerun_history(iterations, counter, pdf, window):
+    recent = reruns_per_window(iterations, counter, window)
+    fig, axis = plt.subplots(figsize=(12, 7)); recent_axis = axis.twinx()
+    cumulative, = axis.step(iterations, counter, where="post", c="tab:blue", lw=2,
+                            label="Cumulative FOM reruns")
+    recent_line, = recent_axis.plot(iterations, recent, c="tab:purple", lw=2,
+                                    label=f"Reruns in previous {window:g} iterations")
+    axis.set_ylabel("Cumulative FOM reruns"); recent_axis.set_ylabel("Recent FOM reruns")
+    axis.set_ylim(bottom=0); recent_axis.set_ylim(bottom=0)
+    axis.set_title("Conservation-Error FOM Rerun History")
+    apply_standard_axes(axis); axis.legend(handles=[cumulative, recent_line], loc="best")
+    save_figure(pdf, fig)
+
+
+# =============================================================================
+# PROGRAM ORCHESTRATION
+# =============================================================================
 
 def parse_arguments():
-    """
-    Read command-line arguments.
-    """
-
     parser = argparse.ArgumentParser(
-        description=(
-            "Compute relative L2 error and Pearson correlation "
-            "histories between FOM and ROM result files."
-        )
+        description="Generate FOM/ROM metric and conservation-error PDFs."
     )
-
-    parser.add_argument(
-        "fom_dir",
-        help=(
-            "Directory containing the FOM "
-            "{iteration}iteration_prim.npy files."
-        )
-    )
-
-    parser.add_argument(
-        "rom_dir",
-        help=(
-            "Directory containing the ROM "
-            "{iteration}iteration_prim.npy files."
-        )
-    )
-
-    parser.add_argument(
-        "-o",
-        "--output",
-        default=None,
-        help=(
-            "Output PDF filename. By default, "
-            "FOM_ROM_metrics.pdf is saved in the ROM directory."
-        )
-    )
-
-
-    parser.add_argument(
-        "--error-short-window", type=int, default=1000,
-        help="Short error-signal moving-average window (default: 1000)."
-    )
-    parser.add_argument(
-        "--error-long-window", type=int, default=5000,
-        help="Long error-signal moving-average window (default: 5000)."
-    )
-    parser.add_argument(
-        "--error-delimiter", default=",",
-        help="Error-signal file delimiter (default: comma)."
-    )
-    parser.add_argument(
-        "--fom-rerun-window", type=int, default=1000,
-        help=(
-            "Trailing iteration window for FOM-rerun frequency. A normalized "
-            "running average is used during startup (default: 1000)."
-        ),
-    )
-
+    parser.add_argument("fom_dir", type=Path)
+    parser.add_argument("rom_dir", type=Path)
+    parser.add_argument("-o", "--output", type=Path, default=None)
+    parser.add_argument("--error-short-window", type=int, default=1000)
+    parser.add_argument("--error-long-window", type=int, default=5000)
+    parser.add_argument("--error-delimiter", default=",")
+    parser.add_argument("--fom-rerun-window", type=int, default=1000)
     return parser.parse_args()
 
 
-def run_active_plot_range():
-    """
-    Generate the PDF for the currently active iteration range.
-    """
+def run_range(args, active_range):
+    fom_dir = args.fom_dir.expanduser().resolve()
+    rom_dir = args.rom_dir.expanduser().resolve()
+    validate_directory(fom_dir, "FOM")
+    validate_directory(rom_dir, "ROM")
+    base_output = (args.output.expanduser().resolve() if args.output
+                   else rom_dir / "FOM_ROM_metrics.pdf")
+    pdf_filename = output_filename(base_output, active_range)
+    pdf_filename.parent.mkdir(parents=True, exist_ok=True)
+    print_section("Run configuration", fom_directory=fom_dir, rom_directory=rom_dir,
+                  output_pdf=pdf_filename, iteration_range=active_range,
+                  enabled_plots=[k for k, v in PLOT_ENABLED.items() if v])
 
-    args = parse_arguments()
+    fom, rom, iterations = load_common_npy_data(
+        fom_dir, rom_dir, PRIMITIVE_FILE_PATTERN, active_range, "primitive")
+    relative_l2, correlation = compute_metric_histories(fom, rom)
+    del fom, rom
 
-    fom_dir = os.path.abspath(
-        os.path.expanduser(args.fom_dir)
-    )
+    fom_integrals = rom_integrals = None
+    if is_plot_enabled("conservative_integrals"):
+        fom_cons, rom_cons = load_conservative_data_for_iterations(fom_dir, rom_dir, iterations)
+        fom_integrals, rom_integrals = compute_conservative_integrals(fom_cons, rom_cons)
+        del fom_cons, rom_cons
 
-    rom_dir = os.path.abspath(
-        os.path.expanduser(args.rom_dir)
-    )
-
-    if args.output is None:
-        pdf_filename = os.path.join(
-            rom_dir,
-            "FOM_ROM_metrics.pdf"
-        )
-    else:
-        pdf_filename = os.path.abspath(
-            os.path.expanduser(args.output)
-        )
-
-    if ACTIVE_PLOT_ITERATION_RANGE is not None:
-        range_start, range_stop = ACTIVE_PLOT_ITERATION_RANGE
-        output_path = Path(pdf_filename)
-        pdf_filename = str(
-            output_path.with_name(
-                f"{output_path.stem}_{range_start:g}_to_{range_stop:g}"
-                f"{output_path.suffix}"
-            )
-        )
-
-    field_names = [
-        "Density",
-        "Velocity",
-        "Pressure",
-        "Temperature",
-        "Reactant",
-        "Heat release rate"
-    ]
-
-    print("============================================================")
-    print("FOM directory:")
-    print(f"  {fom_dir}")
-    print("ROM directory:")
-    print(f"  {rom_dir}")
-    print("Output PDF:")
-    print(f"  {pdf_filename}")
-    print("============================================================")
-
-    fom_data, rom_data, iterations = load_common_data(
-        fom_dir=fom_dir,
-        rom_dir=rom_dir
-    )
-
-    relative_l2, correlation = compute_histories(
-        fom_data=fom_data,
-        rom_data=rom_data
-    )
-
-    print("Releasing primitive FOM and ROM arrays from memory.", flush=True)
-    del fom_data
-    del rom_data
-
-
-    fom_conservative_data, rom_conservative_data = (
-        load_common_conservative_data(
-            fom_dir=fom_dir,
-            rom_dir=rom_dir,
-            iterations=iterations,
-        )
-    )
-
-    fom_integrals, rom_integrals = (
-        compute_conservative_integral_histories(
-            fom_conservative_data=fom_conservative_data,
-            rom_conservative_data=rom_conservative_data,
-        )
-    )
-
-    print("Releasing conservative FOM and ROM arrays from memory.", flush=True)
-    del fom_conservative_data
-    del rom_conservative_data
-
-    # Each error directory is a sibling of its corresponding results directory.
-    fom_error_directory = Path(fom_dir) / "error"
-    rom_error_directory = Path(rom_dir).parent / "error"
-    error_directory = rom_error_directory
-
-    # This input is optional. Missing or invalid counter data does not stop
-    # existing PDF generation.
-    fom_rerun_counter_file = rom_error_directory / "error_cons_fom_iter_counter.txt"
-    fom_rerun_counter_iterations = None
-    fom_rerun_counter_values = None
-    fom_rerun_iterations = np.array([], dtype=float)
-    fom_rerun_iterations_by_variable = tuple(
-        np.array([], dtype=float)
-        for _ in range(4)
-    )
-
-    if fom_rerun_counter_file.is_file():
+    rom_error_dir = rom_dir.parent / "error"
+    counter_file = rom_error_dir / "error_cons_fom_iter_counter.txt"
+    counter_iterations = counter_values = None
+    rerun_iterations = np.array([])
+    reruns_by_variable = tuple(np.array([]) for _ in range(4))
+    if counter_file.is_file():
         try:
-            (
-                fom_rerun_counter_iterations,
-                fom_rerun_counter_values,
-                fom_rerun_iterations,
-                fom_rerun_iterations_by_variable,
-            ) = load_fom_rerun_counter(
-                fom_rerun_counter_file,
-                delimiter=args.error_delimiter,
+            counter_iterations, counter_values, rerun_iterations, reruns_by_variable = (
+                load_fom_rerun_counter(counter_file, active_range, args.error_delimiter)
             )
         except (OSError, ValueError) as error:
-            print(
-                "Warning: counter file could not be used; continuing with "
-                "the original plotting behavior."
-            )
-            print(f"  File: {fom_rerun_counter_file}")
-            print(f"  Reason: {error}")
-            fom_rerun_counter_iterations = None
-            fom_rerun_counter_values = None
-            fom_rerun_iterations = np.array([], dtype=float)
-            fom_rerun_iterations_by_variable = tuple(
-                np.array([], dtype=float)
-                for _ in range(4)
-            )
-    else:
-        print(
-            "Warning: counter file not found; continuing with the original "
-            "plotting behavior."
-        )
-        print(f"  Expected file: {fom_rerun_counter_file}")
+            print(f"Warning: ignoring invalid counter file {counter_file}: {error}")
 
-    os.makedirs(
-        os.path.dirname(os.path.abspath(pdf_filename)),
-        exist_ok=True,
-    )
-
-    # Open the output PDF exactly once so every figure is written to the same file.
     with PdfPages(pdf_filename) as pdf:
-        # Save this first so it becomes the first PDF page when available.
-        if fom_rerun_counter_iterations is not None:
-            plot_fom_rerun_counter_to_pdf(
-                counter_iterations=fom_rerun_counter_iterations,
-                counter_values=fom_rerun_counter_values,
-                rerun_iterations=fom_rerun_iterations,
-                pdf=pdf,
-                rerun_window=args.fom_rerun_window,
-            )
-
-        plot_histories_to_pdf(
-            iterations=iterations,
-            relative_l2=relative_l2,
-            correlation=correlation,
-            field_names=field_names,
-            pdf_filename=pdf_filename,
-            pdf=pdf,
-        )
-
-
-        # Domain-integrated conservative-state FOM, ROM, and relative-error
-        # plotting is intentionally disabled.
-        # plot_conservative_integral_histories_to_pdf(
-        #     iterations=iterations,
-        #     fom_integrals=fom_integrals,
-        #     rom_integrals=rom_integrals,
-        #     pdf=pdf,
-        # )
-
-        plot_fom_rom_conservation_errors_to_pdf(
-            fom_error_directory=fom_error_directory,
-            rom_error_directory=rom_error_directory,
-            pdf=pdf,
-            fom_rerun_iterations=fom_rerun_iterations,
-            fom_rerun_iterations_by_variable=(
-                fom_rerun_iterations_by_variable
-            ),
-            short_window=args.error_short_window,
-            long_window=args.error_long_window,
-            delimiter=args.error_delimiter,
-        )
-
-        plot_error_signals_to_pdf(
-            metric_iterations=iterations,
-            relative_l2=relative_l2,
-            correlation=correlation,
-            primitive_field_names=field_names,
-            error_directory=error_directory,
-            pdf=pdf,
-            fom_rerun_iterations=fom_rerun_iterations,
-            short_window=args.error_short_window,
-            long_window=args.error_long_window,
-            delimiter=args.error_delimiter,
-        )
-
-
+        if is_plot_enabled("fom_rerun_history") and counter_iterations is not None:
+            plot_fom_rerun_history(counter_iterations, counter_values, pdf,
+                                   args.fom_rerun_window)
+        if is_plot_enabled("primitive_metrics"):
+            plot_primitive_metrics(iterations, relative_l2, correlation,
+                                   PRIMITIVE_FIELD_NAMES, pdf)
+        if is_plot_enabled("conservative_integrals"):
+            plot_conservative_integrals(iterations, fom_integrals, rom_integrals, pdf)
+        if any(is_plot_enabled(key) for key in (
+            "rom_conservation_error_log", "rom_conservation_error_linear",
+            "baseline_comparison", "winsorized_mean_comparison",
+            "winsorized_residual_metrics", "winsorized_standard_deviation",
+            "winsorized_coefficient_of_variation", "adaptive_valley_band",
+            "histogram_density_band", "variable_outlier_count",
+            "rolling_rms",
+            "rolling_cv", "rolling_standard_deviation", "rolling_log_ratio")):
+            plot_rom_conservation_errors(rom_error_dir, pdf, active_range,
+                reruns_by_variable, args.error_short_window, args.error_delimiter)
+        if is_plot_enabled("interpolation_error_signals"):
+            plot_interpolation_error_signals(iterations, relative_l2, correlation,
+                PRIMITIVE_FIELD_NAMES, rom_error_dir, pdf, active_range,
+                rerun_iterations, args.error_short_window, args.error_long_window,
+                args.error_delimiter)
+    print(f"Saved: {pdf_filename}", flush=True)
 
 
 def main():
-    """Generate one separate PDF for every configured iteration range."""
-    global ACTIVE_PLOT_ITERATION_RANGE
-
-    if PLOT_ITERATION_RANGES is None or len(PLOT_ITERATION_RANGES) == 0:
-        ranges_to_plot = [None]
-    else:
-        ranges_to_plot = list(PLOT_ITERATION_RANGES)
-
-    for range_index, iteration_range in enumerate(ranges_to_plot):
-        if iteration_range is not None:
-            if len(iteration_range) != 2:
-                raise ValueError(
-                    "Each PLOT_ITERATION_RANGES entry must contain exactly "
-                    f"two values. Entry {range_index}: {iteration_range}"
-                )
-
-            start, stop = iteration_range
-
-            if not np.isfinite(start) or not np.isfinite(stop):
-                raise ValueError(
-                    "Plot-range limits must be finite. "
-                    f"Entry {range_index}: {iteration_range}"
-                )
-
-            if start > stop:
-                raise ValueError(
-                    "A plot-range start cannot exceed its stop. "
-                    f"Entry {range_index}: {iteration_range}"
-                )
-
-            ACTIVE_PLOT_ITERATION_RANGE = (start, stop)
-            print("============================================================")
-            print(
-                f"Generating PDF for inclusive iteration range "
-                f"{start:g} to {stop:g}"
-            )
-            print("============================================================")
-        else:
-            ACTIVE_PLOT_ITERATION_RANGE = None
-            print("Generating one PDF containing all available iterations.")
-
-        run_active_plot_range()
+    args = parse_arguments()
+    validate_configuration()
+    validate_windows(
+        ("--error-short-window", args.error_short_window),
+        ("--error-long-window", args.error_long_window),
+        ("--fom-rerun-window", args.fom_rerun_window),
+    )
+    for index, active_range in enumerate(configured_ranges()):
+        active_range = validate_iteration_range(active_range, index)
+        run_range(args, active_range)
 
 
 if __name__ == "__main__":
