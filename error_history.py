@@ -27,7 +27,7 @@ CELL_VOLUME = 1
 # Use None or [] to include every available iteration.
 PLOT_ITERATION_RANGES = [
     (0, 100000),
-    (0, 2500),
+    (0, 1000000),
 ]
 
 
@@ -933,6 +933,176 @@ def compute_exponential_moving_average_ignore_nan(values, span):
     return average
 
 
+def compute_moving_median_ignore_nan(values, window):
+    """Compute a causal trailing moving median, ignoring non-finite samples."""
+    values = np.asarray(values, dtype=float)
+    if window <= 0:
+        raise ValueError("Moving-median windows must be positive integers.")
+
+    median = np.full(len(values), np.nan, dtype=float)
+    for index in range(len(values)):
+        start = max(0, index - window + 1)
+        current = values[start:index + 1]
+        current = current[np.isfinite(current)]
+        if current.size:
+            median[index] = np.median(current)
+    return median
+
+
+def compute_moving_shorth_ignore_nan(values, window):
+    """Compute a causal trailing shorth location, ignoring non-finite samples.
+
+    At each sample, sort the finite values in the trailing window, find the
+    narrowest interval containing ceil(n / 2) samples, and return the mean of
+    the samples in that interval. Ties are resolved by the first interval in
+    sorted order.
+    """
+    values = np.asarray(values, dtype=float)
+    if window <= 0:
+        raise ValueError("Moving-shorth windows must be positive integers.")
+
+    shorth = np.full(len(values), np.nan, dtype=float)
+    for index in range(len(values)):
+        start = max(0, index - window + 1)
+        current = values[start:index + 1]
+        current = np.sort(current[np.isfinite(current)])
+        number_of_values = current.size
+        if number_of_values == 0:
+            continue
+
+        subset_size = (number_of_values + 1) // 2
+        widths = current[subset_size - 1:] - current[:number_of_values - subset_size + 1]
+        interval_start = int(np.argmin(widths))
+        shorth[index] = np.mean(
+            current[interval_start:interval_start + subset_size],
+            dtype=np.float64,
+        )
+
+    return shorth
+
+
+def _modified_zscore_candidate(gaps_so_far, candidate_gap):
+    """Return the candidate gap's robust modified z-score."""
+    accepted = np.asarray(gaps_so_far, dtype=float)
+    if accepted.size == 0:
+        return 0.0
+
+    center = np.median(accepted)
+    mad = np.median(np.abs(accepted - center))
+    if mad > 0.0:
+        return 0.6745 * (candidate_gap - center) / mad
+
+    # Repeated or quantized accepted gaps can give MAD == 0. In that case,
+    # equal gaps are ordinary and any larger gap is an unbounded anomaly.
+    if candidate_gap <= center:
+        return 0.0
+    return np.inf
+
+
+def _walk_valley_direction(
+    sorted_values,
+    start_index,
+    step,
+    cutoff=3.5,
+    min_gaps_before_testing=4,
+):
+    """Walk away from the median and stop before an anomalous sorted gap."""
+    accepted_gaps = []
+    index = start_index
+    number_of_values = len(sorted_values)
+
+    while True:
+        next_index = index + step
+        if next_index < 0 or next_index >= number_of_values:
+            break
+
+        candidate_gap = abs(sorted_values[next_index] - sorted_values[index])
+        should_test = len(accepted_gaps) >= min_gaps_before_testing
+        if should_test:
+            modified_zscore = _modified_zscore_candidate(
+                accepted_gaps,
+                candidate_gap,
+            )
+            if modified_zscore > cutoff:
+                break
+
+        accepted_gaps.append(candidate_gap)
+        index = next_index
+
+    return index
+
+
+def compute_moving_valley_band_ignore_nan(
+    values,
+    window,
+    cutoff=3.5,
+    min_gaps_before_testing=4,
+):
+    """Compute a causal median-centered dense band in log10 space.
+
+    Each trailing window is filtered to finite positive values and transformed
+    to log10 space. Starting at the median rank, each side is walked outward
+    until the proposed adjacent gap is a modified-z-score outlier relative to
+    the gaps already accepted on that side. Returned edges and means are in
+    the original conservation-error units.
+    """
+    values = np.asarray(values, dtype=float)
+    if window <= 0:
+        raise ValueError("Moving valley-band windows must be positive integers.")
+    if cutoff <= 0.0 or not np.isfinite(cutoff):
+        raise ValueError("Valley-band modified-z cutoff must be positive and finite.")
+    if min_gaps_before_testing < 1:
+        raise ValueError("Valley-band minimum accepted-gap count must be positive.")
+
+    number_of_samples = len(values)
+    median = np.full(number_of_samples, np.nan, dtype=float)
+    left_edge = np.full(number_of_samples, np.nan, dtype=float)
+    right_edge = np.full(number_of_samples, np.nan, dtype=float)
+    band_mean = np.full(number_of_samples, np.nan, dtype=float)
+    band_count = np.zeros(number_of_samples, dtype=np.int64)
+
+    for index in range(number_of_samples):
+        start = max(0, index - window + 1)
+        current = values[start:index + 1]
+        current = current[np.isfinite(current) & (current > 0.0)]
+        if current.size == 0:
+            continue
+
+        sorted_log = np.sort(np.log10(current))
+        count = sorted_log.size
+        median_log = np.median(sorted_log)
+        median[index] = 10.0 ** median_log
+
+        # For even counts, begin at the upper central observation. The final
+        # reported center remains the conventional median of both central values.
+        center_index = count // 2
+        left_index = _walk_valley_direction(
+            sorted_log,
+            center_index,
+            -1,
+            cutoff=cutoff,
+            min_gaps_before_testing=min_gaps_before_testing,
+        )
+        right_index = _walk_valley_direction(
+            sorted_log,
+            center_index,
+            +1,
+            cutoff=cutoff,
+            min_gaps_before_testing=min_gaps_before_testing,
+        )
+
+        left_log = sorted_log[left_index]
+        right_log = sorted_log[right_index]
+        selected_log = sorted_log[left_index:right_index + 1]
+
+        left_edge[index] = 10.0 ** left_log
+        right_edge[index] = 10.0 ** right_log
+        band_mean[index] = np.mean(10.0 ** selected_log, dtype=np.float64)
+        band_count[index] = selected_log.size
+
+    return median, left_edge, right_edge, band_mean, band_count
+
+
 def compute_rolling_rms_about_baseline(values, baseline, window):
     """Compute trailing RMS magnitude of values minus a supplied baseline."""
     values = np.asarray(values, dtype=float)
@@ -975,6 +1145,15 @@ def plot_conservation_average_and_rms_to_pdf(
     exponential_average = compute_exponential_moving_average_ignore_nan(
         raw, baseline_window
     )
+    moving_median = compute_moving_median_ignore_nan(raw, baseline_window)
+    moving_shorth = compute_moving_shorth_ignore_nan(raw, baseline_window)
+    (
+        valley_median,
+        valley_left_edge,
+        valley_right_edge,
+        valley_band_mean,
+        valley_band_count,
+    ) = compute_moving_valley_band_ignore_nan(raw, baseline_window)
     moving_average_rms = compute_rolling_rms_about_baseline(
         raw, moving_average, rms_window
     )
@@ -993,6 +1172,16 @@ def plot_conservation_average_and_rms_to_pdf(
         exponential_average,
         np.nan,
     )
+    moving_median_log = np.where(
+        np.isfinite(moving_median) & (moving_median > 0.0),
+        moving_median,
+        np.nan,
+    )
+    moving_shorth_log = np.where(
+        np.isfinite(moving_shorth) & (moving_shorth > 0.0),
+        moving_shorth,
+        np.nan,
+    )
 
     fig, axis = plt.subplots(figsize=(12, 7))
     raw_artist = axis.scatter(
@@ -1009,19 +1198,154 @@ def plot_conservation_average_and_rms_to_pdf(
         color="tab:blue", linewidth=2.6, linestyle="--",
         label=f"Exponential moving average (span={baseline_window})", zorder=21,
     )
+    median_line, = axis.plot(
+        signal_iterations, moving_median_log,
+        color="tab:purple", linewidth=2.6, linestyle=":",
+        label=f"Moving median ({baseline_window})", zorder=22,
+    )
+    shorth_line, = axis.plot(
+        signal_iterations, moving_shorth_log,
+        color="tab:orange", linewidth=2.6, linestyle="-.",
+        label=f"Moving shorth ({baseline_window})", zorder=23,
+    )
     axis.set_xlabel("Iteration")
     axis.set_ylabel("Conservation error [%]")
     axis.set_yscale("log")
     axis.set_title(
-        f"{title}: {field_name}\nMoving and exponential moving averages"
+        f"{title}: {field_name}\nMA, EMA, moving median, and moving shorth"
     )
     axis.minorticks_on()
     axis.grid(which="major", axis="both", linestyle="-", alpha=0.35)
     axis.grid(which="minor", axis="both", linestyle=":", alpha=0.20)
-    axis.legend(handles=[raw_artist, moving_line, exponential_line], loc="best")
+    axis.legend(
+        handles=[
+            raw_artist,
+            moving_line,
+            exponential_line,
+            median_line,
+            shorth_line,
+        ],
+        loc="best",
+    )
     fig.tight_layout()
     pdf.savefig(fig, bbox_inches="tight", dpi=150)
     plt.close(fig)
+
+    valley_median_plot = np.where(
+        np.isfinite(valley_median) & (valley_median > 0.0),
+        valley_median,
+        np.nan,
+    )
+    valley_left_plot = np.where(
+        np.isfinite(valley_left_edge) & (valley_left_edge > 0.0),
+        valley_left_edge,
+        np.nan,
+    )
+    valley_right_plot = np.where(
+        np.isfinite(valley_right_edge) & (valley_right_edge > 0.0),
+        valley_right_edge,
+        np.nan,
+    )
+    valley_mean_plot = np.where(
+        np.isfinite(valley_band_mean) & (valley_band_mean > 0.0),
+        valley_band_mean,
+        np.nan,
+    )
+
+    fig, valley_axis = plt.subplots(figsize=(12, 7))
+    valley_raw_artist = valley_axis.scatter(
+        signal_iterations,
+        raw_log,
+        color="0.65",
+        s=9,
+        alpha=0.30,
+        label="ROM percent conservation error",
+        zorder=2,
+        rasterized=True,
+    )
+    valley_fill = valley_axis.fill_between(
+        signal_iterations,
+        valley_left_plot,
+        valley_right_plot,
+        where=(
+            np.isfinite(valley_left_plot)
+            & np.isfinite(valley_right_plot)
+        ),
+        color="tab:cyan",
+        alpha=0.20,
+        label="Adaptive median-centered valley band",
+        zorder=5,
+    )
+    valley_left_line, = valley_axis.plot(
+        signal_iterations,
+        valley_left_plot,
+        color="tab:cyan",
+        linewidth=1.2,
+        linestyle="--",
+        label="Valley-band lower edge",
+        zorder=10,
+    )
+    valley_right_line, = valley_axis.plot(
+        signal_iterations,
+        valley_right_plot,
+        color="tab:cyan",
+        linewidth=1.2,
+        linestyle="--",
+        label="Valley-band upper edge",
+        zorder=10,
+    )
+    valley_median_line, = valley_axis.plot(
+        signal_iterations,
+        valley_median_plot,
+        color="tab:purple",
+        linewidth=2.4,
+        linestyle=":",
+        label=f"Moving median ({baseline_window})",
+        zorder=20,
+    )
+    valley_mean_line, = valley_axis.plot(
+        signal_iterations,
+        valley_mean_plot,
+        color="black",
+        linewidth=2.2,
+        label="Mean inside adaptive valley band",
+        zorder=21,
+    )
+    valley_axis.set_xlabel("Iteration")
+    valley_axis.set_ylabel("Conservation error [%]")
+    valley_axis.set_yscale("log")
+    valley_axis.set_title(
+        f"{title}: {field_name}\n"
+        "Median-centered adaptive valley band in log10 space"
+    )
+    valley_axis.minorticks_on()
+    valley_axis.grid(which="major", axis="both", linestyle="-", alpha=0.35)
+    valley_axis.grid(which="minor", axis="both", linestyle=":", alpha=0.20)
+    valley_axis.legend(
+        handles=[
+            valley_raw_artist,
+            valley_fill,
+            valley_left_line,
+            valley_right_line,
+            valley_median_line,
+            valley_mean_line,
+        ],
+        loc="best",
+        fontsize=9,
+    )
+    fig.tight_layout()
+    pdf.savefig(fig, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+    finite_band_counts = valley_band_count[valley_band_count > 0]
+    if finite_band_counts.size:
+        print(
+            f"Added adaptive valley-band page: {field_name}; "
+            f"median selected count={np.median(finite_band_counts):.1f}; "
+            f"minimum={np.min(finite_band_counts)}; "
+            f"maximum={np.max(finite_band_counts)}",
+            flush=True,
+        )
 
     fig, rms_axis = plt.subplots(figsize=(12, 7))
     error_axis = rms_axis.twinx()
