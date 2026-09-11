@@ -544,7 +544,7 @@ if __name__ == '__main__':
     # ============================================================
 
     start_iter = 0
-    step_iter  = 1
+    step_iter  = 100
     end_iter   = 500000
 
     step_plot  = 1
@@ -555,7 +555,7 @@ if __name__ == '__main__':
 
     x_0      = 0
     x_f      = 0.288
-    cell_num = 500
+    cell_num = 2000
 
     x_label = 'x [m]'
 

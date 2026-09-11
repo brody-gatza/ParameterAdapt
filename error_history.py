@@ -35,6 +35,27 @@ PLOT_ITERATION_RANGES = [
 ACTIVE_PLOT_ITERATION_RANGE = None
 
 
+# Rolling coefficient-of-variation settings.
+# Windows are trailing sample counts and expand during startup.
+ROLLING_COEFFICIENT_OF_VARIATION_WINDOWS = (1000,)
+ROLLING_COEFFICIENT_OF_VARIATION_MIN_MEAN_MAGNITUDE = 1.0e-30
+ROLLING_COEFFICIENT_OF_VARIATION_LOGY = False
+
+
+# Rolling standard-deviation settings.
+# The baseline is removed before measuring the fluctuation magnitude.
+ROLLING_STANDARD_DEVIATION_WINDOWS = (1000,)
+ROLLING_STANDARD_DEVIATION_BASELINE_WINDOW = 5000
+ROLLING_STANDARD_DEVIATION_LOGY = False
+
+# Rolling log-ratio fluctuation settings.
+# The metric is the rolling population standard deviation of
+# log10(raw / local_baseline). Only positive raw and baseline values are used.
+ROLLING_LOG_RATIO_WINDOWS = (1000,)
+ROLLING_LOG_RATIO_BASELINE_WINDOW = 5000
+ROLLING_LOG_RATIO_LOGY = False
+
+
 def get_plot_iteration_mask(iterations):
     """Return the iterations selected by PLOT_ITERATION_RANGES."""
     iterations = np.asarray(iterations)
@@ -892,6 +913,256 @@ def compute_moving_average_ignore_nan(values, window):
     return average
 
 
+def compute_exponential_moving_average_ignore_nan(values, span):
+    """Compute a causal EMA, carrying its last value across missing samples."""
+    values = np.asarray(values, dtype=float)
+    if span <= 0:
+        raise ValueError("Exponential-moving-average spans must be positive.")
+
+    alpha = 2.0 / (float(span) + 1.0)
+    average = np.full(len(values), np.nan, dtype=float)
+    previous = np.nan
+    for index, value in enumerate(values):
+        if np.isfinite(value):
+            if np.isfinite(previous):
+                previous = alpha * value + (1.0 - alpha) * previous
+            else:
+                previous = value
+        if np.isfinite(previous):
+            average[index] = previous
+    return average
+
+
+def compute_rolling_rms_about_baseline(values, baseline, window):
+    """Compute trailing RMS magnitude of values minus a supplied baseline."""
+    values = np.asarray(values, dtype=float)
+    baseline = np.asarray(baseline, dtype=float)
+    if values.shape != baseline.shape:
+        raise ValueError("RMS values and baseline must have matching shapes.")
+    if window <= 0:
+        raise ValueError("Rolling-RMS windows must be positive integers.")
+
+    residual = values - baseline
+    residual_squared = np.where(
+        np.isfinite(residual), residual * residual, np.nan
+    )
+    mean_squared = compute_moving_average_ignore_nan(
+        residual_squared, window
+    )
+    return np.sqrt(mean_squared)
+
+
+def plot_conservation_average_and_rms_to_pdf(
+    signal_iterations,
+    raw,
+    title,
+    field_name,
+    pdf,
+    baseline_window,
+    rms_window,
+):
+    """Append one log-baseline page and one RMS page with log raw data."""
+    signal_iterations = np.asarray(signal_iterations, dtype=float)
+    raw = np.asarray(raw, dtype=float)
+    if signal_iterations.shape != raw.shape:
+        raise ValueError(
+            "Conservation-error iterations and raw data must match."
+        )
+    if baseline_window <= 0 or rms_window <= 0:
+        raise ValueError("Baseline and RMS windows must be positive.")
+
+    moving_average = compute_moving_average_ignore_nan(raw, baseline_window)
+    exponential_average = compute_exponential_moving_average_ignore_nan(
+        raw, baseline_window
+    )
+    moving_average_rms = compute_rolling_rms_about_baseline(
+        raw, moving_average, rms_window
+    )
+    exponential_average_rms = compute_rolling_rms_about_baseline(
+        raw, exponential_average, rms_window
+    )
+
+    raw_log = np.where(np.isfinite(raw) & (raw > 0.0), raw, np.nan)
+    moving_average_log = np.where(
+        np.isfinite(moving_average) & (moving_average > 0.0),
+        moving_average,
+        np.nan,
+    )
+    exponential_average_log = np.where(
+        np.isfinite(exponential_average) & (exponential_average > 0.0),
+        exponential_average,
+        np.nan,
+    )
+
+    fig, axis = plt.subplots(figsize=(12, 7))
+    raw_artist = axis.scatter(
+        signal_iterations, raw_log, color="0.60", s=10, alpha=0.40,
+        label="ROM percent conservation error", zorder=2, rasterized=True,
+    )
+    moving_line, = axis.plot(
+        signal_iterations, moving_average_log,
+        color="tab:green", linewidth=2.6,
+        label=f"Moving average ({baseline_window})", zorder=20,
+    )
+    exponential_line, = axis.plot(
+        signal_iterations, exponential_average_log,
+        color="tab:blue", linewidth=2.6, linestyle="--",
+        label=f"Exponential moving average (span={baseline_window})", zorder=21,
+    )
+    axis.set_xlabel("Iteration")
+    axis.set_ylabel("Conservation error [%]")
+    axis.set_yscale("log")
+    axis.set_title(
+        f"{title}: {field_name}\nMoving and exponential moving averages"
+    )
+    axis.minorticks_on()
+    axis.grid(which="major", axis="both", linestyle="-", alpha=0.35)
+    axis.grid(which="minor", axis="both", linestyle=":", alpha=0.20)
+    axis.legend(handles=[raw_artist, moving_line, exponential_line], loc="best")
+    fig.tight_layout()
+    pdf.savefig(fig, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+    fig, rms_axis = plt.subplots(figsize=(12, 7))
+    error_axis = rms_axis.twinx()
+    moving_rms_line, = rms_axis.plot(
+        signal_iterations, moving_average_rms, color="tab:green",
+        linewidth=2.4,
+        label=f"RMS about moving-average baseline ({rms_window})",
+        zorder=20,
+    )
+    exponential_rms_line, = rms_axis.plot(
+        signal_iterations, exponential_average_rms, color="tab:blue",
+        linewidth=2.4, linestyle="--",
+        label=f"RMS about EMA baseline ({rms_window})",
+        zorder=21,
+    )
+    raw_error_artist = error_axis.scatter(
+        signal_iterations, raw_log, color="0.55", s=9, alpha=0.30,
+        label="ROM percent conservation error", zorder=2, rasterized=True,
+    )
+    rms_axis.set_xlabel("Iteration")
+    rms_axis.set_ylabel("RMS fluctuation magnitude [percentage points]")
+    error_axis.set_ylabel(
+        "Conservation error [%]", color="0.35"
+    )
+    error_axis.tick_params(axis="y", labelcolor="0.35")
+    error_axis.set_yscale("log")
+    rms_axis.set_title(
+        f"{title}: {field_name}\n"
+        f"Baseline-relative rolling RMS [baseline={baseline_window}, "
+        f"RMS={rms_window}]"
+    )
+    rms_axis.minorticks_on()
+    rms_axis.grid(which="major", axis="both", linestyle="-", alpha=0.35)
+    rms_axis.grid(which="minor", axis="x", linestyle=":", alpha=0.20)
+    rms_axis.legend(
+        handles=[moving_rms_line, exponential_rms_line, raw_error_artist],
+        loc="best",
+    )
+    fig.tight_layout()
+    pdf.savefig(fig, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+    print(
+        f"Added conservation averages and RMS pages: {field_name}; "
+        f"baseline={baseline_window}; RMS={rms_window}", flush=True,
+    )
+
+
+
+
+def compute_rolling_standard_deviation_about_baseline(
+    values,
+    fluctuation_window,
+    baseline_window,
+):
+    # Compute causal rolling standard deviation after removing a local baseline.
+    values = np.asarray(values, dtype=float)
+    if fluctuation_window <= 0 or baseline_window <= 0:
+        raise ValueError("Rolling-standard-deviation windows must be positive.")
+
+    baseline = compute_moving_average_ignore_nan(values, baseline_window)
+    residual = values - baseline
+    rolling_std = np.full(len(values), np.nan, dtype=float)
+
+    for index in range(len(values)):
+        start = max(0, index - fluctuation_window + 1)
+        current = residual[start:index + 1]
+        current = current[np.isfinite(current)]
+        if len(current) > 0:
+            rolling_std[index] = np.std(current, ddof=0)
+
+    return baseline, rolling_std
+
+
+def compute_rolling_log_ratio_fluctuation(
+    values,
+    fluctuation_window,
+    baseline_window,
+):
+    # Compute rolling std of log10(raw / local baseline).
+    values = np.asarray(values, dtype=float)
+    if fluctuation_window <= 0 or baseline_window <= 0:
+        raise ValueError("Rolling-log-ratio windows must be positive.")
+
+    baseline = compute_moving_average_ignore_nan(values, baseline_window)
+    log_ratio = np.full(len(values), np.nan, dtype=float)
+    valid = (
+        np.isfinite(values)
+        & np.isfinite(baseline)
+        & (values > 0.0)
+        & (baseline > 0.0)
+    )
+    log_ratio[valid] = np.log10(values[valid] / baseline[valid])
+
+    rolling_log_ratio_std = np.full(len(values), np.nan, dtype=float)
+    for index in range(len(values)):
+        start = max(0, index - fluctuation_window + 1)
+        current = log_ratio[start:index + 1]
+        current = current[np.isfinite(current)]
+        if len(current) > 0:
+            rolling_log_ratio_std[index] = np.std(current, ddof=0)
+
+    return baseline, log_ratio, rolling_log_ratio_std
+
+
+
+def compute_rolling_coefficient_of_variation(
+    values,
+    window,
+    min_mean_magnitude=1.0e-30,
+):
+    # Compute a causal trailing coefficient of variation.
+    values = np.asarray(values, dtype=float)
+
+    if window <= 0:
+        raise ValueError(
+            "Rolling coefficient-of-variation windows must be positive."
+        )
+    if min_mean_magnitude < 0.0:
+        raise ValueError(
+            "The rolling-CV minimum mean magnitude must be nonnegative."
+        )
+
+    rolling_cv = np.full(len(values), np.nan, dtype=float)
+
+    for index in range(len(values)):
+        window_start = max(0, index - window + 1)
+        window_values = values[window_start:index + 1]
+        window_values = window_values[np.isfinite(window_values)]
+
+        if len(window_values) == 0:
+            continue
+
+        window_mean = np.mean(window_values)
+        window_std = np.std(window_values, ddof=0)
+
+        if abs(window_mean) >= min_mean_magnitude:
+            rolling_cv[index] = window_std / abs(window_mean)
+
+    return rolling_cv
+
 def load_error_signal_file(filename, delimiter=","):
     """Load iteration from column zero and error signals from later columns."""
     filename = Path(filename)
@@ -1122,7 +1393,280 @@ def plot_error_signals_to_pdf(
                 plt.close(fig)
                 print(f"Added: {title}: {field_name}")
 
+                # Write this CV page immediately after the corresponding
+                # raw-data and moving-average page.
+
+
+
+
     print("Finished appending error-signal plots.")
+
+
+
+def plot_rolling_coefficient_of_variation_to_pdf(
+    signal_iterations,
+    raw,
+    title,
+    field_name,
+    pdf,
+    windows=ROLLING_COEFFICIENT_OF_VARIATION_WINDOWS,
+    min_mean_magnitude=(
+        ROLLING_COEFFICIENT_OF_VARIATION_MIN_MEAN_MAGNITUDE
+    ),
+    logy=ROLLING_COEFFICIENT_OF_VARIATION_LOGY,
+):
+    """Plot raw source data and rolling CV on separate y-axes."""
+    signal_iterations = np.asarray(signal_iterations, dtype=float)
+    raw = np.asarray(raw, dtype=float)
+
+    if signal_iterations.shape != raw.shape:
+        raise ValueError(
+            "Rolling-CV iterations and raw data must have matching shapes."
+        )
+
+    for window in windows:
+        if window <= 0:
+            raise ValueError(
+                "Rolling coefficient-of-variation windows must be positive."
+            )
+
+        rolling_cv = compute_rolling_coefficient_of_variation(
+            values=raw,
+            window=window,
+            min_mean_magnitude=min_mean_magnitude,
+        )
+        if logy:
+            rolling_cv_plot = np.where(
+                np.isfinite(rolling_cv) & (rolling_cv > 0.0),
+                rolling_cv,
+                np.nan,
+            )
+        else:
+            rolling_cv_plot = rolling_cv
+
+        fig, raw_axis = plt.subplots(figsize=(12, 7))
+        cv_axis = raw_axis.twinx()
+
+        raw_line, = raw_axis.plot(
+            signal_iterations,
+            raw,
+            color="0.55",
+            linewidth=1.0,
+            alpha=0.65,
+            label="Raw error signal",
+            rasterized=True,
+            zorder=2,
+        )
+        cv_line, = cv_axis.plot(
+            signal_iterations,
+            rolling_cv_plot,
+            color="tab:purple",
+            linewidth=2.0,
+            alpha=0.95,
+            label=f"Rolling CV ({window})",
+            rasterized=True,
+            zorder=4,
+        )
+
+        raw_axis.set_xlabel("Iteration")
+        raw_axis.set_ylabel("Raw error signal", color="0.35")
+        cv_axis.set_ylabel(
+            "Rolling coefficient of variation",
+            color="tab:purple",
+        )
+        raw_axis.tick_params(axis="y", labelcolor="0.35")
+        cv_axis.tick_params(axis="y", labelcolor="tab:purple")
+
+        finite_raw = raw[np.isfinite(raw)]
+        if len(finite_raw) and np.all(finite_raw > 0.0):
+            raw_axis.set_yscale("log")
+        if logy:
+            cv_axis.set_yscale("log")
+
+        raw_axis.set_title(
+            f"{title}: {field_name}\n"
+            f"Raw error signal and rolling coefficient of variation, "
+            f"window={window}"
+        )
+        raw_axis.minorticks_on()
+        raw_axis.grid(
+            which="major", axis="both", linestyle="-", alpha=0.35
+        )
+        raw_axis.grid(
+            which="minor", axis="x", linestyle=":", alpha=0.20
+        )
+        raw_axis.legend(handles=[raw_line, cv_line], loc="best")
+
+        fig.tight_layout()
+        pdf.savefig(fig, bbox_inches="tight", dpi=150)
+        plt.close(fig)
+        print(
+            f"Added rolling CV: {title}: {field_name}; window={window}",
+            flush=True,
+        )
+
+
+def plot_rolling_standard_deviation_to_pdf(
+    signal_iterations,
+    raw,
+    title,
+    field_name,
+    pdf,
+    windows=ROLLING_STANDARD_DEVIATION_WINDOWS,
+    baseline_window=ROLLING_STANDARD_DEVIATION_BASELINE_WINDOW,
+    logy=ROLLING_STANDARD_DEVIATION_LOGY,
+):
+    # Plot raw data, local baseline, and rolling residual standard deviation.
+    signal_iterations = np.asarray(signal_iterations, dtype=float)
+    raw = np.asarray(raw, dtype=float)
+    if signal_iterations.shape != raw.shape:
+        raise ValueError("Rolling-std iterations and raw data must match.")
+
+    for window in windows:
+        baseline, rolling_std = compute_rolling_standard_deviation_about_baseline(
+            raw, window, baseline_window
+        )
+        if logy:
+            rolling_std_plot = np.where(
+                np.isfinite(rolling_std) & (rolling_std > 0.0),
+                rolling_std,
+                np.nan,
+            )
+        else:
+            rolling_std_plot = rolling_std
+
+        fig, raw_axis = plt.subplots(figsize=(12, 7))
+        std_axis = raw_axis.twinx()
+        raw_line, = raw_axis.plot(
+            signal_iterations, raw, color="0.55", linewidth=1.0,
+            alpha=0.65, label="Raw error signal", rasterized=True,
+        )
+        baseline_line, = raw_axis.plot(
+            signal_iterations, baseline, color="tab:green", linewidth=2.2,
+            linestyle="-.", label=f"Local baseline ({baseline_window})",
+            rasterized=True,
+        )
+        std_line, = std_axis.plot(
+            signal_iterations, rolling_std_plot, color="tab:orange",
+            linewidth=2.0, alpha=0.95,
+            label=f"Rolling residual std ({window})", rasterized=True,
+        )
+
+        raw_axis.set_xlabel("Iteration")
+        raw_axis.set_ylabel("Raw error signal", color="0.35")
+        std_axis.set_ylabel(
+            "Rolling standard deviation about local baseline",
+            color="tab:orange",
+        )
+        raw_axis.tick_params(axis="y", labelcolor="0.35")
+        std_axis.tick_params(axis="y", labelcolor="tab:orange")
+        finite_raw = raw[np.isfinite(raw)]
+        if len(finite_raw) and np.all(finite_raw > 0.0):
+            raw_axis.set_yscale("log")
+        if logy:
+            std_axis.set_yscale("log")
+
+        raw_axis.set_title(
+            f"{title}: {field_name}\n"
+            f"Rolling standard deviation about baseline "
+            f"[std={window}, baseline={baseline_window}]"
+        )
+        raw_axis.minorticks_on()
+        raw_axis.grid(which="major", axis="both", linestyle="-", alpha=0.35)
+        raw_axis.grid(which="minor", axis="x", linestyle=":", alpha=0.20)
+        raw_axis.legend(handles=[raw_line, baseline_line, std_line], loc="best")
+        fig.tight_layout()
+        pdf.savefig(fig, bbox_inches="tight", dpi=150)
+        plt.close(fig)
+        print(
+            f"Added rolling standard deviation: {title}: {field_name}; "
+            f"window={window}; baseline={baseline_window}", flush=True
+        )
+
+
+def plot_rolling_log_ratio_fluctuation_to_pdf(
+    signal_iterations,
+    raw,
+    title,
+    field_name,
+    pdf,
+    windows=ROLLING_LOG_RATIO_WINDOWS,
+    baseline_window=ROLLING_LOG_RATIO_BASELINE_WINDOW,
+    logy=ROLLING_LOG_RATIO_LOGY,
+):
+    # Plot raw data, local baseline, and rolling log-ratio fluctuation.
+    signal_iterations = np.asarray(signal_iterations, dtype=float)
+    raw = np.asarray(raw, dtype=float)
+    if signal_iterations.shape != raw.shape:
+        raise ValueError("Rolling-log-ratio iterations and raw data must match.")
+
+    for window in windows:
+        baseline, _log_ratio, rolling_log_ratio_std = (
+            compute_rolling_log_ratio_fluctuation(
+                raw, window, baseline_window
+            )
+        )
+        if logy:
+            metric_plot = np.where(
+                np.isfinite(rolling_log_ratio_std)
+                & (rolling_log_ratio_std > 0.0),
+                rolling_log_ratio_std,
+                np.nan,
+            )
+        else:
+            metric_plot = rolling_log_ratio_std
+
+        fig, raw_axis = plt.subplots(figsize=(12, 7))
+        metric_axis = raw_axis.twinx()
+        raw_line, = raw_axis.plot(
+            signal_iterations, raw, color="0.55", linewidth=1.0,
+            alpha=0.65, label="Raw error signal", rasterized=True,
+        )
+        baseline_line, = raw_axis.plot(
+            signal_iterations, baseline, color="tab:green", linewidth=2.2,
+            linestyle="-.", label=f"Local baseline ({baseline_window})",
+            rasterized=True,
+        )
+        metric_line, = metric_axis.plot(
+            signal_iterations, metric_plot, color="tab:blue",
+            linewidth=2.0, alpha=0.95,
+            label=f"Rolling std of log10(raw / baseline) ({window})",
+            rasterized=True,
+        )
+
+        raw_axis.set_xlabel("Iteration")
+        raw_axis.set_ylabel("Raw error signal", color="0.35")
+        metric_axis.set_ylabel(
+            "Rolling std of log10(raw / local baseline) [decades]",
+            color="tab:blue",
+        )
+        raw_axis.tick_params(axis="y", labelcolor="0.35")
+        metric_axis.tick_params(axis="y", labelcolor="tab:blue")
+        finite_raw = raw[np.isfinite(raw)]
+        if len(finite_raw) and np.all(finite_raw > 0.0):
+            raw_axis.set_yscale("log")
+        if logy:
+            metric_axis.set_yscale("log")
+
+        raw_axis.set_title(
+            f"{title}: {field_name}\n"
+            f"Rolling log-ratio fluctuation "
+            f"[window={window}, baseline={baseline_window}]"
+        )
+        raw_axis.minorticks_on()
+        raw_axis.grid(which="major", axis="both", linestyle="-", alpha=0.35)
+        raw_axis.grid(which="minor", axis="x", linestyle=":", alpha=0.20)
+        raw_axis.legend(
+            handles=[raw_line, baseline_line, metric_line], loc="best"
+        )
+        fig.tight_layout()
+        pdf.savefig(fig, bbox_inches="tight", dpi=150)
+        plt.close(fig)
+        print(
+            f"Added rolling log-ratio fluctuation: {title}: {field_name}; "
+            f"window={window}; baseline={baseline_window}", flush=True
+        )
+
 
 
 def load_fom_rerun_counter(counter_filename, delimiter=","):
@@ -1408,9 +1952,14 @@ def plot_fom_rom_conservation_errors_to_pdf(
     long_window=5000,
     delimiter=",",
 ):
-    """Plot only ROM percent conservation errors using the saved moving average."""
-    del fom_error_directory, short_window, long_window
+    """Plot ROM percent conservation errors and fluctuation metrics."""
+    del fom_error_directory
     rom_error_directory = Path(rom_error_directory)
+
+    if short_window <= 0 or long_window <= 0:
+        raise ValueError(
+            "Conservation-error baseline and RMS windows must be positive."
+        )
 
     if fom_rerun_iterations is None:
         fom_rerun_iterations = np.array([], dtype=float)
@@ -1552,6 +2101,53 @@ def plot_fom_rom_conservation_errors_to_pdf(
             fig.tight_layout()
             pdf.savefig(fig, bbox_inches="tight", dpi=150)
             plt.close(fig)
+
+
+        plot_conservation_average_and_rms_to_pdf(
+            signal_iterations=percent_iterations,
+            raw=raw,
+            title="ROM Percent Conservation Error History",
+            field_name=field_name,
+            pdf=pdf,
+            baseline_window=1000,
+            rms_window=short_window,
+        )
+
+        # Analyze the ROM conservation-error percent data used above.
+        plot_rolling_coefficient_of_variation_to_pdf(
+            signal_iterations=percent_iterations,
+            raw=raw,
+            title="ROM Percent Conservation Error History",
+            field_name=field_name,
+            pdf=pdf,
+            windows=ROLLING_COEFFICIENT_OF_VARIATION_WINDOWS,
+            min_mean_magnitude=(
+                ROLLING_COEFFICIENT_OF_VARIATION_MIN_MEAN_MAGNITUDE
+            ),
+            logy=ROLLING_COEFFICIENT_OF_VARIATION_LOGY,
+        )
+
+        plot_rolling_standard_deviation_to_pdf(
+            signal_iterations=percent_iterations,
+            raw=raw,
+            title="ROM Percent Conservation Error History",
+            field_name=field_name,
+            pdf=pdf,
+            windows=ROLLING_STANDARD_DEVIATION_WINDOWS,
+            baseline_window=ROLLING_STANDARD_DEVIATION_BASELINE_WINDOW,
+            logy=ROLLING_STANDARD_DEVIATION_LOGY,
+        )
+
+        plot_rolling_log_ratio_fluctuation_to_pdf(
+            signal_iterations=percent_iterations,
+            raw=raw,
+            title="ROM Percent Conservation Error History",
+            field_name=field_name,
+            pdf=pdf,
+            windows=ROLLING_LOG_RATIO_WINDOWS,
+            baseline_window=ROLLING_LOG_RATIO_BASELINE_WINDOW,
+            logy=ROLLING_LOG_RATIO_LOGY,
+        )
 
     print("Finished appending ROM percent conservation-error histories.")
 
@@ -1781,12 +2377,14 @@ def run_active_plot_range():
         )
 
 
-        plot_conservative_integral_histories_to_pdf(
-            iterations=iterations,
-            fom_integrals=fom_integrals,
-            rom_integrals=rom_integrals,
-            pdf=pdf,
-        )
+        # Domain-integrated conservative-state FOM, ROM, and relative-error
+        # plotting is intentionally disabled.
+        # plot_conservative_integral_histories_to_pdf(
+        #     iterations=iterations,
+        #     fom_integrals=fom_integrals,
+        #     rom_integrals=rom_integrals,
+        #     pdf=pdf,
+        # )
 
         plot_fom_rom_conservation_errors_to_pdf(
             fom_error_directory=fom_error_directory,
@@ -1813,6 +2411,8 @@ def run_active_plot_range():
             long_window=args.error_long_window,
             delimiter=args.error_delimiter,
         )
+
+
 
 
 def main():
