@@ -7,7 +7,7 @@ from compflowlab.boundary_condition import bc_func
 from compflowlab.rom.basis_func import adapt_basis
 from compflowlab.rom.sampling_func import hyper_precompute
 
-from ..utils.classes import MovingAverage
+from ..utils.classes import MovingAverage, MedianAbsoluteDeviation
 import copy
 
 def snapshot_state(state):
@@ -132,6 +132,7 @@ def _get_error_output_file_names(include_sampling_freq=True):
         "error_cons",
         "error_cons_perct",
         "error_cons_perct_ma",
+        "error_cons_mad",
         "error_cons_fom_iter_counter",
     ])
 
@@ -1180,6 +1181,8 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 if "error_output_files" not in rom_param:
                     _open_error_output_files(rom_param, dir_results, mode)
 
+                rom_param['error_cons_mad'] = MedianAbsoluteDeviation(1000, solver_param['num_state_var'])
+
                 rom_param['error_cons_perct_ma'] = MovingAverage(5000, solver_param['num_state_var'])
                 rom_param['error_cons_fom_iter_counter'] = 0
 
@@ -1288,6 +1291,15 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 prim_interp_avg_slope_ratio = np.where(prim_interp_avg_slope > 0, prim_interp_avg/rom_param['prim_interp_avg_store'], np.where(prim_interp_avg_slope < 0, rom_param['prim_interp_avg_store']/prim_interp_avg, 0))
                 prim_proj_max_slope_ratio   = np.where(prim_proj_max_slope   > 0, prim_proj_max/rom_param['prim_proj_max_store'],     np.where(prim_proj_max_slope   < 0, rom_param['prim_proj_max_store']/prim_proj_max,     0))
                 prim_proj_avg_slope_ratio   = np.where(prim_proj_avg_slope   > 0, prim_proj_avg/rom_param['prim_proj_avg_store'],     np.where(prim_proj_avg_slope   < 0, rom_param['prim_proj_avg_store']/prim_proj_avg,     0))
+
+            # Update the conservation error MAD
+            rom_param['error_cons_mad'].update(error_cons_perct)
+
+            # Write rolling medians first, followed by normalized MAD values.
+            error_cons_mad_output = np.concatenate((
+                rom_param['error_cons_mad'].center,
+                rom_param['error_cons_mad'].MAD,
+            ))
 
             # Update the conservation error moving average
             rom_param['error_cons_perct_ma'].update(error_cons_perct)
@@ -1423,6 +1435,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 "error_cons_perct_ma": (
                     rom_param["error_cons_perct_ma"].avg.copy()
                 ),
+                "error_cons_mad": error_cons_mad_output,
                 "error_cons_fom_iter_counter": rom_param.get(
                     "error_cons_fom_iter_counter", 0
                 ),
