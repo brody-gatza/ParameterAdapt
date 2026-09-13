@@ -33,18 +33,22 @@ PLOT_ENABLED = {
     "conservative_integrals": False,
     "rom_conservation_error_log": False,
     "rom_conservation_error_linear": False,
-    "baseline_comparison": True,
-    "winsorized_mean_comparison": True,
-    "winsorized_residual_metrics": True,
-    "winsorized_standard_deviation": True,
-    "winsorized_coefficient_of_variation": True,
+    "baseline_comparison": False,
+    "winsorized_mean_comparison": False,
+    "winsorized_residual_metrics": False,
+    "winsorized_standard_deviation": False,
+    "winsorized_coefficient_of_variation": False,
     "adaptive_valley_band": False,
-    "histogram_density_band": True,
-    "variable_outlier_count": True,
-    "rolling_rms": True,
+    "histogram_density_band": False,
+    "variable_outlier_count": False,
+    "rolling_rms": False,
+    "rolling_mad_median": False,
+    "rolling_normalized_mad_median": True,
+    "rolling_median_standard_deviation": False,
+    "rolling_median_coefficient_of_variation": False,
     "rolling_cv": True,
     "rolling_standard_deviation": False,
-    "rolling_log_ratio": True,
+    "rolling_log_ratio": False,
     "interpolation_error_signals": False,
 }
 
@@ -52,7 +56,7 @@ PLOT_ENABLED = {
 CELL_VOLUME = 1.0
 
 # Inclusive ranges. Use None or [] for one PDF containing all iterations.
-PLOT_ITERATION_RANGES = [(0, 100_000), [0, 1_000_000]]
+PLOT_ITERATION_RANGES = []
 
 PRIMITIVE_FIELD_NAMES = [
     "Density", "Velocity", "Pressure", "Temperature", "Reactant",
@@ -63,6 +67,13 @@ CONSERVATIVE_FIELD_NAMES = ["Mass", "Momentum", "Energy", "Species"]
 ROLLING_CV_WINDOWS = (1000,)
 ROLLING_CV_MIN_MEAN_MAGNITUDE = 1.0e-30
 ROLLING_CV_LOGY = False
+
+ROLLING_MEDIAN_STAT_WINDOWS = (1000,)
+ROLLING_MEDIAN_STAT_MIN_BASELINE_MAGNITUDE = 1.0e-30
+ROLLING_MAD_LOGY = True
+ROLLING_NORMALIZED_MAD_LOGY = False
+ROLLING_MEDIAN_STD_LOGY = True
+ROLLING_MEDIAN_CV_LOGY = True
 
 ROLLING_STD_WINDOWS = (1000,)
 ROLLING_STD_BASELINE_WINDOW = 5000
@@ -87,6 +98,22 @@ ASYMMETRIC_MAD_NORMAL_SCALE = 1.4826
 
 # Trailing sample count for the sliding-window density-histogram band.
 HISTOGRAM_DENSITY_BAND_WINDOW = 1000
+
+# Target expected sample count per SMOOTHED bin under Poisson sampling.
+# Used to self-calibrate the box-filter smoothing radius: with this many
+# expected samples, a truly occupied bin has under a 1% chance of a
+# spuriously empty/low reading purely from sampling noise.
+HISTOGRAM_DENSITY_BAND_TARGET_BIN_COUNT = 5.0
+
+# Modified-z-score cutoff for flagging a curvature (change-in-decline-rate)
+# value as an anomalous structural break rather than normal tail decline.
+# 3.5 is the standard Iglewicz & Hoaglin convention, not a per-dataset
+# tuned constant.
+HISTOGRAM_DENSITY_BAND_CURVATURE_CUTOFF = 3.5
+
+# Minimum number of accepted curvature samples before testing a candidate;
+# a stability requirement so the local MAD estimate is not degenerate.
+HISTOGRAM_DENSITY_BAND_MIN_CURVATURE_HISTORY = 3
 
 ERROR_SIGNAL_GROUPS = (
     ("Primitive Variables - Maximum Error", "prim_interp_max.txt", "primitive"),
@@ -143,6 +170,9 @@ def validate_configuration() -> None:
         "winsorized_coefficient_of_variation", "adaptive_valley_band",
         "histogram_density_band", "variable_outlier_count",
         "rolling_rms",
+        "rolling_mad_median", "rolling_normalized_mad_median",
+        "rolling_median_standard_deviation",
+        "rolling_median_coefficient_of_variation",
         "rolling_cv", "rolling_standard_deviation", "rolling_log_ratio",
         "interpolation_error_signals",
     }
@@ -153,12 +183,41 @@ def validate_configuration() -> None:
     require_positive(CELL_VOLUME, "CELL_VOLUME")
     for index, item in enumerate(configured_ranges()):
         validate_iteration_range(item, index)
-    for window in (*ROLLING_CV_WINDOWS, *ROLLING_STD_WINDOWS, *ROLLING_LOG_RATIO_WINDOWS):
+    for window in (
+        *ROLLING_CV_WINDOWS,
+        *ROLLING_MEDIAN_STAT_WINDOWS,
+        *ROLLING_STD_WINDOWS,
+        *ROLLING_LOG_RATIO_WINDOWS,
+    ):
         require_positive(window, "rolling window")
+    require_nonnegative(
+        ROLLING_MEDIAN_STAT_MIN_BASELINE_MAGNITUDE,
+        "ROLLING_MEDIAN_STAT_MIN_BASELINE_MAGNITUDE",
+    )
+    for name, value in (
+        ("ROLLING_MAD_LOGY", ROLLING_MAD_LOGY),
+        ("ROLLING_NORMALIZED_MAD_LOGY", ROLLING_NORMALIZED_MAD_LOGY),
+        ("ROLLING_MEDIAN_STD_LOGY", ROLLING_MEDIAN_STD_LOGY),
+        ("ROLLING_MEDIAN_CV_LOGY", ROLLING_MEDIAN_CV_LOGY),
+    ):
+        if not isinstance(value, bool):
+            raise TypeError(f"{name} must be True or False.")
     require_positive(ROLLING_STD_BASELINE_WINDOW, "ROLLING_STD_BASELINE_WINDOW")
     require_positive(ROLLING_LOG_RATIO_BASELINE_WINDOW, "ROLLING_LOG_RATIO_BASELINE_WINDOW")
     require_positive(BASELINE_COMPARISON_WINDOW, "BASELINE_COMPARISON_WINDOW")
     require_positive(HISTOGRAM_DENSITY_BAND_WINDOW, "HISTOGRAM_DENSITY_BAND_WINDOW")
+    require_positive(
+        HISTOGRAM_DENSITY_BAND_TARGET_BIN_COUNT,
+        "HISTOGRAM_DENSITY_BAND_TARGET_BIN_COUNT",
+    )
+    require_positive(
+        HISTOGRAM_DENSITY_BAND_CURVATURE_CUTOFF,
+        "HISTOGRAM_DENSITY_BAND_CURVATURE_CUTOFF",
+    )
+    require_positive(
+        HISTOGRAM_DENSITY_BAND_MIN_CURVATURE_HISTORY,
+        "HISTOGRAM_DENSITY_BAND_MIN_CURVATURE_HISTORY",
+    )
     require_positive(WINSORIZED_MEAN_WINDOW, "WINSORIZED_MEAN_WINDOW")
     require_positive(
         WINSORIZED_RESIDUAL_AVERAGE_WINDOW,
@@ -748,7 +807,96 @@ def _freedman_diaconis_bin_edges(log_values):
     return np.linspace(lo, hi, n_bins + 1)
 
 
-def moving_histogram_density_band(values, window):
+def _self_calibrated_smoothing_radius(window, n_bins, target_bin_sample_count):
+    """Pick a box-filter radius (in bins) so a smoothed bin's *expected*
+    sample count clears `target_bin_sample_count`, given how many samples
+    the window holds and how many bins they are spread across. This makes
+    the smoothing amount track the resolution automatically instead of
+    being a fixed, dataset-tuned constant: finer bins (more of them) or
+    smaller windows automatically call for more smoothing.
+    """
+    if n_bins <= 0:
+        return 0
+    average_count_per_bin = window / n_bins
+    if average_count_per_bin <= 0.0:
+        return 0
+    kernel_width_bins = max(1, int(np.ceil(target_bin_sample_count / average_count_per_bin)))
+    return (kernel_width_bins - 1) // 2
+
+
+def _modified_zscore(history, candidate):
+    """Return candidate's modified z-score (Iglewicz & Hoaglin) against a
+    robust median/MAD summary of `history`. Returns 0 if there is no
+    history yet, and +inf if the history is degenerate (zero MAD) and the
+    candidate exceeds it -- any deviation from an exactly flat history is
+    by definition anomalous.
+    """
+    if len(history) == 0:
+        return 0.0
+    history = np.asarray(history, dtype=float)
+    center = np.median(history)
+    mad = np.median(np.abs(history - center))
+    if mad > 0.0:
+        return 0.6745 * (candidate - center) / mad
+    return 0.0 if candidate <= center else np.inf
+
+
+def _walk_density_edge(smoothed_counts, start_index, step, cutoff, min_history):
+    """Walk outward from a peak bin through smoothed bin counts, stopping
+    at whichever comes first: a genuinely empty bin, or a statistically
+    anomalous CHANGE in the rate of density decline (curvature).
+
+    Testing curvature rather than the raw drop matters because a smooth,
+    unimodal cluster's log-density declines at a smoothly accelerating
+    rate moving into its tail (exactly quadratic for a Gaussian), so
+    testing the raw drop against past drops eventually flags normal tail
+    decline as anomalous and cuts the band too tight. The curvature
+    (the change in the drop from one step to the next) stays roughly
+    constant through a smooth, unimodal tail, and only spikes at a real
+    structural break -- e.g. a shoulder or secondary population that
+    never quite reaches zero density but is clearly not part of the same
+    cluster.
+    """
+    index = start_index
+    n_bins = len(smoothed_counts)
+    drop_history = []
+    curvature_history = []
+
+    while True:
+        next_index = index + step
+        if next_index < 0 or next_index >= n_bins:
+            break
+
+        current = smoothed_counts[index]
+        candidate = smoothed_counts[next_index]
+
+        if candidate <= 0.0:
+            break  # genuinely empty bin: unconditional stop
+
+        if current > 0.0:
+            drop = np.log(current) - np.log(candidate)
+            if drop_history:
+                curvature = drop - drop_history[-1]
+                if (
+                    len(curvature_history) >= min_history
+                    and _modified_zscore(curvature_history, curvature) > cutoff
+                ):
+                    break
+                curvature_history.append(curvature)
+            drop_history.append(drop)
+
+        index = next_index
+
+    return index
+
+
+def moving_histogram_density_band(
+    values,
+    window,
+    target_bin_sample_count=HISTOGRAM_DENSITY_BAND_TARGET_BIN_COUNT,
+    curvature_cutoff=HISTOGRAM_DENSITY_BAND_CURVATURE_CUTOFF,
+    min_curvature_history=HISTOGRAM_DENSITY_BAND_MIN_CURVATURE_HISTORY,
+):
     """Track the densest cluster's edges with an incrementally updated
     sliding-window histogram in log10 space.
 
@@ -756,18 +904,31 @@ def moving_histogram_density_band(values, window):
     _freedman_diaconis_bin_edges) from the full finite-positive history, so
     no per-dataset threshold is hardcoded. At every sample, the trailing
     window's histogram is updated in O(1) (one bin increment for the
-    entering sample, one bin decrement for the sample leaving the window).
-    The band is the contiguous run of nonempty bins around the tallest
-    (peak/mode) bin; walking outward stops naturally at the first empty
-    bin, which is where the dense cluster thins out. This costs O(1)
-    amortized per sample for the histogram update plus O(number_of_bins)
-    for the peak/valley search, versus O(window * log(window)) for
-    resorting the trailing window from scratch at every step.
+    entering sample, one bin decrement for the sample leaving the window),
+    then box-filter smoothed (see _self_calibrated_smoothing_radius) before
+    the peak and band edges are found.
+
+    The band is the contiguous run of bins around the tallest (peak) bin
+    reached by walking outward until either a bin is genuinely empty, or
+    the CHANGE in the rate of density decline (curvature) becomes a
+    statistical outlier relative to the walk's own history so far -- see
+    _walk_density_edge. This catches structural breaks (shoulders,
+    secondary populations) that never reach exactly zero density, not just
+    literal gaps. Edges are still reported at the full, unsmoothed bin
+    resolution.
+
+    Cost: O(number_of_bins) per sample (histogram update, smoothing pass,
+    and peak/edge search), versus O(window * log(window)) for resorting
+    the trailing window from scratch at every step.
 
     Returns:
         lower_edge, upper_edge, band_count (each shape (len(values),))
     """
     validate_windows(("histogram-density-band window", window))
+    require_positive(target_bin_sample_count, "target_bin_sample_count")
+    require_positive(curvature_cutoff, "curvature_cutoff")
+    require_positive(min_curvature_history, "min_curvature_history")
+
     values = np.asarray(values, dtype=float)
     n = len(values)
 
@@ -781,6 +942,13 @@ def moving_histogram_density_band(values, window):
 
     bin_edges = _freedman_diaconis_bin_edges(np.log10(finite_positive))
     n_bins = len(bin_edges) - 1
+
+    smoothing_radius = _self_calibrated_smoothing_radius(
+        window, n_bins, target_bin_sample_count
+    )
+    bin_positions = np.arange(n_bins)
+    smoothing_lower = np.maximum(0, bin_positions - smoothing_radius)
+    smoothing_upper = np.minimum(n_bins, bin_positions + smoothing_radius + 1)
 
     counts = np.zeros(n_bins, dtype=np.int64)
     window_bins = deque()
@@ -805,15 +973,19 @@ def moving_histogram_density_band(values, window):
         if not np.any(counts):
             continue
 
-        peak_bin = int(np.argmax(counts))
+        cumulative_counts = np.concatenate(([0], np.cumsum(counts)))
+        smoothed_counts = (
+            cumulative_counts[smoothing_upper] - cumulative_counts[smoothing_lower]
+        ).astype(float)
 
-        left_bin = peak_bin
-        while left_bin > 0 and counts[left_bin - 1] > 0:
-            left_bin -= 1
+        peak_bin = int(np.argmax(smoothed_counts))
 
-        right_bin = peak_bin
-        while right_bin < n_bins - 1 and counts[right_bin + 1] > 0:
-            right_bin += 1
+        left_bin = _walk_density_edge(
+            smoothed_counts, peak_bin, -1, curvature_cutoff, min_curvature_history
+        )
+        right_bin = _walk_density_edge(
+            smoothed_counts, peak_bin, +1, curvature_cutoff, min_curvature_history
+        )
 
         lower_edge[index] = 10.0 ** bin_edges[left_bin]
         upper_edge[index] = 10.0 ** bin_edges[right_bin + 1]
@@ -847,6 +1019,44 @@ def rolling_cv(values, window, minimum_mean):
         mean = np.mean(x)
         return np.std(x, ddof=0) / abs(mean) if abs(mean) >= minimum_mean else np.nan
     return rolling_statistic(values, window, calculate)
+
+
+def rolling_median_spread_statistics(values, window, minimum_baseline_magnitude):
+    """Return rolling median, MAD, normalized MAD, RMS spread, and CV.
+
+    The RMS spread is the square root of the mean squared deviation from the
+    window median. Normalized MAD and the coefficient of variation divide
+    their spread measure by the magnitude of the same window median.
+    """
+    validate_windows(("rolling median-statistics window", window))
+    require_nonnegative(
+        minimum_baseline_magnitude,
+        "minimum rolling-median baseline magnitude",
+    )
+    values = np.asarray(values, dtype=float)
+    median = np.full(values.shape, np.nan, dtype=float)
+    mad = np.full(values.shape, np.nan, dtype=float)
+    normalized_mad = np.full(values.shape, np.nan, dtype=float)
+    spread = np.full(values.shape, np.nan, dtype=float)
+    coefficient_of_variation = np.full(values.shape, np.nan, dtype=float)
+
+    for index in range(len(values)):
+        start = max(0, index - int(window) + 1)
+        current = values[start:index + 1]
+        current = current[np.isfinite(current)]
+        if current.size == 0:
+            continue
+
+        center = np.median(current)
+        residual = current - center
+        median[index] = center
+        mad[index] = np.median(np.abs(residual))
+        spread[index] = np.sqrt(np.mean(residual ** 2, dtype=np.float64))
+        if abs(center) > minimum_baseline_magnitude:
+            normalized_mad[index] = mad[index] / abs(center)
+            coefficient_of_variation[index] = spread[index] / abs(center)
+
+    return median, mad, normalized_mad, spread, coefficient_of_variation
 
 
 def rolling_std_about_baseline(values, window, baseline_window):
@@ -1296,15 +1506,23 @@ def plot_variable_outlier_count(iterations, outlier_masks, names, title, pdf):
 def plot_single_rolling_metric(iterations, raw, baseline, metric, name, title,
                                metric_label, line_label, color, pdf, logy=False):
     fig, axis = plt.subplots(figsize=(12, 7)); metric_axis = axis.twinx()
-    raw_line, = axis.plot(iterations, raw, c="0.55", lw=1, alpha=.65, label="Raw error signal")
+    axis.set_zorder(1)
+    metric_axis.set_zorder(2)
+    metric_axis.patch.set_visible(False)
+    raw_line, = axis.plot(
+        iterations, raw, c="0.55", lw=1, alpha=.45,
+        label="Raw error signal", zorder=1,
+    )
     handles = [raw_line]
     if baseline is not None:
         baseline_line, = axis.plot(iterations, baseline, c="tab:green", lw=2.2, ls="-.",
                                    label="Local baseline")
         handles.append(baseline_line)
     metric_plot = positive_or_nan(metric) if logy else metric
-    metric_line, = metric_axis.plot(iterations, metric_plot, color=color, lw=2,
-                                    label=line_label)
+    metric_line, = metric_axis.plot(
+        iterations, metric_plot, color=color, lw=2.4,
+        label=line_label, zorder=4,
+    )
     handles.append(metric_line)
     finite = np.asarray(raw)[np.isfinite(raw)]
     if finite.size and np.all(finite > 0):
@@ -1319,6 +1537,40 @@ def plot_single_rolling_metric(iterations, raw, baseline, metric, name, title,
 
 
 def plot_rolling_metrics(iterations, raw, title, name, pdf):
+    for window in ROLLING_MEDIAN_STAT_WINDOWS:
+        median, mad, normalized_mad, spread, median_cv = (
+            rolling_median_spread_statistics(
+                raw, window, ROLLING_MEDIAN_STAT_MIN_BASELINE_MAGNITUDE
+            )
+        )
+        if is_plot_enabled("rolling_mad_median"):
+            plot_single_rolling_metric(
+                iterations, raw, median, mad, name, title,
+                "Rolling MAD [percentage points]",
+                f"Rolling MAD about median ({window})",
+                "tab:red", pdf, ROLLING_MAD_LOGY,
+            )
+        if is_plot_enabled("rolling_normalized_mad_median"):
+            plot_single_rolling_metric(
+                iterations, raw, median, normalized_mad, name, title,
+                "Rolling normalized MAD = MAD / |median|",
+                f"Rolling normalized MAD about median ({window})",
+                "tab:brown", pdf, ROLLING_NORMALIZED_MAD_LOGY,
+            )
+        if is_plot_enabled("rolling_median_standard_deviation"):
+            plot_single_rolling_metric(
+                iterations, raw, median, spread, name, title,
+                "Rolling spread [percentage points]",
+                f"Rolling RMS spread about median ({window})",
+                "tab:orange", pdf, ROLLING_MEDIAN_STD_LOGY,
+            )
+        if is_plot_enabled("rolling_median_coefficient_of_variation"):
+            plot_single_rolling_metric(
+                iterations, raw, median, median_cv, name, title,
+                "Rolling CV = spread / |median|",
+                f"Rolling median-based CV ({window})",
+                "tab:purple", pdf, ROLLING_MEDIAN_CV_LOGY,
+            )
     if is_plot_enabled("rolling_cv"):
         for window in ROLLING_CV_WINDOWS:
             metric = rolling_cv(raw, window, ROLLING_CV_MIN_MEAN_MAGNITUDE)
@@ -1585,6 +1837,9 @@ def run_range(args, active_range):
             "winsorized_coefficient_of_variation", "adaptive_valley_band",
             "histogram_density_band", "variable_outlier_count",
             "rolling_rms",
+            "rolling_mad_median", "rolling_normalized_mad_median",
+            "rolling_median_standard_deviation",
+            "rolling_median_coefficient_of_variation",
             "rolling_cv", "rolling_standard_deviation", "rolling_log_ratio")):
             plot_rom_conservation_errors(rom_error_dir, pdf, active_range,
                 reruns_by_variable, args.error_short_window, args.error_delimiter)
