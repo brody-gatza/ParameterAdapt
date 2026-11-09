@@ -20,6 +20,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 # =============================================================================
 
 PLOT_ENABLED = {
+    "sampling_frequency": True,
     "fom_rerun_history": False,
     "primitive_metrics": True,
     "conservative_integrals": False,
@@ -28,8 +29,9 @@ PLOT_ENABLED = {
     "winsorized_mean_comparison": False,
     "histogram_density_band": False,
     "saved_rolling_normalized_mad_median": True,
+    "saved_median_scaled_mad": False,
     "rolling_normalized_mad_median": False,
-    "rolling_cv": True,
+    "rolling_cv": False,
     "interpolation_error_signals": False,
 }
 
@@ -37,7 +39,9 @@ PLOT_ENABLED = {
 CELL_VOLUME = 1.0
 
 # Inclusive ranges. Use None or [] for one PDF containing all iterations.
-PLOT_ITERATION_RANGES = []
+PLOT_ITERATION_RANGES = [(0, 100_000),
+                            (0, 20_000),
+                            (0, 500_000)]
 
 PRIMITIVE_FIELD_NAMES = [
     "Density",
@@ -53,9 +57,17 @@ ROLLING_CV_WINDOWS = (1000,)
 ROLLING_CV_MIN_MEAN_MAGNITUDE = 1.0e-30
 ROLLING_CV_LOGY = False
 
+SAMPLING_FREQUENCY_FILENAME = "sampling_freq.txt"
+SAMPLING_FREQUENCY_AVERAGE_WINDOW = 1000
+
 ROLLING_MEDIAN_STAT_WINDOWS = (1000,)
 ROLLING_MEDIAN_STAT_MIN_BASELINE_MAGNITUDE = 1.0e-30
 ROLLING_NORMALIZED_MAD_LOGY = False
+
+# Number of iteration numbers used to establish the per-variable MAD scales.
+# Starting at the first iteration t0 in the active plot range, the baseline
+# interval is t0 through t0 + MAD_SCALE_BASELINE_ITERATION_COUNT - 1.
+MAD_SCALE_BASELINE_ITERATION_COUNT = 100
 
 WINSORIZED_MEAN_WINDOW = 1000
 WINSORIZED_TAIL_FRACTIONS = (0.05, 0.10, 0.20)
@@ -110,6 +122,7 @@ def validate_iteration_range(iteration_range, index: int = 0):
 
 def validate_configuration() -> None:
     expected = {
+        "sampling_frequency",
         "fom_rerun_history",
         "primitive_metrics",
         "conservative_integrals",
@@ -118,6 +131,7 @@ def validate_configuration() -> None:
         "winsorized_mean_comparison",
         "histogram_density_band",
         "saved_rolling_normalized_mad_median",
+        "saved_median_scaled_mad",
         "rolling_normalized_mad_median",
         "rolling_cv",
         "interpolation_error_signals",
@@ -147,6 +161,20 @@ def validate_configuration() -> None:
         raise TypeError("ROLLING_CV_LOGY must be True or False.")
     if not isinstance(ROLLING_NORMALIZED_MAD_LOGY, bool):
         raise TypeError("ROLLING_NORMALIZED_MAD_LOGY must be True or False.")
+
+    require_positive(
+        MAD_SCALE_BASELINE_ITERATION_COUNT,
+        "MAD_SCALE_BASELINE_ITERATION_COUNT",
+    )
+    if not isinstance(MAD_SCALE_BASELINE_ITERATION_COUNT, int):
+        raise TypeError(
+            "MAD_SCALE_BASELINE_ITERATION_COUNT must be an integer."
+        )
+
+    require_positive(
+        SAMPLING_FREQUENCY_AVERAGE_WINDOW,
+        "SAMPLING_FREQUENCY_AVERAGE_WINDOW",
+    )
 
     require_positive(WINSORIZED_MEAN_WINDOW, "WINSORIZED_MEAN_WINDOW")
     if not WINSORIZED_TAIL_FRACTIONS:
@@ -747,6 +775,41 @@ def plot_primitive_metrics(iterations, relative_l2, correlation, names, pdf):
         save_figure(pdf, fig)
 
 
+def plot_sampling_frequency(error_dir, pdf, active_range, delimiter):
+    iterations, columns = load_error_signal_file(
+        Path(error_dir) / SAMPLING_FREQUENCY_FILENAME,
+        active_range,
+        delimiter,
+    )
+    if columns.shape[1] != 1:
+        raise ValueError(
+            f"{SAMPLING_FREQUENCY_FILENAME} must contain exactly one "
+            "sampling-frequency column."
+        )
+    frequency = columns[:, 0]
+    if not np.all(np.isfinite(frequency)):
+        raise ValueError("Sampling-frequency values must be finite.")
+    if np.any(frequency <= 0):
+        raise ValueError("Sampling-frequency values must be positive.")
+    running_average = moving_average(
+        frequency, SAMPLING_FREQUENCY_AVERAGE_WINDOW
+    )
+    fig, axis = plt.subplots(figsize=(12, 7))
+    raw_artist = axis.scatter(
+        iterations, frequency, color="0.55", s=10, alpha=0.45,
+        label="Raw sampling frequency", rasterized=True,
+    )
+    average_line, = axis.plot(
+        iterations, running_average, color="tab:blue", linewidth=2.5,
+        label=f"Running average ({SAMPLING_FREQUENCY_AVERAGE_WINDOW})",
+    )
+    axis.set_ylabel("Sampling frequency [iterations]")
+    axis.set_title("ROM Sampling Frequency")
+    apply_standard_axes(axis)
+    axis.legend(handles=[raw_artist, average_line], loc="best")
+    save_figure(pdf, fig, 150)
+
+
 def plot_single_rolling_metric(
     iterations,
     raw,
@@ -760,8 +823,10 @@ def plot_single_rolling_metric(
     pdf,
     logy=False,
 ):
+    """Plot one rolling metric without a cumulative-sum curve."""
     fig, raw_axis = plt.subplots(figsize=(12, 7))
     metric_axis = raw_axis.twinx()
+
     raw_axis.set_zorder(1)
     metric_axis.set_zorder(2)
     metric_axis.patch.set_visible(False)
@@ -777,6 +842,7 @@ def plot_single_rolling_metric(
         zorder=1,
     )
     handles = [raw_artist]
+
     if baseline is not None:
         baseline_line, = raw_axis.plot(
             iterations,
@@ -785,6 +851,7 @@ def plot_single_rolling_metric(
             linewidth=2.2,
             linestyle="-.",
             label="Local baseline",
+            zorder=2,
         )
         handles.append(baseline_line)
 
@@ -802,16 +869,481 @@ def plot_single_rolling_metric(
     finite_raw = np.asarray(raw)[np.isfinite(raw)]
     if finite_raw.size and np.all(finite_raw > 0):
         raw_axis.set_yscale("log")
+
     if logy:
         metric_axis.set_yscale("log")
 
     raw_axis.set_ylabel("Raw error signal")
     metric_axis.set_ylabel(metric_label, color=color)
     metric_axis.tick_params(axis="y", labelcolor=color)
+
     raw_axis.set_title(f"{title}: {name}\n{line_label}")
     apply_standard_axes(raw_axis)
     raw_axis.legend(handles=handles, loc="best")
-    save_figure(pdf, fig, 150)
+
+    fig.subplots_adjust(right=0.88)
+    pdf.savefig(fig, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+
+def plot_combined_saved_mad_metric(
+    iterations,
+    raw,
+    short_median,
+    long_median,
+    short_mad,
+    long_mad,
+    name,
+    title,
+    pdf,
+    logy=False,
+):
+    """
+    Plot the saved short- and long-window MAD histories together.
+
+    The raw conservation error and median baselines use the left axis.
+    The short and long MAD values use the right axis.
+    """
+    iterations = np.asarray(iterations, dtype=float)
+    raw = np.asarray(raw, dtype=float)
+    short_median = np.asarray(short_median, dtype=float)
+    long_median = np.asarray(long_median, dtype=float)
+    short_mad = np.asarray(short_mad, dtype=float)
+    long_mad = np.asarray(long_mad, dtype=float)
+
+    validate_history_shape(
+        raw,
+        iterations,
+        f"{name} raw conservation error",
+    )
+    validate_history_shape(
+        short_median,
+        iterations,
+        f"{name} short saved median",
+    )
+    validate_history_shape(
+        long_median,
+        iterations,
+        f"{name} long saved median",
+    )
+    validate_history_shape(
+        short_mad,
+        iterations,
+        f"{name} short saved MAD",
+    )
+    validate_history_shape(
+        long_mad,
+        iterations,
+        f"{name} long saved MAD",
+    )
+
+    fig, raw_axis = plt.subplots(figsize=(12, 7))
+    mad_axis = raw_axis.twinx()
+
+    raw_axis.set_zorder(1)
+    mad_axis.set_zorder(2)
+    mad_axis.patch.set_visible(False)
+
+    raw_artist = raw_axis.scatter(
+        iterations,
+        raw,
+        color="0.65",
+        s=9,
+        alpha=0.35,
+        label="Raw conservation error",
+        rasterized=True,
+        zorder=1,
+    )
+
+    short_median_line, = raw_axis.plot(
+        iterations,
+        short_median,
+        color="tab:green",
+        linewidth=1.7,
+        linestyle="--",
+        alpha=0.90,
+        label="Short-window median (100)",
+        zorder=2,
+    )
+
+    long_median_line, = raw_axis.plot(
+        iterations,
+        long_median,
+        color="darkgreen",
+        linewidth=2.3,
+        linestyle="-.",
+        alpha=0.95,
+        label="Long-window median (1000)",
+        zorder=3,
+    )
+
+    short_mad_plot = positive_or_nan(short_mad) if logy else short_mad
+    long_mad_plot = positive_or_nan(long_mad) if logy else long_mad
+
+    short_mad_line, = mad_axis.plot(
+        iterations,
+        short_mad_plot,
+        color="tab:brown",
+        linewidth=1.8,
+        alpha=0.90,
+        label="Short-window normalized MAD (100)",
+        zorder=4,
+    )
+
+    long_mad_line, = mad_axis.plot(
+        iterations,
+        long_mad_plot,
+        color="tab:purple",
+        linewidth=2.5,
+        alpha=0.95,
+        label="Long-window normalized MAD (1000)",
+        zorder=5,
+    )
+
+    finite_raw = raw[np.isfinite(raw)]
+    if finite_raw.size and np.all(finite_raw > 0):
+        raw_axis.set_yscale("log")
+
+    if logy:
+        mad_axis.set_yscale("log")
+
+    raw_axis.set_ylabel("Conservation error [%]")
+    mad_axis.set_ylabel(
+        "Normalized MAD = MAD / |median|",
+        color="tab:purple",
+    )
+    mad_axis.tick_params(axis="y", labelcolor="tab:purple")
+
+    raw_axis.set_title(
+        f"{title}: {name}\n"
+        "Saved short- and long-window normalized MAD"
+    )
+    apply_standard_axes(raw_axis)
+
+    handles = [
+        raw_artist,
+        short_median_line,
+        long_median_line,
+        short_mad_line,
+        long_mad_line,
+    ]
+    raw_axis.legend(
+        handles=handles,
+        loc="best",
+        fontsize=9,
+    )
+
+    fig.subplots_adjust(right=0.88)
+    pdf.savefig(fig, bbox_inches="tight", dpi=150)
+    plt.close(fig)
+
+
+def median_scale_saved_mad(
+    iterations,
+    values,
+    label,
+    baseline_iteration_count=MAD_SCALE_BASELINE_ITERATION_COUNT,
+):
+    """
+    Scale a saved MAD history using its median over the first iteration span.
+
+    If the first available iteration is t0 and baseline_iteration_count is
+    100, the scale is calculated using finite values from iteration numbers:
+
+        t0 <= iteration <= t0 + 99
+
+    This is based on iteration numbers, not simply the first 100 stored rows.
+    """
+    iterations = np.asarray(iterations, dtype=float)
+    values = np.asarray(values, dtype=float)
+
+    validate_history_shape(
+        values,
+        iterations,
+        f"{label} scaling history",
+    )
+
+    require_positive(
+        baseline_iteration_count,
+        "baseline_iteration_count",
+    )
+    baseline_iteration_count = int(baseline_iteration_count)
+
+    finite_iterations = np.isfinite(iterations)
+    if not np.any(finite_iterations):
+        raise ValueError(
+            f"Cannot median-scale {label}: no finite iterations were found."
+        )
+
+    first_iteration = float(np.min(iterations[finite_iterations]))
+    last_baseline_iteration = (
+        first_iteration + baseline_iteration_count - 1
+    )
+
+    baseline_mask = (
+        np.isfinite(iterations)
+        & np.isfinite(values)
+        & (iterations >= first_iteration)
+        & (iterations <= last_baseline_iteration)
+    )
+    baseline_values = values[baseline_mask]
+
+    if baseline_values.size == 0:
+        raise ValueError(
+            f"Cannot median-scale {label}: no finite MAD values were found "
+            f"from iteration {first_iteration:g} through "
+            f"{last_baseline_iteration:g}."
+        )
+
+    median_value = float(np.median(baseline_values))
+
+    if (
+        not np.isfinite(median_value)
+        or median_value
+        <= ROLLING_MEDIAN_STAT_MIN_BASELINE_MAGNITUDE
+    ):
+        raise ValueError(
+            f"Cannot median-scale {label}: the baseline median MAD is "
+            f"{median_value:.17e}, which is not greater than "
+            "ROLLING_MEDIAN_STAT_MIN_BASELINE_MAGNITUDE "
+            f"({ROLLING_MEDIAN_STAT_MIN_BASELINE_MAGNITUDE:.17e}). "
+            f"The baseline used {baseline_values.size} finite values from "
+            f"iteration {first_iteration:g} through "
+            f"{last_baseline_iteration:g}."
+        )
+
+    scaled_values = np.full(values.shape, np.nan, dtype=float)
+    finite_values = np.isfinite(values)
+    scaled_values[finite_values] = (
+        values[finite_values] / median_value
+    )
+
+    baseline_information = {
+        "first_iteration": first_iteration,
+        "last_iteration": last_baseline_iteration,
+        "sample_count": int(baseline_values.size),
+    }
+
+    return scaled_values, median_value, baseline_information
+
+
+def plot_median_scaled_saved_mad_metric(
+    iterations,
+    raw,
+    short_median,
+    long_median,
+    short_mad,
+    long_mad,
+    name,
+    title,
+    pdf,
+    logy=False,
+):
+    """
+    Plot short- and long-window MAD histories after per-variable scaling.
+
+    The short and long MAD histories are scaled independently:
+
+        short_scaled = short_MAD / baseline_median(short_MAD)
+        long_scaled  = long_MAD / baseline_median(long_MAD)
+
+    Each baseline median is computed for this variable using finite MAD values
+    from the first MAD_SCALE_BASELINE_ITERATION_COUNT iteration numbers in the
+    active plotting range.
+
+    The raw conservation error and saved short/long error medians remain
+    unscaled on the left axis. The scaled MAD histories share the right axis.
+    """
+    iterations = np.asarray(iterations, dtype=float)
+    raw = np.asarray(raw, dtype=float)
+    short_median = np.asarray(short_median, dtype=float)
+    long_median = np.asarray(long_median, dtype=float)
+    short_mad = np.asarray(short_mad, dtype=float)
+    long_mad = np.asarray(long_mad, dtype=float)
+
+    validate_history_shape(
+        raw,
+        iterations,
+        f"{name} raw conservation error",
+    )
+    validate_history_shape(
+        short_median,
+        iterations,
+        f"{name} short saved median",
+    )
+    validate_history_shape(
+        long_median,
+        iterations,
+        f"{name} long saved median",
+    )
+    validate_history_shape(
+        short_mad,
+        iterations,
+        f"{name} short saved MAD",
+    )
+    validate_history_shape(
+        long_mad,
+        iterations,
+        f"{name} long saved MAD",
+    )
+
+    (
+        short_scaled_mad,
+        short_mad_scale,
+        short_baseline_info,
+    ) = median_scale_saved_mad(
+        iterations,
+        short_mad,
+        f"{name} short-window MAD",
+    )
+    (
+        long_scaled_mad,
+        long_mad_scale,
+        long_baseline_info,
+    ) = median_scale_saved_mad(
+        iterations,
+        long_mad,
+        f"{name} long-window MAD",
+    )
+
+    short_mad_plot = (
+        positive_or_nan(short_scaled_mad)
+        if logy
+        else short_scaled_mad
+    )
+    long_mad_plot = (
+        positive_or_nan(long_scaled_mad)
+        if logy
+        else long_scaled_mad
+    )
+
+    fig, raw_axis = plt.subplots(figsize=(12, 7))
+    mad_axis = raw_axis.twinx()
+
+    raw_axis.set_zorder(1)
+    mad_axis.set_zorder(2)
+    mad_axis.patch.set_visible(False)
+
+    raw_artist = raw_axis.scatter(
+        iterations,
+        raw,
+        color="0.65",
+        s=9,
+        alpha=0.35,
+        label="Raw conservation error",
+        rasterized=True,
+        zorder=1,
+    )
+
+    short_median_line, = raw_axis.plot(
+        iterations,
+        short_median,
+        color="tab:green",
+        linewidth=1.7,
+        linestyle="--",
+        alpha=0.90,
+        label="Short-window error median (100)",
+        zorder=2,
+    )
+
+    long_median_line, = raw_axis.plot(
+        iterations,
+        long_median,
+        color="darkgreen",
+        linewidth=2.3,
+        linestyle="-.",
+        alpha=0.95,
+        label="Long-window error median (1000)",
+        zorder=3,
+    )
+
+    long_mad_line, = mad_axis.plot(
+        iterations,
+        long_mad_plot,
+        color="tab:purple",
+        linewidth=2.0,
+        linestyle="-",
+        alpha=0.80,
+        label=(
+            "Long MAD / baseline median "
+            f"[scale={long_mad_scale:.3e}, "
+            f"n={long_baseline_info['sample_count']}]"
+        ),
+        zorder=4,
+    )
+
+    short_mad_line, = mad_axis.plot(
+        iterations,
+        short_mad_plot,
+        color="tab:orange",
+        linewidth=2.0,
+        linestyle="--",
+        alpha=1.0,
+        label=(
+            "Short MAD / baseline median "
+            f"[scale={short_mad_scale:.3e}, "
+            f"n={short_baseline_info['sample_count']}]"
+        ),
+        zorder=5,
+    )
+
+    # A value of one means that the current MAD equals this variable's median
+    # MAD value over the selected iteration range.
+    baseline_line = mad_axis.axhline(
+        1.0,
+        color="black",
+        linewidth=1.2,
+        linestyle=":",
+        alpha=0.85,
+        label="Median-scaled baseline = 1",
+        zorder=3,
+    )
+
+    finite_raw = raw[np.isfinite(raw)]
+    if finite_raw.size and np.all(finite_raw > 0):
+        raw_axis.set_yscale("log")
+
+    if logy:
+        mad_axis.set_yscale("log")
+
+    raw_axis.set_ylabel("Conservation error [%]")
+    mad_axis.set_ylabel(
+        "MAD / first-100-iteration median(MAD)",
+        color="tab:purple",
+    )
+    mad_axis.tick_params(
+        axis="y",
+        labelcolor="tab:purple",
+    )
+
+    raw_axis.set_title(
+        f"{title}: {name}\n"
+        "Per-variable MAD scaled by first "
+        f"{MAD_SCALE_BASELINE_ITERATION_COUNT} iterations"
+    )
+    apply_standard_axes(raw_axis)
+
+    handles = [
+        raw_artist,
+        short_median_line,
+        long_median_line,
+        short_mad_line,
+        long_mad_line,
+        baseline_line,
+    ]
+    raw_axis.legend(
+        handles=handles,
+        loc="best",
+        fontsize=8,
+    )
+
+    fig.subplots_adjust(right=0.88)
+    pdf.savefig(
+        fig,
+        bbox_inches="tight",
+        dpi=150,
+    )
+    plt.close(fig)
 
 
 def plot_rolling_metrics(iterations, raw, title, name, pdf):
@@ -1086,34 +1618,72 @@ def plot_rom_conservation_errors(
             "Conservation percent-error and saved-MA files are not aligned."
         )
 
-    saved_mad_iterations = None
-    saved_median = None
-    saved_normalized_mad = None
-    if is_plot_enabled("saved_rolling_normalized_mad_median"):
-        saved_mad_iterations, saved_mad_columns = load_error_signal_file(
-            rom_error_dir / "error_cons_mad.txt",
+    def load_saved_mad_history(filename):
+        mad_iterations, mad_columns = load_error_signal_file(
+            rom_error_dir / filename,
             active_range,
             delimiter,
         )
-        expected_saved_mad_columns = 2 * values.shape[1]
-        if saved_mad_columns.shape[1] != expected_saved_mad_columns:
+
+        number_of_variables = values.shape[1]
+        expected_columns = 2 * number_of_variables
+
+        if mad_columns.shape[1] != expected_columns:
             raise ValueError(
-                "Expected error_cons_mad.txt to contain "
-                f"{expected_saved_mad_columns} value columns: "
-                f"{values.shape[1]} medians followed by "
-                f"{values.shape[1]} normalized MAD values; received "
-                f"{saved_mad_columns.shape[1]}."
+                f"Expected {filename} to contain "
+                f"{expected_columns} value columns: "
+                f"{number_of_variables} medians followed by "
+                f"{number_of_variables} normalized MAD values; received "
+                f"{mad_columns.shape[1]}."
             )
-        if not np.allclose(
+
+        if iterations.shape != mad_iterations.shape or not np.allclose(
             iterations,
-            saved_mad_iterations,
+            mad_iterations,
             atol=1.0e-9,
         ):
             raise ValueError(
-                "Conservation percent-error and saved-MAD files are not aligned."
+                "Conservation percent-error and "
+                f"{filename} are not aligned."
             )
-        saved_median = saved_mad_columns[:, :values.shape[1]]
-        saved_normalized_mad = saved_mad_columns[:, values.shape[1]:]
+
+        medians = mad_columns[:, :number_of_variables]
+        normalized_mads = mad_columns[:, number_of_variables:]
+
+        return mad_iterations, medians, normalized_mads
+
+    saved_mad_iterations = None
+    saved_median = None
+    saved_normalized_mad = None
+
+    saved_mad_long_iterations = None
+    saved_median_long = None
+    saved_normalized_mad_long = None
+
+    if (
+        is_plot_enabled("saved_rolling_normalized_mad_median")
+        or is_plot_enabled("saved_median_scaled_mad")
+    ):
+        (
+            saved_mad_iterations,
+            saved_median,
+            saved_normalized_mad,
+        ) = load_saved_mad_history("error_cons_mad.txt")
+
+        (
+            saved_mad_long_iterations,
+            saved_median_long,
+            saved_normalized_mad_long,
+        ) = load_saved_mad_history("error_cons_mad_long.txt")
+
+        if not np.allclose(
+            saved_mad_iterations,
+            saved_mad_long_iterations,
+            atol=1.0e-9,
+        ):
+            raise ValueError(
+                "Short- and long-window saved-MAD files are not aligned."
+            )
 
     values = np.abs(values)
     saved_ma = np.abs(saved_ma)
@@ -1182,18 +1752,31 @@ def plot_rom_conservation_errors(
             save_figure(pdf, fig, 150)
 
         if is_plot_enabled("saved_rolling_normalized_mad_median"):
-            plot_single_rolling_metric(
-                saved_mad_iterations,
-                raw,
-                saved_median[:, i],
-                saved_normalized_mad[:, i],
-                name,
-                "ROM Percent Conservation Error",
-                "Rolling normalized MAD = MAD / |median|",
-                "Saved rolling normalized MAD about median (1000)",
-                "tab:brown",
-                pdf,
-                ROLLING_NORMALIZED_MAD_LOGY,
+            plot_combined_saved_mad_metric(
+                iterations=saved_mad_iterations,
+                raw=raw,
+                short_median=saved_median[:, i],
+                long_median=saved_median_long[:, i],
+                short_mad=saved_normalized_mad[:, i],
+                long_mad=saved_normalized_mad_long[:, i],
+                name=name,
+                title="ROM Percent Conservation Error",
+                pdf=pdf,
+                logy=ROLLING_NORMALIZED_MAD_LOGY,
+            )
+
+        if is_plot_enabled("saved_median_scaled_mad"):
+            plot_median_scaled_saved_mad_metric(
+                iterations=saved_mad_iterations,
+                raw=raw,
+                short_median=saved_median[:, i],
+                long_median=saved_median_long[:, i],
+                short_mad=saved_normalized_mad[:, i],
+                long_mad=saved_normalized_mad_long[:, i],
+                name=name,
+                title="ROM Percent Conservation Error",
+                pdf=pdf,
+                logy=ROLLING_NORMALIZED_MAD_LOGY,
             )
 
         plot_rolling_metrics(
@@ -1588,6 +2171,11 @@ def run_range(args, active_range):
             print(f"Warning: ignoring invalid counter file {counter_file}: {error}")
 
     with PdfPages(pdf_filename) as pdf:
+        if is_plot_enabled("sampling_frequency"):
+            plot_sampling_frequency(
+                rom_error_dir, pdf, active_range, args.error_delimiter,
+            )
+
         if is_plot_enabled("fom_rerun_history"):
             if counter_iterations is None:
                 print(f"Warning: FOM-rerun counter file unavailable: {counter_file}")
@@ -1624,6 +2212,7 @@ def run_range(args, active_range):
                 "winsorized_mean_comparison",
                 "histogram_density_band",
                 "saved_rolling_normalized_mad_median",
+                "saved_median_scaled_mad",
                 "rolling_normalized_mad_median",
                 "rolling_cv",
             )

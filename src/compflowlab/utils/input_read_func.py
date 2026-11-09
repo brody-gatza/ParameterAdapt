@@ -185,5 +185,7 @@ def init_solver_param(args,input_param):
     solver_param['parameter_adapt']       = eval(input_param['parameter_adapt'])
     solver_param['force_FOM']             = eval(input_param['force_FOM'])
     solver_param['stencil']               = int(input_param['stencil'])
+    solver_param['upper_bound']           = float(input_param['upper_bound'])
+    solver_param['lower_bound']           = float(input_param['lower_bound'])
 
     return solver_param

@@ -544,7 +544,7 @@ if __name__ == '__main__':
     # ============================================================
 
     start_iter = 0
-    step_iter  = 1
+    step_iter  = 25
     end_iter   = 500000
 
     step_plot  = 1
@@ -971,7 +971,7 @@ if __name__ == '__main__':
                                 markeredgewidth=1.8,
                                 ms=7,
                                 zorder=10,
-                                label='sampled solver cells'
+                                label='sampled cells'
                             )
 
                             ax.set_ylabel(y_label)
@@ -980,34 +980,15 @@ if __name__ == '__main__':
                             # Limits are determined from FOM data only.
                             ax.set_ylim([y_min, y_max])
 
-                            ax.legend(
+                            legend = ax.legend(
                                 loc='center left',
                                 bbox_to_anchor=(1.02, 0.5),
                                 borderaxespad=0,
-                                fontsize=10
+                                fontsize=10,
+                                title=f'Iteration: {actual_iter}'
                             )
 
                             ax.grid(which='both')
-
-                            text_box = ax.text(
-                                0.02,
-                                0.95,
-                                (
-                                    f'Case: {rom_name}\n'
-                                    f'Variable: {var_name}\n'
-                                    f'Iteration: {actual_iter}\n'
-                                    f'Percent error norm: {error_percent_norm:.6e} %'
-                                ),
-                                transform=ax.transAxes,
-                                fontsize=11,
-                                verticalalignment='top',
-                                bbox=dict(
-                                    boxstyle='round',
-                                    facecolor='white',
-                                    alpha=0.85,
-                                    edgecolor='black'
-                                )
-                            )
 
                         else:
 
@@ -1015,13 +996,8 @@ if __name__ == '__main__':
                             p2.set_ydata(rom_state_vector)
                             p3.set_data(sample_x, sample_y)
 
-                            text_box.set_text(
-                                (
-                                    f'Case: {rom_name}\n'
-                                    f'Variable: {var_name}\n'
-                                    f'Iteration: {actual_iter}\n'
-                                    f'Percent error norm: {error_percent_norm:.6e} %'
-                                )
+                            legend.set_title(
+                                f'Iteration: {actual_iter}'
                             )
 
                         plt.tight_layout()
