@@ -30,6 +30,7 @@ PLOT_ENABLED = {
     "histogram_density_band": False,
     "saved_rolling_normalized_mad_median": True,
     "saved_median_scaled_mad": False,
+    "rolling_log10_mad": False,
     "rolling_normalized_mad_median": False,
     "rolling_cv": False,
     "interpolation_error_signals": False,
@@ -41,7 +42,7 @@ CELL_VOLUME = 1.0
 # Inclusive ranges. Use None or [] for one PDF containing all iterations.
 PLOT_ITERATION_RANGES = [(0, 100_000),
                             (0, 20_000),
-                            (0, 500_000)]
+                            (35_000, 55_000)]
 
 PRIMITIVE_FIELD_NAMES = [
     "Density",
@@ -63,6 +64,14 @@ SAMPLING_FREQUENCY_AVERAGE_WINDOW = 1000
 ROLLING_MEDIAN_STAT_WINDOWS = (1000,)
 ROLLING_MEDIAN_STAT_MIN_BASELINE_MAGNITUDE = 1.0e-30
 ROLLING_NORMALIZED_MAD_LOGY = False
+
+# Rolling-window lengths used for the log10 conservation-error MAD plots.
+# The first entry is the short window and the second is the long window.
+LOG10_MAD_WINDOWS = (100, 1000)
+
+# Show the long-window median and long-window MAD curves on saved MAD plots.
+# False hides both long-window curves while preserving the short-window curves.
+SHOW_LONG_WINDOW_CURVES = False
 
 # Number of iteration numbers used to establish the per-variable MAD scales.
 # Starting at the first iteration t0 in the active plot range, the baseline
@@ -132,6 +141,7 @@ def validate_configuration() -> None:
         "histogram_density_band",
         "saved_rolling_normalized_mad_median",
         "saved_median_scaled_mad",
+        "rolling_log10_mad",
         "rolling_normalized_mad_median",
         "rolling_cv",
         "interpolation_error_signals",
@@ -149,8 +159,27 @@ def validate_configuration() -> None:
     for index, item in enumerate(configured_ranges()):
         validate_iteration_range(item, index)
 
-    for window in (*ROLLING_CV_WINDOWS, *ROLLING_MEDIAN_STAT_WINDOWS):
+    for window in (
+        *ROLLING_CV_WINDOWS,
+        *ROLLING_MEDIAN_STAT_WINDOWS,
+        *LOG10_MAD_WINDOWS,
+    ):
         require_positive(window, "rolling window")
+
+    if len(LOG10_MAD_WINDOWS) != 2:
+        raise ValueError(
+            "LOG10_MAD_WINDOWS must contain exactly two values: "
+            "(short_window, long_window)."
+        )
+    if not all(isinstance(window, int) for window in LOG10_MAD_WINDOWS):
+        raise TypeError(
+            "Every LOG10_MAD_WINDOWS entry must be an integer."
+        )
+    if LOG10_MAD_WINDOWS[0] > LOG10_MAD_WINDOWS[1]:
+        raise ValueError(
+            "The short LOG10_MAD_WINDOWS entry must not exceed "
+            "the long entry."
+        )
     if ROLLING_CV_MIN_MEAN_MAGNITUDE < 0:
         raise ValueError("ROLLING_CV_MIN_MEAN_MAGNITUDE must be nonnegative.")
     if ROLLING_MEDIAN_STAT_MIN_BASELINE_MAGNITUDE < 0:
@@ -161,6 +190,8 @@ def validate_configuration() -> None:
         raise TypeError("ROLLING_CV_LOGY must be True or False.")
     if not isinstance(ROLLING_NORMALIZED_MAD_LOGY, bool):
         raise TypeError("ROLLING_NORMALIZED_MAD_LOGY must be True or False.")
+    if not isinstance(SHOW_LONG_WINDOW_CURVES, bool):
+        raise TypeError("SHOW_LONG_WINDOW_CURVES must be True or False.")
 
     require_positive(
         MAD_SCALE_BASELINE_ITERATION_COUNT,
@@ -499,6 +530,57 @@ def rolling_median_spread_statistics(values, window, minimum_baseline_magnitude)
     return median, mad, normalized_mad, spread, coefficient_of_variation
 
 
+
+def rolling_log10_median_mad(values, window):
+    """
+    Compute a causal rolling median and MAD in log10 absolute-error space.
+
+    For each index i, finite positive errors in the causal window are
+    transformed according to:
+
+        log_error = log10(|true - actual|)
+
+    The returned statistics are:
+
+        log10_median[i] = median(log_error)
+        log10_mad[i] = median(abs(log_error - log10_median[i]))
+
+    The MAD is measured in decades. It is not normalized by the median because
+    log-space differences already represent multiplicative changes in the
+    original conservation error.
+
+    Zero, NaN, and infinite absolute errors are excluded because they
+    cannot be represented as finite log10 values. Negative input values
+    are also excluded; callers should convert signed differences to
+    absolute errors before calling this function.
+    """
+    require_positive(window, "log10-MAD rolling window")
+
+    values = np.asarray(values, dtype=float)
+    log_values = np.full(values.shape, np.nan, dtype=float)
+
+    valid = np.isfinite(values) & (values > 0.0)
+    log_values[valid] = np.log10(values[valid])
+
+    log10_median = np.full(values.shape, np.nan, dtype=float)
+    log10_mad = np.full(values.shape, np.nan, dtype=float)
+    window = int(window)
+
+    for index in range(len(values)):
+        start = max(0, index - window + 1)
+        current = log_values[start:index + 1]
+        current = current[np.isfinite(current)]
+
+        if current.size == 0:
+            continue
+
+        center = np.median(current)
+        log10_median[index] = center
+        log10_mad[index] = np.median(np.abs(current - center))
+
+    return log10_median, log10_mad
+
+
 def compute_conservative_integrals(fom, rom):
     validate_matching_3d_arrays(fom, rom, "conservative data")
     names = [
@@ -771,7 +853,29 @@ def plot_primitive_metrics(iterations, relative_l2, correlation, names, pdf):
         correlation_axis.set_ylim(1, 0)
         error_axis.set_title(name)
         apply_standard_axes(error_axis)
-        error_axis.legend(handles=[error_line, correlation_line], loc="best")
+
+        # Use the Pearson-correlation axis for horizontal gridlines.
+        # Keep the vertical gridlines from the shared iteration axis.
+        error_axis.grid(False, which="both", axis="y")
+        correlation_axis.minorticks_on()
+        correlation_axis.grid(
+            which="major",
+            axis="y",
+            linestyle="-",
+            alpha=0.35,
+        )
+        correlation_axis.grid(
+            which="minor",
+            axis="y",
+            linestyle=":",
+            alpha=0.20,
+        )
+        correlation_axis.set_axisbelow(True)
+
+        error_axis.legend(
+            handles=[error_line, correlation_line],
+            loc="best",
+        )
         save_figure(pdf, fig)
 
 
@@ -837,7 +941,7 @@ def plot_single_rolling_metric(
         color="0.55",
         s=9,
         alpha=0.45,
-        label="Raw error signal",
+        label=r"Raw absolute conservation error",
         rasterized=True,
         zorder=1,
     )
@@ -873,7 +977,9 @@ def plot_single_rolling_metric(
     if logy:
         metric_axis.set_yscale("log")
 
-    raw_axis.set_ylabel("Raw error signal")
+    raw_axis.set_ylabel(
+        r"Absolute conservation error"
+    )
     metric_axis.set_ylabel(metric_label, color=color)
     metric_axis.tick_params(axis="y", labelcolor=color)
 
@@ -950,7 +1056,7 @@ def plot_combined_saved_mad_metric(
         color="0.65",
         s=9,
         alpha=0.35,
-        label="Raw conservation error",
+        label=r"Raw absolute conservation error",
         rasterized=True,
         zorder=1,
     )
@@ -962,20 +1068,22 @@ def plot_combined_saved_mad_metric(
         linewidth=1.7,
         linestyle="--",
         alpha=0.90,
-        label="Short-window median (100)",
+        label="Short-window absolute-error median (100)",
         zorder=2,
     )
 
-    long_median_line, = raw_axis.plot(
-        iterations,
-        long_median,
-        color="darkgreen",
-        linewidth=2.3,
-        linestyle="-.",
-        alpha=0.95,
-        label="Long-window median (1000)",
-        zorder=3,
-    )
+    long_median_line = None
+    if SHOW_LONG_WINDOW_CURVES:
+        long_median_line, = raw_axis.plot(
+            iterations,
+            long_median,
+            color="darkgreen",
+            linewidth=2.3,
+            linestyle="-.",
+            alpha=0.95,
+            label="Long-window absolute-error median (1000)",
+            zorder=3,
+        )
 
     short_mad_plot = positive_or_nan(short_mad) if logy else short_mad
     long_mad_plot = positive_or_nan(long_mad) if logy else long_mad
@@ -990,15 +1098,17 @@ def plot_combined_saved_mad_metric(
         zorder=4,
     )
 
-    long_mad_line, = mad_axis.plot(
-        iterations,
-        long_mad_plot,
-        color="tab:purple",
-        linewidth=2.5,
-        alpha=0.95,
-        label="Long-window normalized MAD (1000)",
-        zorder=5,
-    )
+    long_mad_line = None
+    if SHOW_LONG_WINDOW_CURVES:
+        long_mad_line, = mad_axis.plot(
+            iterations,
+            long_mad_plot,
+            color="tab:purple",
+            linewidth=2.5,
+            alpha=0.95,
+            label="Long-window normalized MAD (1000)",
+            zorder=5,
+        )
 
     finite_raw = raw[np.isfinite(raw)]
     if finite_raw.size and np.all(finite_raw > 0):
@@ -1007,26 +1117,62 @@ def plot_combined_saved_mad_metric(
     if logy:
         mad_axis.set_yscale("log")
 
-    raw_axis.set_ylabel("Conservation error [%]")
+    raw_axis.set_ylabel(
+        r"Absolute conservation error"
+    )
+
+    # Match the MAD axis to the short-window MAD curve.
+    mad_axis_color = "tab:brown"
     mad_axis.set_ylabel(
         "Normalized MAD = MAD / |median|",
-        color="tab:purple",
+        color=mad_axis_color,
     )
-    mad_axis.tick_params(axis="y", labelcolor="tab:purple")
+    mad_axis.tick_params(
+        axis="y",
+        colors=mad_axis_color,
+    )
+    mad_axis.spines["right"].set_color(mad_axis_color)
 
+    window_description = (
+        "Saved short- and long-window normalized MAD"
+        if SHOW_LONG_WINDOW_CURVES
+        else "Saved short-window normalized MAD"
+    )
     raw_axis.set_title(
         f"{title}: {name}\n"
-        "Saved short- and long-window normalized MAD"
+        f"{window_description}"
     )
     apply_standard_axes(raw_axis)
+
+    # Replace left-axis horizontal gridlines with horizontal gridlines based
+    # on the right MAD-axis ticks. The vertical gridlines remain tied to the
+    # shared iteration x-axis.
+    raw_axis.grid(False, which="both", axis="y")
+    mad_axis.minorticks_on()
+    mad_axis.grid(
+        which="major",
+        axis="y",
+        linestyle="-",
+        alpha=0.35,
+    )
+    mad_axis.grid(
+        which="minor",
+        axis="y",
+        linestyle=":",
+        alpha=0.20,
+    )
+    mad_axis.set_axisbelow(True)
 
     handles = [
         raw_artist,
         short_median_line,
-        long_median_line,
         short_mad_line,
-        long_mad_line,
     ]
+    if long_median_line is not None:
+        handles.append(long_median_line)
+    if long_mad_line is not None:
+        handles.append(long_mad_line)
+
     raw_axis.legend(
         handles=handles,
         loc="best",
@@ -1230,7 +1376,7 @@ def plot_median_scaled_saved_mad_metric(
         color="0.65",
         s=9,
         alpha=0.35,
-        label="Raw conservation error",
+        label=r"Raw absolute conservation error",
         rasterized=True,
         zorder=1,
     )
@@ -1242,35 +1388,39 @@ def plot_median_scaled_saved_mad_metric(
         linewidth=1.7,
         linestyle="--",
         alpha=0.90,
-        label="Short-window error median (100)",
+        label="Short-window absolute-error median (100)",
         zorder=2,
     )
 
-    long_median_line, = raw_axis.plot(
-        iterations,
-        long_median,
-        color="darkgreen",
-        linewidth=2.3,
-        linestyle="-.",
-        alpha=0.95,
-        label="Long-window error median (1000)",
-        zorder=3,
-    )
+    long_median_line = None
+    if SHOW_LONG_WINDOW_CURVES:
+        long_median_line, = raw_axis.plot(
+            iterations,
+            long_median,
+            color="darkgreen",
+            linewidth=2.3,
+            linestyle="-.",
+            alpha=0.95,
+            label="Long-window absolute-error median (1000)",
+            zorder=3,
+        )
 
-    long_mad_line, = mad_axis.plot(
-        iterations,
-        long_mad_plot,
-        color="tab:purple",
-        linewidth=2.0,
-        linestyle="-",
-        alpha=0.80,
-        label=(
-            "Long MAD / baseline median "
-            f"[scale={long_mad_scale:.3e}, "
-            f"n={long_baseline_info['sample_count']}]"
-        ),
-        zorder=4,
-    )
+    long_mad_line = None
+    if SHOW_LONG_WINDOW_CURVES:
+        long_mad_line, = mad_axis.plot(
+            iterations,
+            long_mad_plot,
+            color="tab:purple",
+            linewidth=2.0,
+            linestyle="-",
+            alpha=0.80,
+            label=(
+                "Long MAD / baseline median "
+                f"[scale={long_mad_scale:.3e}, "
+                f"n={long_baseline_info['sample_count']}]"
+            ),
+            zorder=4,
+        )
 
     short_mad_line, = mad_axis.plot(
         iterations,
@@ -1306,15 +1456,21 @@ def plot_median_scaled_saved_mad_metric(
     if logy:
         mad_axis.set_yscale("log")
 
-    raw_axis.set_ylabel("Conservation error [%]")
+    raw_axis.set_ylabel(
+        r"Absolute conservation error"
+    )
+
+    # Match the MAD axis to the short-window scaled-MAD curve.
+    mad_axis_color = "tab:orange"
     mad_axis.set_ylabel(
         "MAD / first-100-iteration median(MAD)",
-        color="tab:purple",
+        color=mad_axis_color,
     )
     mad_axis.tick_params(
         axis="y",
-        labelcolor="tab:purple",
+        colors=mad_axis_color,
     )
+    mad_axis.spines["right"].set_color(mad_axis_color)
 
     raw_axis.set_title(
         f"{title}: {name}\n"
@@ -1323,18 +1479,256 @@ def plot_median_scaled_saved_mad_metric(
     )
     apply_standard_axes(raw_axis)
 
+    # Replace left-axis horizontal gridlines with horizontal gridlines based
+    # on the right MAD-axis ticks. The vertical gridlines remain tied to the
+    # shared iteration x-axis.
+    raw_axis.grid(False, which="both", axis="y")
+    mad_axis.minorticks_on()
+    mad_axis.grid(
+        which="major",
+        axis="y",
+        linestyle="-",
+        alpha=0.35,
+    )
+    mad_axis.grid(
+        which="minor",
+        axis="y",
+        linestyle=":",
+        alpha=0.20,
+    )
+    mad_axis.set_axisbelow(True)
+
     handles = [
         raw_artist,
         short_median_line,
-        long_median_line,
         short_mad_line,
-        long_mad_line,
-        baseline_line,
     ]
+    if long_median_line is not None:
+        handles.append(long_median_line)
+    if long_mad_line is not None:
+        handles.append(long_mad_line)
+    handles.append(baseline_line)
+
     raw_axis.legend(
         handles=handles,
         loc="best",
         fontsize=8,
+    )
+
+    fig.subplots_adjust(right=0.88)
+    pdf.savefig(
+        fig,
+        bbox_inches="tight",
+        dpi=150,
+    )
+    plt.close(fig)
+
+
+
+def plot_log10_mad_metric(
+    iterations,
+    raw,
+    name,
+    title,
+    pdf,
+):
+    """
+    Plot raw absolute conservation error with rolling log10 medians and MADs.
+
+    The left axis contains:
+
+        raw |true - actual| conservation error
+        10 ** median(log10(|true - actual|))
+
+    The left axis is logarithmic because the raw error is positive and may span
+    several orders of magnitude.
+
+    The right axis contains:
+
+        median(abs(
+            log10(|true - actual|)
+            - median(log10(|true - actual|))
+        ))
+
+    Therefore, the right-axis MAD is measured in decades. For example, a
+    log10 MAD of approximately 0.301 corresponds to a factor-of-two
+    multiplicative spread because 10 ** 0.301 is approximately 2.
+    """
+    iterations = np.asarray(iterations, dtype=float)
+    raw = np.asarray(raw, dtype=float)
+
+    validate_history_shape(
+        raw,
+        iterations,
+        f"{name} raw conservation error for log10 MAD",
+    )
+
+    short_window, long_window = LOG10_MAD_WINDOWS
+
+    short_log_median, short_log_mad = rolling_log10_median_mad(
+        raw,
+        short_window,
+    )
+    long_log_median, long_log_mad = rolling_log10_median_mad(
+        raw,
+        long_window,
+    )
+
+    # Back-transform the log10 medians so that the median baselines can be
+    # compared directly against the raw errors on the logarithmic left axis.
+    short_error_median = np.full(raw.shape, np.nan, dtype=float)
+    long_error_median = np.full(raw.shape, np.nan, dtype=float)
+
+    valid_short_median = np.isfinite(short_log_median)
+    valid_long_median = np.isfinite(long_log_median)
+
+    short_error_median[valid_short_median] = (
+        10.0 ** short_log_median[valid_short_median]
+    )
+    long_error_median[valid_long_median] = (
+        10.0 ** long_log_median[valid_long_median]
+    )
+
+    fig, raw_axis = plt.subplots(figsize=(12, 7))
+    mad_axis = raw_axis.twinx()
+
+    raw_axis.set_zorder(1)
+    mad_axis.set_zorder(2)
+    mad_axis.patch.set_visible(False)
+
+    raw_artist = raw_axis.scatter(
+        iterations,
+        positive_or_nan(raw),
+        color="0.65",
+        s=9,
+        alpha=0.35,
+        label=r"Raw absolute conservation error",
+        rasterized=True,
+        zorder=1,
+    )
+
+    short_median_line, = raw_axis.plot(
+        iterations,
+        positive_or_nan(short_error_median),
+        color="tab:green",
+        linewidth=1.7,
+        linestyle="--",
+        alpha=0.90,
+        label=(
+            r"Short-window $10^{median(log_{10})} "
+            f"({short_window})"
+        ),
+        zorder=2,
+    )
+
+    long_median_line = None
+    if SHOW_LONG_WINDOW_CURVES:
+        long_median_line, = raw_axis.plot(
+            iterations,
+            positive_or_nan(long_error_median),
+            color="darkgreen",
+            linewidth=2.3,
+            linestyle="-.",
+            alpha=0.95,
+            label=(
+                r"Long-window $10^{median(log_{10})} "
+                f"({long_window})"
+            ),
+            zorder=3,
+        )
+
+    short_mad_line, = mad_axis.plot(
+        iterations,
+        short_log_mad,
+        color="tab:brown",
+        linewidth=1.8,
+        alpha=0.90,
+        label=(
+            r"Short-window MAD of $log_{10}$ "
+            f"({short_window})"
+        ),
+        zorder=4,
+    )
+
+    long_mad_line = None
+    if SHOW_LONG_WINDOW_CURVES:
+        long_mad_line, = mad_axis.plot(
+            iterations,
+            long_log_mad,
+            color="tab:purple",
+            linewidth=2.5,
+            alpha=0.95,
+            label=(
+                r"Long-window MAD of $log_{10}$ "
+                f"({long_window})"
+            ),
+            zorder=5,
+        )
+
+    # Raw error and the back-transformed median are both positive quantities.
+    raw_axis.set_yscale("log")
+    raw_axis.set_ylabel(
+        r"Absolute conservation error"
+    )
+
+    mad_axis_color = "tab:brown"
+    mad_axis.set_ylabel(
+        r"MAD of $log_{10}$ [decades]",
+        color=mad_axis_color,
+    )
+    mad_axis.tick_params(
+        axis="y",
+        colors=mad_axis_color,
+    )
+    mad_axis.spines["right"].set_color(mad_axis_color)
+    mad_axis.set_ylim(bottom=0.0)
+
+    window_description = (
+        "Short- and long-window log10 median and MAD"
+        if SHOW_LONG_WINDOW_CURVES
+        else "Short-window log10 median and MAD"
+    )
+    raw_axis.set_title(
+        f"{title}: {name}\n"
+        f"{window_description}"
+    )
+
+    apply_standard_axes(raw_axis)
+
+    # Use the log10-MAD right-axis ticks for horizontal gridlines while
+    # preserving the shared iteration gridlines from the left axis.
+    raw_axis.grid(False, which="both", axis="y")
+    mad_axis.minorticks_on()
+    mad_axis.grid(
+        which="major",
+        axis="y",
+        linestyle="-",
+        alpha=0.35,
+    )
+    mad_axis.grid(
+        which="minor",
+        axis="y",
+        linestyle=":",
+        alpha=0.20,
+    )
+    mad_axis.set_axisbelow(True)
+
+    handles = [
+        raw_artist,
+        short_median_line,
+        short_mad_line,
+    ]
+
+    if long_median_line is not None:
+        handles.append(long_median_line)
+
+    if long_mad_line is not None:
+        handles.append(long_mad_line)
+
+    raw_axis.legend(
+        handles=handles,
+        loc="best",
+        fontsize=9,
     )
 
     fig.subplots_adjust(right=0.88)
@@ -1442,7 +1836,7 @@ def plot_winsorized_mean_comparison(iterations, raw, title, name, pdf):
         color="0.65",
         s=9,
         alpha=0.22,
-        label="Raw conservation error",
+        label=r"Raw absolute conservation error",
         rasterized=True,
         zorder=1,
     )
@@ -1503,7 +1897,9 @@ def plot_winsorized_mean_comparison(iterations, raw, title, name, pdf):
         handles.append(line)
 
     axis.set_yscale("log")
-    axis.set_ylabel("Conservation error [%]")
+    axis.set_ylabel(
+        r"Absolute conservation error"
+    )
     axis.set_title(
         f"{title}: {name}\nCausal winsorized means and percentile bands "
         f"(window={WINSORIZED_MEAN_WINDOW})"
@@ -1581,7 +1977,9 @@ def plot_histogram_density_band_page(
         alpha=0.8,
     )
     axis.set_yscale("log")
-    axis.set_ylabel("Conservation error [%]")
+    axis.set_ylabel(
+        r"Absolute conservation error"
+    )
     axis.set_title(
         f"{title}: {name}\nSliding-histogram density band (window={window})"
     )
@@ -1599,7 +1997,7 @@ def plot_rom_conservation_errors(
 ):
     rom_error_dir = Path(rom_error_dir)
     iterations, values = load_error_signal_file(
-        rom_error_dir / "error_cons_perct.txt",
+        rom_error_dir / "error_cons.txt",
         active_range,
         delimiter,
     )
@@ -1615,7 +2013,8 @@ def plot_rom_conservation_errors(
         atol=1.0e-9,
     ):
         raise ValueError(
-            "Conservation percent-error and saved-MA files are not aligned."
+            "Raw absolute conservation-error and saved-MA files "
+            "are not aligned."
         )
 
     def load_saved_mad_history(filename):
@@ -1643,7 +2042,7 @@ def plot_rom_conservation_errors(
             atol=1.0e-9,
         ):
             raise ValueError(
-                "Conservation percent-error and "
+                "Raw absolute conservation-error and "
                 f"{filename} are not aligned."
             )
 
@@ -1717,7 +2116,7 @@ def plot_rom_conservation_errors(
                 color="tab:red",
                 s=10,
                 alpha=0.45,
-                label="ROM percent conservation error",
+                label=r"ROM absolute conservation error",
                 rasterized=True,
             )
             handles = [regular_artist]
@@ -1745,8 +2144,12 @@ def plot_rom_conservation_errors(
 
             if use_log:
                 axis.set_yscale("log")
-            axis.set_ylabel("Conservation error [%]")
-            axis.set_title(f"ROM Percent Conservation Error: {name}\n{label}")
+            axis.set_ylabel(
+                r"Absolute conservation error"
+            )
+            axis.set_title(
+                f"ROM Absolute Conservation Error: {name}\n{label}"
+            )
             apply_standard_axes(axis)
             axis.legend(handles=handles, loc="best")
             save_figure(pdf, fig, 150)
@@ -1760,7 +2163,7 @@ def plot_rom_conservation_errors(
                 short_mad=saved_normalized_mad[:, i],
                 long_mad=saved_normalized_mad_long[:, i],
                 name=name,
-                title="ROM Percent Conservation Error",
+                title="ROM Absolute Conservation Error",
                 pdf=pdf,
                 logy=ROLLING_NORMALIZED_MAD_LOGY,
             )
@@ -1774,15 +2177,24 @@ def plot_rom_conservation_errors(
                 short_mad=saved_normalized_mad[:, i],
                 long_mad=saved_normalized_mad_long[:, i],
                 name=name,
-                title="ROM Percent Conservation Error",
+                title="ROM Absolute Conservation Error",
                 pdf=pdf,
                 logy=ROLLING_NORMALIZED_MAD_LOGY,
+            )
+
+        if is_plot_enabled("rolling_log10_mad"):
+            plot_log10_mad_metric(
+                iterations,
+                raw,
+                name,
+                "ROM Absolute Conservation Error",
+                pdf,
             )
 
         plot_rolling_metrics(
             iterations,
             raw,
-            "ROM Percent Conservation Error",
+            "ROM Absolute Conservation Error",
             name,
             pdf,
         )
@@ -1791,7 +2203,7 @@ def plot_rom_conservation_errors(
             plot_winsorized_mean_comparison(
                 iterations,
                 raw,
-                "ROM Percent Conservation Error",
+                "ROM Absolute Conservation Error",
                 name,
                 pdf,
             )
@@ -1815,7 +2227,7 @@ def plot_rom_conservation_errors(
                 lower_edge,
                 upper_edge,
                 outside_band,
-                "ROM Percent Conservation Error",
+                "ROM Absolute Conservation Error",
                 name,
                 pdf,
                 HISTOGRAM_DENSITY_BAND_WINDOW,
@@ -1940,6 +2352,27 @@ def plot_interpolation_error_signals(
             correlation_axis.set_ylim(1, 0)
             signal_axis.set_title(f"{title}: {field_name}")
             apply_standard_axes(signal_axis)
+
+            # Use the Pearson-correlation axis for horizontal
+            # gridlines. The signal axis retains the shared vertical
+            # iteration gridlines.
+            signal_axis.grid(False, which="both", axis="y")
+            l2_axis.grid(False, which="both", axis="y")
+            correlation_axis.minorticks_on()
+            correlation_axis.grid(
+                which="major",
+                axis="y",
+                linestyle="-",
+                alpha=0.35,
+            )
+            correlation_axis.grid(
+                which="minor",
+                axis="y",
+                linestyle=":",
+                alpha=0.20,
+            )
+            correlation_axis.set_axisbelow(True)
+
             signal_axis.legend(
                 handles,
                 [handle.get_label() for handle in handles],
@@ -2213,6 +2646,7 @@ def run_range(args, active_range):
                 "histogram_density_band",
                 "saved_rolling_normalized_mad_median",
                 "saved_median_scaled_mad",
+                "rolling_log10_mad",
                 "rolling_normalized_mad_median",
                 "rolling_cv",
             )
