@@ -651,6 +651,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 rom_param['update_sampling_counter'] = 0
                 rom_param['sample_cycle_count'] = 0
                 rom_param['update_sampling_reset_counter'] = 0
+                rom_param['increase_interval'] = True
 
             # create a full-state copy
             rom_param['Q_bar'] = state['Q_cons'].copy()
@@ -663,44 +664,119 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
                 block_size = 5000
 
-                for i in range(2, 50):
-                    if i == 2:
-                        block_start = solver_param['FOM2ROM_trans_iter']
-                    else:
-                        block_start = actual_block_end
-                    nominal_block_end = (i - 1) * block_size
+                # ------------------------------------------------------------
+                # SAMPLING INTERVAL CONFIGURATION
+                # ------------------------------------------------------------
+                # Decreasing interval numbers:
+                # 20, 19, 18, ..., 2
+                # This samples progressively MORE frequently.
+                sampling_start = 20
+                sampling_stop = 2
 
-                    # Move nominal_block_end forward until it lands on the sampling schedule
-                    remainder = (nominal_block_end - block_start) % i
+                # Increasing interval numbers:
+                # 2, 3, 4, ..., 20
+                # This samples progressively LESS frequently.
+                #
+                # To use increasing interval numbers instead, change to:
+                #
+                # sampling_start = 2
+                # sampling_stop = 20
+                # ------------------------------------------------------------
 
-                    if remainder == 0:
-                        actual_block_end = nominal_block_end
-                    else:
-                        actual_block_end = nominal_block_end + (i - remainder)
+                if sampling_start <= 0 or sampling_stop <= 0:
+                    raise ValueError(
+                        "sampling_start and sampling_stop must both be positive integers."
+                    )
 
-                    # Optional but recommended: do not go past num_step
-                    actual_block_end = min(actual_block_end, solver_param['num_step'])
+                # Include both sampling_start and sampling_stop.
+                if sampling_start <= sampling_stop:
+                    sampling_intervals = range(
+                        sampling_start,
+                        sampling_stop + 1,
+                        1
+                    )
+                else:
+                    sampling_intervals = range(
+                        sampling_start,
+                        sampling_stop - 1,
+                        -1
+                    )
+
+                first_sampling_iter = int(solver_param['FOM2ROM_trans_iter'])
+                final_iteration = int(solver_param['num_step'])
+
+                if first_sampling_iter < 0:
+                    raise ValueError(
+                        "solver_param['FOM2ROM_trans_iter'] must be nonnegative."
+                    )
+
+                if final_iteration < first_sampling_iter:
+                    raise ValueError(
+                        "solver_param['num_step'] must be greater than or equal to "
+                        "solver_param['FOM2ROM_trans_iter']."
+                    )
+
+                resample_blocks = []
+                block_start = first_sampling_iter
+                last_sampling_interval = None
+
+                for sampling_interval in sampling_intervals:
+
+                    # Stop if the complete simulation range has already been covered.
+                    if block_start > final_iteration:
+                        break
+
+                    # Each sampling interval applies to one block_size-wide block.
+                    block_end = min(
+                        block_start + block_size,
+                        final_iteration + 1
+                    )
 
                     sampling_list = np.arange(
                         block_start,
-                        actual_block_end,
-                        i,
+                        block_end,
+                        sampling_interval,
                         dtype=int
                     )
 
-                    if i == 2:
-                        solver_param['resample_iter_list'] = sampling_list
-                    else:
-                        solver_param['resample_iter_list'] = np.append(
-                            solver_param['resample_iter_list'],
-                            sampling_list
-                        )
+                    if sampling_list.size > 0:
+                        resample_blocks.append(sampling_list)
 
-                    if actual_block_end >= solver_param['num_step']:
-                        break
+                    last_sampling_interval = sampling_interval
 
-                solver_param['resample_iter_list'] = np.unique(solver_param['resample_iter_list'])
-                sampling_adapt_freq = 2
+                    # The next block begins exactly where the current block ends.
+                    block_start = block_end
+
+                # If num_step extends beyond the configured interval sequence,
+                # continue sampling the remaining iterations using the final interval.
+                if (
+                    block_start <= final_iteration
+                    and last_sampling_interval is not None
+                ):
+                    remaining_sampling_list = np.arange(
+                        block_start,
+                        final_iteration + 1,
+                        last_sampling_interval,
+                        dtype=int
+                    )
+
+                    if remaining_sampling_list.size > 0:
+                        resample_blocks.append(remaining_sampling_list)
+
+                # Combine all blocks into one sorted integer array.
+                if resample_blocks:
+                    solver_param['resample_iter_list'] = np.unique(
+                        np.concatenate(resample_blocks)
+                    )
+                else:
+                    solver_param['resample_iter_list'] = np.array([], dtype=int)
+
+                # Store the interval used after all configured transitions.
+                sampling_adapt_freq = (
+                    last_sampling_interval
+                    if last_sampling_interval is not None
+                    else sampling_stop
+                )
 
             elif solver_param['force_FOM']:
                 start_FOM = 86000
@@ -1198,6 +1274,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
                     rom_param['error_cons_mad'] = MedianAbsoluteDeviation(100, solver_param['num_state_var'])
                     rom_param['error_cons_mad_long'] = MedianAbsoluteDeviation(1000, solver_param['num_state_var'])
+                    rom_param['error_cons_mad_ma'] = MovingAverage(1000, solver_param['num_state_var'])
 
                     rom_param['error_cons_perct_ma'] = MovingAverage(5000, solver_param['num_state_var'])
                     rom_param['error_cons_fom_iter_counter'] = 0
@@ -1313,11 +1390,13 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 # rom_param['error_cons_mad_long'].update(error_cons_perct)
                 rom_param['error_cons_mad'].update(error_cons)
                 rom_param['error_cons_mad_long'].update(error_cons)
+                rom_param['error_cons_mad_ma'].update(rom_param['error_cons_mad'].MAD)
 
                 # Write rolling medians first, followed by normalized MAD values.
                 error_cons_mad_output = np.concatenate((
                     rom_param['error_cons_mad'].center,
                     rom_param['error_cons_mad'].MAD,
+                    rom_param['error_cons_mad_ma'].avg,
                 ))
                 error_cons_mad_long_output = np.concatenate((
                     rom_param['error_cons_mad_long'].center,
@@ -1494,62 +1573,53 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
                 # Check if thresholds are exceeded
                 if solver_param['parameter_adapt']:
-                    if np.any((rom_param['error_cons_mad'].MAD[:(solver_param['num_state_var']-1)] >= solver_param['upper_bound']) | np.all(rom_param['error_cons_mad'].MAD[:(solver_param['num_state_var']-1)] <= solver_param['lower_bound'])):
 
-                        hard_upper_bound = 0.2
-                        if np.any(rom_param['error_cons_mad'].MAD[:(solver_param['num_state_var']-1)] >= solver_param['upper_bound']):
-                            
-                            # Increment the counter to reset to FOM
-                            if np.any(rom_param['error_cons_mad'].MAD[:(solver_param['num_state_var']-1)] >= hard_upper_bound):
+                    hard_reset_bound = 0.2
+                    if rom_param['error_cons_mad_ma'].avg[0] >= solver_param['upper_bound']:
+                    # if rom_param['error_cons_mad_ma'].avg[0] >= hard_reset_bound:
+                        rom_param['hard_reset'] = True
+                    else:
+                        rom_param['hard_reset'] = False
 
-                                rom_param['update_sampling_counter'] = 0
-                                rom_param['sample_cycle_count'] = 0
-                                rom_param['update_sampling_reset_counter'] += 1
+                    if rom_param['error_cons_mad'].MAD[0] >= 100:
+                    # if rom_param['error_cons_mad'].MAD[0] >= solver_param['upper_bound']:
+                        rom_param['decrease_interval'] = True
+                    else:
+                        rom_param['decrease_interval'] = False
 
-                                print('Reverting to FOM for ', solver_param['init_training_win'], ' iterations')
+                    if rom_param['error_cons_mad'].MAD[0] >= solver_param['lower_bound']:
+                        rom_param['increase_interval'] = False   
+                    
+                    if rom_param['hard_reset']:
 
-                                solver_param['unsampled_update_freq'] = 2
+                        print('Reverting to FOM for ', solver_param['init_training_win'], ' iterations')
 
-                                rom_param['error_cons_mad'].reset()
-                                rom_param['error_cons_mad_long'].reset()
+                        rom_param['update_sampling_counter'] = 0
+                        rom_param['sample_cycle_count'] = 0
+                        # rom_param['update_sampling_reset_counter'] += 1
 
-                                past_samples = solver_param['resample_iter_list'][solver_param['resample_iter_list'] <= iter]
+                        # solver_param['unsampled_update_freq'] = 2
 
-                                fom_samples = np.arange(iter + 1, iter + 1 + 10*solver_param['init_training_win'], 1, dtype=int)
-                                
-                                future_samples = np.arange(iter + 1 + 10*solver_param['init_training_win'], solver_param['num_step'], solver_param['unsampled_update_freq'], dtype=int)
+                        rom_param['error_cons_mad'].reset()
+                        rom_param['error_cons_mad_long'].reset()
+                        rom_param['error_cons_mad_ma'].reset()
 
-                                solver_param['resample_iter_list'] = np.concatenate((past_samples, fom_samples, future_samples))
+                        past_samples = solver_param['resample_iter_list'][solver_param['resample_iter_list'] <= iter]
 
-                                # if solver_param['unsampled_update_freq'] <= 2:
-                                #     solver_param['unsampled_update_freq'] = 2
-                                #     print('Update frequency is already at max!')
+                        fom_samples = np.arange(iter + 1, iter + 1 + solver_param['init_training_win'], 1, dtype=int)
+                        
+                        future_samples = np.arange(iter + 1 + solver_param['init_training_win'], solver_param['num_step'], solver_param['unsampled_update_freq'], dtype=int)
 
-                                # else:
-                                #     solver_param['unsampled_update_freq'] = 2
-                                #     rom_param['update_sampling'] = True
-                                #     print('Reset the sampling interval to', solver_param['unsampled_update_freq'])
+                        solver_param['resample_iter_list'] = np.concatenate((past_samples, fom_samples, future_samples))
 
-                                #     update_sampling_list(solver_param, iter, iter + 1)
+                    elif rom_param['decrease_interval']:
+                        rom_param['update_sampling_counter'] -= 1
 
-                            else:
-                                rom_param['update_sampling_counter'] -= 1
+            # Only runs during a sampling update time step unless it is during a hard reset
+            elif solver_param['parameter_adapt'] and not rom_param['hard_reset']:
 
-                                # if solver_param['unsampled_update_freq'] <= 2:
-                                #     solver_param['unsampled_update_freq'] = 2
-                                #     print('Update frequency is already at max; evaluating FOM')
-                                #     rom_param['update_sampling'] = True
-
-                        # Increment the counter to indicate the ROM is stable this time step
-                        else:
-                            rom_param['update_sampling_counter'] += 1
-
-            # Only runs during a sampling update time step
-            elif solver_param['parameter_adapt']:
-
-                # Check if all of the time steps were below the lower bound
-                if (rom_param['update_sampling_counter'] == solver_param['unsampled_update_freq'] - 1):
-
+                # Check if all the iterations this sampling interval were below the lower bound
+                if rom_param['increase_interval']:
                     required_cycles = round(2 * 1.24856 ** (solver_param['unsampled_update_freq'] - 2))
 
                     # The number of consecutive sampling cycles that must pass
@@ -1581,31 +1651,13 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
 
                         update_sampling_list(solver_param, iter, iter + 1)
 
-                # Set the next window size number of iterations to FOM to restart the ROM
-                # elif (rom_param['update_sampling_reset_counter'] == solver_param['unsampled_update_freq'] - 1):
-
-                #     print('Reverting to FOM for ', solver_param['init_training_win'], ' iterations')
-
-                #     rom_param['sample_cycle_count'] = 0
-
-                #     solver_param['unsampled_update_freq'] = 2
-
-                #     rom_param['error_cons_mad'].reset()
-                #     rom_param['error_cons_mad_long'].reset()
-
-                #     past_samples = solver_param['resample_iter_list'][solver_param['resample_iter_list'] <= iter]
-
-                #     fom_samples = np.arange(iter + 1, iter + 1 + solver_param['init_training_win'], 1, dtype=int)
-                    
-                #     future_samples = np.arange(iter + 1 + solver_param['init_training_win'], solver_param['num_step'], solver_param['unsampled_update_freq'], dtype=int)
-
-                #     solver_param['resample_iter_list'] = np.concatenate((past_samples, fom_samples, future_samples))
-
                 else:
                     rom_param['sample_cycle_count'] = 0
 
                 rom_param['update_sampling_counter'] = 0
                 rom_param['update_sampling_reset_counter'] = 0
+
+                rom_param['increase_interval'] = True
 
 
     return solver_param, state, rom_param

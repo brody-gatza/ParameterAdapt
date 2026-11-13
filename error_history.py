@@ -28,7 +28,9 @@ PLOT_ENABLED = {
     "rom_conservation_error_linear": False,
     "winsorized_mean_comparison": False,
     "histogram_density_band": False,
-    "saved_rolling_normalized_mad_median": True,
+    "saved_rolling_normalized_mad_median": False,
+    "saved_short_long_mad_ratio": False,
+    "saved_short_mad_moving_average": True,
     "saved_median_scaled_mad": False,
     "rolling_log10_mad": False,
     "rolling_normalized_mad_median": False,
@@ -42,7 +44,8 @@ CELL_VOLUME = 1.0
 # Inclusive ranges. Use None or [] for one PDF containing all iterations.
 PLOT_ITERATION_RANGES = [(0, 100_000),
                             (0, 20_000),
-                            (35_000, 55_000)]
+                            (35_000, 55_000),
+                            (0, 100)]
 
 PRIMITIVE_FIELD_NAMES = [
     "Density",
@@ -60,6 +63,11 @@ ROLLING_CV_LOGY = False
 
 SAMPLING_FREQUENCY_FILENAME = "sampling_freq.txt"
 SAMPLING_FREQUENCY_AVERAGE_WINDOW = 1000
+
+# Window used when the short-MAD moving average was calculated during
+# data collection. This value is used only for plot labels and does
+# not cause the moving average to be recomputed during post-processing.
+SHORT_MAD_MOVING_AVERAGE_WINDOW = 1000
 
 ROLLING_MEDIAN_STAT_WINDOWS = (1000,)
 ROLLING_MEDIAN_STAT_MIN_BASELINE_MAGNITUDE = 1.0e-30
@@ -140,6 +148,8 @@ def validate_configuration() -> None:
         "winsorized_mean_comparison",
         "histogram_density_band",
         "saved_rolling_normalized_mad_median",
+        "saved_short_long_mad_ratio",
+        "saved_short_mad_moving_average",
         "saved_median_scaled_mad",
         "rolling_log10_mad",
         "rolling_normalized_mad_median",
@@ -206,6 +216,18 @@ def validate_configuration() -> None:
         SAMPLING_FREQUENCY_AVERAGE_WINDOW,
         "SAMPLING_FREQUENCY_AVERAGE_WINDOW",
     )
+
+    require_positive(
+        SHORT_MAD_MOVING_AVERAGE_WINDOW,
+        "SHORT_MAD_MOVING_AVERAGE_WINDOW",
+    )
+    if not isinstance(
+        SHORT_MAD_MOVING_AVERAGE_WINDOW,
+        int,
+    ):
+        raise TypeError(
+            "SHORT_MAD_MOVING_AVERAGE_WINDOW must be an integer."
+        )
 
     require_positive(WINSORIZED_MEAN_WINDOW, "WINSORIZED_MEAN_WINDOW")
     if not WINSORIZED_TAIL_FRACTIONS:
@@ -1184,6 +1206,526 @@ def plot_combined_saved_mad_metric(
     plt.close(fig)
 
 
+
+def compute_saved_short_long_mad_ratio(
+    short_mad,
+    long_mad,
+    minimum_denominator=ROLLING_MEDIAN_STAT_MIN_BASELINE_MAGNITUDE,
+):
+    """
+    Calculate the ratio of short-window to long-window saved normalized MAD.
+
+        ratio = short_normalized_MAD / long_normalized_MAD
+
+    The ratio is calculated only where both histories are finite and the
+    magnitude of the long-window MAD is greater than minimum_denominator.
+
+    A ratio of:
+
+        1.0 means short MAD equals long MAD
+        >1.0 means short-term variability exceeds long-term variability
+        <1.0 means short-term variability is below long-term variability
+    """
+    short_mad = np.asarray(short_mad, dtype=float)
+    long_mad = np.asarray(long_mad, dtype=float)
+
+    if short_mad.shape != long_mad.shape:
+        raise ValueError(
+            "Short- and long-window MAD shapes differ: "
+            f"{short_mad.shape} versus {long_mad.shape}."
+        )
+
+    if minimum_denominator < 0.0:
+        raise ValueError(
+            "minimum_denominator must be nonnegative."
+        )
+
+    ratio = np.full(
+        short_mad.shape,
+        np.nan,
+        dtype=float,
+    )
+
+    valid = (
+        np.isfinite(short_mad)
+        & np.isfinite(long_mad)
+        & (
+            np.abs(long_mad)
+            > minimum_denominator
+        )
+    )
+
+    ratio[valid] = (
+        short_mad[valid]
+        / long_mad[valid]
+    )
+
+    return ratio
+
+
+def plot_saved_short_long_mad_ratio(
+    iterations,
+    raw,
+    short_median,
+    long_median,
+    short_mad,
+    long_mad,
+    name,
+    title,
+    pdf,
+):
+    """
+    Plot raw error and saved medians with short-MAD/long-MAD ratio.
+
+    Left axis:
+        raw absolute conservation error
+        short-window saved error median
+        long-window saved error median
+
+    Right axis:
+        short normalized MAD / long normalized MAD
+    """
+    iterations = np.asarray(
+        iterations,
+        dtype=float,
+    )
+    raw = np.asarray(
+        raw,
+        dtype=float,
+    )
+    short_median = np.asarray(
+        short_median,
+        dtype=float,
+    )
+    long_median = np.asarray(
+        long_median,
+        dtype=float,
+    )
+    short_mad = np.asarray(
+        short_mad,
+        dtype=float,
+    )
+    long_mad = np.asarray(
+        long_mad,
+        dtype=float,
+    )
+
+    validate_history_shape(
+        raw,
+        iterations,
+        f"{name} raw conservation error",
+    )
+    validate_history_shape(
+        short_median,
+        iterations,
+        f"{name} short saved median",
+    )
+    validate_history_shape(
+        long_median,
+        iterations,
+        f"{name} long saved median",
+    )
+    validate_history_shape(
+        short_mad,
+        iterations,
+        f"{name} short saved MAD",
+    )
+    validate_history_shape(
+        long_mad,
+        iterations,
+        f"{name} long saved MAD",
+    )
+
+    mad_ratio = compute_saved_short_long_mad_ratio(
+        short_mad,
+        long_mad,
+    )
+
+    fig, raw_axis = plt.subplots(
+        figsize=(12, 7)
+    )
+    ratio_axis = raw_axis.twinx()
+
+    raw_axis.set_zorder(1)
+    ratio_axis.set_zorder(2)
+    ratio_axis.patch.set_visible(False)
+
+    raw_artist = raw_axis.scatter(
+        iterations,
+        positive_or_nan(raw),
+        color="0.65",
+        s=9,
+        alpha=0.30,
+        label="Raw absolute conservation error",
+        rasterized=True,
+        zorder=1,
+    )
+
+    short_median_line, = raw_axis.plot(
+        iterations,
+        positive_or_nan(short_median),
+        color="tab:green",
+        linewidth=1.7,
+        linestyle="--",
+        alpha=0.90,
+        label="Short-window error median (100)",
+        zorder=2,
+    )
+
+    long_median_line, = raw_axis.plot(
+        iterations,
+        positive_or_nan(long_median),
+        color="darkgreen",
+        linewidth=2.2,
+        linestyle="-.",
+        alpha=0.95,
+        label="Long-window error median (1000)",
+        zorder=3,
+    )
+
+    ratio_line, = ratio_axis.plot(
+        iterations,
+        mad_ratio,
+        color="tab:orange",
+        linewidth=2.2,
+        alpha=0.95,
+        label=(
+            "Short normalized MAD / "
+            "long normalized MAD"
+        ),
+        zorder=5,
+    )
+
+    equality_line = ratio_axis.axhline(
+        1.0,
+        color="black",
+        linewidth=1.3,
+        linestyle=":",
+        alpha=0.85,
+        label="Short MAD = long MAD",
+        zorder=4,
+    )
+
+    raw_axis.set_yscale("log")
+    raw_axis.set_ylabel(
+        "Absolute conservation error"
+    )
+
+    ratio_color = "tab:orange"
+
+    ratio_axis.set_ylabel(
+        "Short normalized MAD / long normalized MAD",
+        color=ratio_color,
+    )
+    ratio_axis.tick_params(
+        axis="y",
+        colors=ratio_color,
+    )
+    ratio_axis.spines["right"].set_color(
+        ratio_color
+    )
+    ratio_axis.set_ylim(bottom=0.0)
+
+    raw_axis.set_title(
+        f"{title}: {name}\n"
+        "Short-to-long normalized MAD ratio"
+    )
+
+    apply_standard_axes(raw_axis)
+
+    # Retain the shared iteration-axis grids, but use the ratio axis for
+    # horizontal gridlines.
+    raw_axis.grid(
+        False,
+        which="both",
+        axis="y",
+    )
+
+    ratio_axis.minorticks_on()
+    ratio_axis.grid(
+        which="major",
+        axis="y",
+        linestyle="-",
+        alpha=0.35,
+    )
+    ratio_axis.grid(
+        which="minor",
+        axis="y",
+        linestyle=":",
+        alpha=0.20,
+    )
+    ratio_axis.set_axisbelow(True)
+
+    handles = [
+        raw_artist,
+        short_median_line,
+        long_median_line,
+        ratio_line,
+        equality_line,
+    ]
+
+    raw_axis.legend(
+        handles=handles,
+        loc="best",
+        fontsize=8,
+    )
+
+    finite_ratio = mad_ratio[
+        np.isfinite(mad_ratio)
+    ]
+
+    if finite_ratio.size:
+        print_section(
+            f"Short-to-long MAD ratio: {name}",
+            finite_values=int(finite_ratio.size),
+            median_ratio=float(
+                np.median(finite_ratio)
+            ),
+            maximum_ratio=float(
+                np.max(finite_ratio)
+            ),
+            fraction_above_one=float(
+                np.mean(finite_ratio > 1.0)
+            ),
+            fraction_above_two=float(
+                np.mean(finite_ratio > 2.0)
+            ),
+        )
+
+    fig.subplots_adjust(right=0.88)
+
+    pdf.savefig(
+        fig,
+        bbox_inches="tight",
+        dpi=150,
+    )
+    plt.close(fig)
+
+
+
+def plot_saved_short_mad_moving_average(
+    iterations,
+    raw,
+    short_median,
+    short_mad,
+    short_mad_average,
+    name,
+    title,
+    pdf,
+):
+    """
+    Plot the saved short median, short normalized MAD, and saved MAD average.
+
+    Left logarithmic axis:
+        raw absolute conservation error
+        saved short-window error median
+
+    Right linear axis:
+        saved short-window normalized MAD
+        saved moving average of the short normalized MAD
+
+    The moving-average values are read directly from error_cons_mad.txt.
+    No moving-average calculation is performed during post-processing.
+    """
+    iterations = np.asarray(
+        iterations,
+        dtype=float,
+    )
+    raw = np.asarray(
+        raw,
+        dtype=float,
+    )
+    short_median = np.asarray(
+        short_median,
+        dtype=float,
+    )
+    short_mad = np.asarray(
+        short_mad,
+        dtype=float,
+    )
+    short_mad_average = np.asarray(
+        short_mad_average,
+        dtype=float,
+    )
+
+    validate_history_shape(
+        raw,
+        iterations,
+        f"{name} raw conservation error",
+    )
+    validate_history_shape(
+        short_median,
+        iterations,
+        f"{name} short saved median",
+    )
+    validate_history_shape(
+        short_mad,
+        iterations,
+        f"{name} short saved MAD",
+    )
+    validate_history_shape(
+        short_mad_average,
+        iterations,
+        f"{name} saved short-MAD moving average",
+    )
+
+    fig, raw_axis = plt.subplots(
+        figsize=(12, 7)
+    )
+    mad_axis = raw_axis.twinx()
+
+    raw_axis.set_zorder(1)
+    mad_axis.set_zorder(2)
+    mad_axis.patch.set_visible(False)
+
+    raw_artist = raw_axis.scatter(
+        iterations,
+        positive_or_nan(raw),
+        color="0.65",
+        s=9,
+        alpha=0.30,
+        label="Raw absolute conservation error",
+        rasterized=True,
+        zorder=1,
+    )
+
+    short_median_line, = raw_axis.plot(
+        iterations,
+        positive_or_nan(short_median),
+        color="tab:green",
+        linewidth=2.0,
+        linestyle="--",
+        alpha=0.95,
+        label="Short-window error median (100)",
+        zorder=2,
+    )
+
+    short_mad_line, = mad_axis.plot(
+        iterations,
+        short_mad,
+        color="tab:brown",
+        linewidth=1.4,
+        alpha=0.55,
+        label="Short-window normalized MAD (100)",
+        zorder=4,
+    )
+
+    average_line, = mad_axis.plot(
+        iterations,
+        short_mad_average,
+        color="tab:orange",
+        linewidth=2.8,
+        alpha=1.0,
+        label=(
+            "Saved moving average of short normalized MAD "
+            f"({SHORT_MAD_MOVING_AVERAGE_WINDOW})"
+        ),
+        zorder=5,
+    )
+
+    raw_axis.set_yscale("log")
+    raw_axis.set_ylabel(
+        "Absolute conservation error"
+    )
+
+    mad_axis_color = "tab:orange"
+
+    mad_axis.set_ylabel(
+        "Short normalized MAD and saved moving average",
+        color=mad_axis_color,
+    )
+    mad_axis.tick_params(
+        axis="y",
+        colors=mad_axis_color,
+    )
+    mad_axis.spines["right"].set_color(
+        mad_axis_color
+    )
+    mad_axis.set_ylim(bottom=0.0)
+
+    raw_axis.set_title(
+        f"{title}: {name}\n"
+        "Short normalized MAD and saved moving-average baseline"
+    )
+
+    apply_standard_axes(raw_axis)
+
+    # Keep vertical iteration gridlines from the shared x-axis, but use the
+    # right MAD axis for horizontal gridlines.
+    raw_axis.grid(
+        False,
+        which="both",
+        axis="y",
+    )
+
+    mad_axis.minorticks_on()
+    mad_axis.grid(
+        which="major",
+        axis="y",
+        linestyle="-",
+        alpha=0.35,
+    )
+    mad_axis.grid(
+        which="minor",
+        axis="y",
+        linestyle=":",
+        alpha=0.20,
+    )
+    mad_axis.set_axisbelow(True)
+
+    handles = [
+        raw_artist,
+        short_median_line,
+        short_mad_line,
+        average_line,
+    ]
+
+    raw_axis.legend(
+        handles=handles,
+        loc="best",
+        fontsize=8,
+    )
+
+    finite_short_mad = short_mad[
+        np.isfinite(short_mad)
+    ]
+    finite_average = short_mad_average[
+        np.isfinite(short_mad_average)
+    ]
+
+    if (
+        finite_short_mad.size
+        and finite_average.size
+    ):
+        print_section(
+            f"Saved short-MAD moving average: {name}",
+            moving_average_window=(
+                SHORT_MAD_MOVING_AVERAGE_WINDOW
+            ),
+            median_short_mad=float(
+                np.median(finite_short_mad)
+            ),
+            maximum_short_mad=float(
+                np.max(finite_short_mad)
+            ),
+            median_saved_short_mad_average=float(
+                np.median(finite_average)
+            ),
+            maximum_saved_short_mad_average=float(
+                np.max(finite_average)
+            ),
+        )
+
+    fig.subplots_adjust(right=0.88)
+
+    pdf.savefig(
+        fig,
+        bbox_inches="tight",
+        dpi=150,
+    )
+    plt.close(fig)
+
+
 def median_scale_saved_mad(
     iterations,
     values,
@@ -2017,7 +2559,24 @@ def plot_rom_conservation_errors(
             "are not aligned."
         )
 
-    def load_saved_mad_history(filename):
+    def load_saved_mad_history(
+        filename,
+        includes_moving_average=False,
+    ):
+        """
+        Load a saved MAD history.
+
+        Short-file layout when includes_moving_average is True:
+
+            medians[0:N],
+            normalized_mads[0:N],
+            moving_averages[0:N]
+
+        Long-file layout when includes_moving_average is False:
+
+            medians[0:N],
+            normalized_mads[0:N]
+        """
         mad_iterations, mad_columns = load_error_signal_file(
             rom_error_dir / filename,
             active_range,
@@ -2025,35 +2584,81 @@ def plot_rom_conservation_errors(
         )
 
         number_of_variables = values.shape[1]
-        expected_columns = 2 * number_of_variables
+        number_of_groups = (
+            3
+            if includes_moving_average
+            else 2
+        )
+        expected_columns = (
+            number_of_groups
+            * number_of_variables
+        )
 
         if mad_columns.shape[1] != expected_columns:
+            if includes_moving_average:
+                expected_description = (
+                    f"{number_of_variables} medians, followed by "
+                    f"{number_of_variables} normalized MAD values, "
+                    f"followed by {number_of_variables} saved "
+                    "moving-average values"
+                )
+            else:
+                expected_description = (
+                    f"{number_of_variables} medians followed by "
+                    f"{number_of_variables} normalized MAD values"
+                )
+
             raise ValueError(
                 f"Expected {filename} to contain "
                 f"{expected_columns} value columns: "
-                f"{number_of_variables} medians followed by "
-                f"{number_of_variables} normalized MAD values; received "
+                f"{expected_description}; received "
                 f"{mad_columns.shape[1]}."
             )
 
-        if iterations.shape != mad_iterations.shape or not np.allclose(
-            iterations,
-            mad_iterations,
-            atol=1.0e-9,
+        if (
+            iterations.shape != mad_iterations.shape
+            or not np.allclose(
+                iterations,
+                mad_iterations,
+                atol=1.0e-9,
+            )
         ):
             raise ValueError(
                 "Raw absolute conservation-error and "
                 f"{filename} are not aligned."
             )
 
-        medians = mad_columns[:, :number_of_variables]
-        normalized_mads = mad_columns[:, number_of_variables:]
+        median_stop = number_of_variables
+        mad_stop = 2 * number_of_variables
 
-        return mad_iterations, medians, normalized_mads
+        medians = mad_columns[
+            :,
+            :median_stop,
+        ]
+        normalized_mads = mad_columns[
+            :,
+            median_stop:mad_stop,
+        ]
+
+        moving_averages = None
+
+        if includes_moving_average:
+            moving_averages = mad_columns[
+                :,
+                mad_stop:3 * number_of_variables,
+            ]
+
+        return (
+            mad_iterations,
+            medians,
+            normalized_mads,
+            moving_averages,
+        )
 
     saved_mad_iterations = None
     saved_median = None
     saved_normalized_mad = None
+    saved_normalized_mad_average = None
 
     saved_mad_long_iterations = None
     saved_median_long = None
@@ -2061,19 +2666,29 @@ def plot_rom_conservation_errors(
 
     if (
         is_plot_enabled("saved_rolling_normalized_mad_median")
+        or is_plot_enabled("saved_short_long_mad_ratio")
+        or is_plot_enabled("saved_short_mad_moving_average")
         or is_plot_enabled("saved_median_scaled_mad")
     ):
         (
             saved_mad_iterations,
             saved_median,
             saved_normalized_mad,
-        ) = load_saved_mad_history("error_cons_mad.txt")
+            saved_normalized_mad_average,
+        ) = load_saved_mad_history(
+            "error_cons_mad.txt",
+            includes_moving_average=True,
+        )
 
         (
             saved_mad_long_iterations,
             saved_median_long,
             saved_normalized_mad_long,
-        ) = load_saved_mad_history("error_cons_mad_long.txt")
+            _,
+        ) = load_saved_mad_history(
+            "error_cons_mad_long.txt",
+            includes_moving_average=False,
+        )
 
         if not np.allclose(
             saved_mad_iterations,
@@ -2166,6 +2781,33 @@ def plot_rom_conservation_errors(
                 title="ROM Absolute Conservation Error",
                 pdf=pdf,
                 logy=ROLLING_NORMALIZED_MAD_LOGY,
+            )
+
+        if is_plot_enabled("saved_short_long_mad_ratio"):
+            plot_saved_short_long_mad_ratio(
+                iterations=saved_mad_iterations,
+                raw=raw,
+                short_median=saved_median[:, i],
+                long_median=saved_median_long[:, i],
+                short_mad=saved_normalized_mad[:, i],
+                long_mad=saved_normalized_mad_long[:, i],
+                name=name,
+                title="ROM Absolute Conservation Error",
+                pdf=pdf,
+            )
+
+        if is_plot_enabled("saved_short_mad_moving_average"):
+            plot_saved_short_mad_moving_average(
+                iterations=saved_mad_iterations,
+                raw=raw,
+                short_median=saved_median[:, i],
+                short_mad=saved_normalized_mad[:, i],
+                short_mad_average=(
+                    saved_normalized_mad_average[:, i]
+                ),
+                name=name,
+                title="ROM Absolute Conservation Error",
+                pdf=pdf,
             )
 
         if is_plot_enabled("saved_median_scaled_mad"):
@@ -2645,6 +3287,8 @@ def run_range(args, active_range):
                 "winsorized_mean_comparison",
                 "histogram_density_band",
                 "saved_rolling_normalized_mad_median",
+                "saved_short_long_mad_ratio",
+                "saved_short_mad_moving_average",
                 "saved_median_scaled_mad",
                 "rolling_log10_mad",
                 "rolling_normalized_mad_median",
