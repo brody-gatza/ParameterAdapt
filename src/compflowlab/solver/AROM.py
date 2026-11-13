@@ -1388,9 +1388,9 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 # Update the conservation error MAD
                 # rom_param['error_cons_mad'].update(error_cons_perct)
                 # rom_param['error_cons_mad_long'].update(error_cons_perct)
-                rom_param['error_cons_mad'].update(error_cons)
-                rom_param['error_cons_mad_long'].update(error_cons)
-                rom_param['error_cons_mad_ma'].update(rom_param['error_cons_mad'].MAD)
+                rom_param['error_cons_mad'].update(iter, error_cons)
+                rom_param['error_cons_mad_long'].update(iter, error_cons)
+                rom_param['error_cons_mad_ma'].update(iter, rom_param['error_cons_mad'].MAD)
 
                 # Write rolling medians first, followed by normalized MAD values.
                 error_cons_mad_output = np.concatenate((
@@ -1404,7 +1404,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 ))
 
                 # Update the conservation error moving average
-                rom_param['error_cons_perct_ma'].update(error_cons_perct)
+                rom_param['error_cons_perct_ma'].update(iter, error_cons_perct)
 
                 # Store the current error QoIs
                 rom_param['cons_interp_max_store'] = cons_interp_max
@@ -1418,29 +1418,29 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 rom_param['prim_proj_avg_store'] = prim_proj_avg
 
                 ## Update the moving averages
-                rom_param['cons_interp_max_short_ma'].update(cons_interp_max)
-                rom_param['cons_interp_max_long_ma'].update(cons_interp_max)
+                rom_param['cons_interp_max_short_ma'].update(iter, cons_interp_max)
+                rom_param['cons_interp_max_long_ma'].update(iter, cons_interp_max)
 
-                rom_param['cons_interp_avg_short_ma'].update(cons_interp_avg)
-                rom_param['cons_interp_avg_long_ma'].update(cons_interp_avg)
+                rom_param['cons_interp_avg_short_ma'].update(iter, cons_interp_avg)
+                rom_param['cons_interp_avg_long_ma'].update(iter, cons_interp_avg)
 
-                rom_param['cons_proj_max_short_ma'].update(cons_proj_max)
-                rom_param['cons_proj_max_long_ma'].update(cons_proj_max)
+                rom_param['cons_proj_max_short_ma'].update(iter, cons_proj_max)
+                rom_param['cons_proj_max_long_ma'].update(iter, cons_proj_max)
 
-                rom_param['cons_proj_avg_short_ma'].update(cons_proj_avg)
-                rom_param['cons_proj_avg_long_ma'].update(cons_proj_avg)
+                rom_param['cons_proj_avg_short_ma'].update(iter, cons_proj_avg)
+                rom_param['cons_proj_avg_long_ma'].update(iter, cons_proj_avg)
 
-                rom_param['prim_interp_max_short_ma'].update(prim_interp_max)
-                rom_param['prim_interp_max_long_ma'].update(prim_interp_max)
+                rom_param['prim_interp_max_short_ma'].update(iter, prim_interp_max)
+                rom_param['prim_interp_max_long_ma'].update(iter, prim_interp_max)
 
-                rom_param['prim_interp_avg_short_ma'].update(prim_interp_avg)
-                rom_param['prim_interp_avg_long_ma'].update(prim_interp_avg)
+                rom_param['prim_interp_avg_short_ma'].update(iter, prim_interp_avg)
+                rom_param['prim_interp_avg_long_ma'].update(iter, prim_interp_avg)
 
-                rom_param['prim_proj_max_short_ma'].update(prim_proj_max)
-                rom_param['prim_proj_max_long_ma'].update(prim_proj_max)
+                rom_param['prim_proj_max_short_ma'].update(iter, prim_proj_max)
+                rom_param['prim_proj_max_long_ma'].update(iter, prim_proj_max)
 
-                rom_param['prim_proj_avg_short_ma'].update(prim_proj_avg)
-                rom_param['prim_proj_avg_long_ma'].update(prim_proj_avg)
+                rom_param['prim_proj_avg_short_ma'].update(iter, prim_proj_avg)
+                rom_param['prim_proj_avg_long_ma'].update(iter, prim_proj_avg)
 
                 ## Update the moving average counter
                 rom_param['cons_interp_max_ma_counter'] += np.sign(rom_param['cons_interp_max_short_ma'].avg - rom_param['cons_interp_max_long_ma'].avg)
