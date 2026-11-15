@@ -1,384 +1,280 @@
 #!/usr/bin/env python3
-"""Safely add an iteration-scaled raw normalized-MAD figure.
-
-The generated figure computes a causal normalized MAD over the complete raw
-error_cons.txt history, but converts the requested iteration interval into a
-number of raw rows using the case update frequency encoded in an ancestor
-folder named s#_u#.
-
-For the default 100-iteration interval:
-    u=5  -> floor(100/5)  = 20 raw rows
-    u=20 -> floor(100/20) = 5 raw rows
-
-Usage:
-    python patch_iteration_scaled_mad.py target.py
-    python patch_iteration_scaled_mad.py target.py -o patched.py
-"""
-from __future__ import annotations
-
-import argparse
-import py_compile
-import shutil
 from pathlib import Path
+import py_compile
+import sys
 
 
-MARKER = "ITERATION_SCALED_RAW_MAD_PATCH_V1"
-TOGGLE = "iteration_scaled_raw_normalized_mad"
+FUNCTION = r'''def plot_online_quarter_phase_mad_ratio(
+    iterations,
+    raw,
+    sampling_update,
+    cycle_windows,
+    name,
+    pdf,
+):
+    iterations = np.asarray(iterations, dtype=float)
+    raw = np.asarray(raw, dtype=float)
+    validate_history_shape(raw, iterations, f"{name} raw conservation error")
+
+    rounded_iterations = np.rint(iterations)
+    if not np.allclose(iterations, rounded_iterations, atol=1.0e-9):
+        raise ValueError("Online quarter-phase MAD plotting requires integer iterations.")
+
+    integer_iterations = rounded_iterations.astype(np.int64)
+    phases = (
+        integer_iterations
+        - CONSERVATION_ERROR_START_ITERATION
+        + 1
+    ) % sampling_update
+
+    populated_phase_count = sampling_update - 1
+    quarter_phase_count = max(1, int(np.ceil(0.25 * populated_phase_count)))
+    first_phases = np.arange(1, quarter_phase_count + 1)
+    last_phases = np.arange(
+        sampling_update - quarter_phase_count,
+        sampling_update,
+    )
+    last_phase = sampling_update - 1
+
+    for cycle_window in cycle_windows:
+        require_positive(cycle_window, "online quarter-phase MAD cycle window")
+        cycle_window = int(cycle_window)
+        first_cycles = deque(maxlen=cycle_window)
+        last_cycles = deque(maxlen=cycle_window)
+        current_first = []
+        current_last = []
+        ratio_iterations = []
+        ratios = []
+        first_mads = []
+        last_mads = []
+
+        for index in range(len(integer_iterations)):
+            iteration = integer_iterations[index]
+            value = raw[index]
+            phase = phases[index]
+
+            if iteration < CONSERVATION_ERROR_START_ITERATION:
+                continue
+
+            if phase == 1:
+                current_first = []
+                current_last = []
+
+            if np.isfinite(value) and value > 0.0:
+                if phase in first_phases:
+                    current_first.append(value)
+                if phase in last_phases:
+                    current_last.append(value)
+
+            if phase != last_phase:
+                continue
+
+            if (
+                len(current_first) == len(first_phases)
+                and len(current_last) == len(last_phases)
+            ):
+                first_cycles.append(tuple(current_first))
+                last_cycles.append(tuple(current_last))
+
+            if (
+                len(first_cycles) < cycle_window
+                or len(last_cycles) < cycle_window
+            ):
+                continue
+
+            first_array = np.asarray(first_cycles, dtype=float).reshape(-1)
+            last_array = np.asarray(last_cycles, dtype=float).reshape(-1)
+            first_mad = np.median(
+                np.abs(first_array - np.median(first_array))
+            )
+            last_mad = np.median(
+                np.abs(last_array - np.median(last_array))
+            )
+
+            if not np.isfinite(first_mad) or first_mad <= 0.0:
+                continue
+
+            ratio_iterations.append(iteration)
+            ratios.append(last_mad / first_mad)
+            first_mads.append(first_mad)
+            last_mads.append(last_mad)
+
+        if not ratios:
+            print(
+                f"Warning: no finite online quarter-phase MAD ratios for "
+                f"{name} with N={cycle_window}."
+            )
+            continue
+
+        ratio_iterations = np.asarray(ratio_iterations, dtype=float)
+        ratios = np.asarray(ratios, dtype=float)
+        first_mads = np.asarray(first_mads, dtype=float)
+        last_mads = np.asarray(last_mads, dtype=float)
+
+        fig, mad_axis = plt.subplots(figsize=(12, 7))
+        ratio_axis = mad_axis.twinx()
+        first_line, = mad_axis.plot(
+            ratio_iterations,
+            positive_or_nan(first_mads),
+            color="tab:blue",
+            linewidth=1.8,
+            label=(
+                f"Rolling MAD, first 25% "
+                f"(phases {first_phases[0]}-{first_phases[-1]})"
+            ),
+        )
+        last_line, = mad_axis.plot(
+            ratio_iterations,
+            positive_or_nan(last_mads),
+            color="tab:orange",
+            linewidth=1.8,
+            label=(
+                f"Rolling MAD, last 25% "
+                f"(phases {last_phases[0]}-{last_phases[-1]})"
+            ),
+        )
+        ratio_line, = ratio_axis.plot(
+            ratio_iterations,
+            ratios,
+            color="tab:green",
+            linewidth=2.2,
+            label="Last-25% MAD / first-25% MAD",
+        )
+        ratio_axis.axhline(
+            1.0,
+            color="tab:green",
+            linewidth=0.9,
+            linestyle=":",
+            alpha=0.75,
+        )
+        mad_axis.set_yscale("log")
+        mad_axis.set_ylabel("Rolling phase-group MAD")
+        ratio_axis.set_ylabel(
+            "Last-25% MAD / first-25% MAD",
+            color="tab:green",
+        )
+        ratio_axis.tick_params(axis="y", colors="tab:green")
+        ratio_axis.spines["right"].set_color("tab:green")
+        ratio_axis.set_ylim(
+            0.0,
+            1.05 * max(1.0, float(np.max(ratios))),
+        )
+        mad_axis.set_title(
+            f"Online First/Last Quarter Phase-MAD Ratio: {name}\n"
+            f"Rolling window = {cycle_window} sampling cycles; "
+            f"{quarter_phase_count} phases per quarter"
+        )
+        apply_standard_axes(
+            mad_axis,
+            xlabel="Iteration at completion of last phase",
+        )
+        mad_axis.legend(
+            handles=[first_line, last_line, ratio_line],
+            loc="best",
+            fontsize=8,
+        )
+        fig.subplots_adjust(right=0.88)
+        pdf.savefig(fig, bbox_inches="tight", dpi=150)
+        plt.close(fig)
 
 
-def replace_once(text: str, old: str, new: str, label: str) -> str:
+'''
+
+
+def replace_once(text, old, new, label):
     count = text.count(old)
     if count != 1:
-        raise RuntimeError(
-            f"Expected exactly one {label} anchor, found {count}. "
-            "Apply this patcher to the unpatched code supplied with the request."
-        )
+        raise RuntimeError(f"Expected exactly one {label} anchor; found {count}.")
     return text.replace(old, new, 1)
 
 
-def patch_source(text: str) -> str:
-    if MARKER in text:
-        raise RuntimeError("This patch is already present in the target.")
+def main():
+    if len(sys.argv) != 2:
+        raise SystemExit(f"Usage: {Path(sys.argv[0]).name} SCRIPT.py")
 
-    # Add the independent plot toggle.
-    text = replace_once(
-        text,
-        '    "saved_median_scaled_mad": False,\n    "rolling_log10_mad": False,',
-        '    "saved_median_scaled_mad": False,\n'
-        f'    "{TOGGLE}": True,\n'
-        '    "rolling_log10_mad": False,',
-        "PLOT_ENABLED toggle",
+    path = Path(sys.argv[1]).expanduser().resolve()
+    original = path.read_text(encoding="utf-8")
+    updated = original
+
+    if '"phase_quarter_mad_ratio_online"' in updated:
+        raise RuntimeError("The online quarter-phase MAD patch is already applied.")
+
+    updated = replace_once(
+        updated,
+        '    "phase_mad_ratio_online": True,\n',
+        '    "phase_mad_ratio_online": True,\n'
+        '    "phase_quarter_mad_ratio_online": True,\n',
+        "quarter-phase plot toggle",
     )
 
-    # Add the requested physical iteration interval and the directory-name
-    # parser. The existing re import is reused.
-    configuration = '''CONSERVATIVE_FIELD_NAMES = ["Mass", "Momentum", "Energy", "Species"]
-
-# ITERATION_SCALED_RAW_MAD_PATCH_V1
-ITERATION_SCALED_MAD_WINDOW = 100.0
-CASE_UPDATE_FREQUENCY_PATTERN = re.compile(
-    r"^s[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)_u"
-    r"(?P<u>[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+))$",
-    re.IGNORECASE,
-)
-'''
-    text = replace_once(
-        text,
-        'CONSERVATIVE_FIELD_NAMES = ["Mass", "Momentum", "Energy", "Species"]\n',
-        configuration,
-        "configuration insertion",
+    updated = replace_once(
+        updated,
+        '        "phase_mad_ratio_online",\n'
+        '        "signed_conservation_error_cycle_sum",\n',
+        '        "phase_mad_ratio_online",\n'
+        '        "phase_quarter_mad_ratio_online",\n'
+        '        "signed_conservation_error_cycle_sum",\n',
+        "quarter-phase validation key",
     )
 
-    # Add the toggle to exact-key validation.
-    text = replace_once(
-        text,
-        '        "saved_median_scaled_mad",\n        "rolling_log10_mad",',
-        '        "saved_median_scaled_mad",\n'
-        f'        "{TOGGLE}",\n'
-        '        "rolling_log10_mad",',
-        "validation key",
+    anchor = "def plot_signed_conservation_error_cycle_sum("
+    position = updated.find(anchor)
+    if position == -1:
+        raise RuntimeError("Could not find the signed cycle-sum plotting function.")
+    updated = updated[:position] + FUNCTION + updated[position:]
+
+    nested_old = (
+        '                "phase_mad_ratio_online",\n'
+        '                "signed_conservation_error_cycle_sum",\n'
     )
-
-    # Validate the new iteration interval.
-    text = replace_once(
-        text,
-        '    require_positive(WINSORIZED_MEAN_WINDOW, "WINSORIZED_MEAN_WINDOW")\n',
-        '    require_positive(\n'
-        '        ITERATION_SCALED_MAD_WINDOW,\n'
-        '        "ITERATION_SCALED_MAD_WINDOW",\n'
-        '    )\n\n'
-        '    require_positive(WINSORIZED_MEAN_WINDOW, "WINSORIZED_MEAN_WINDOW")\n',
-        "configuration validation",
+    nested_new = (
+        '                "phase_mad_ratio_online",\n'
+        '                "phase_quarter_mad_ratio_online",\n'
+        '                "signed_conservation_error_cycle_sum",\n'
     )
+    nested_count = updated.count(nested_old)
+    if nested_count != 2:
+        raise RuntimeError(
+            "Expected the phase_mad_ratio_online nested toggle in exactly "
+            f"two blocks; found {nested_count}."
+        )
+    updated = updated.replace(nested_old, nested_new)
 
-    helpers = '''def find_case_update_frequency(path):
-    """Extract update frequency u from this path or an s#_u# ancestor."""
-    path = Path(path).expanduser().resolve()
-    candidates = [path.name]
-    candidates.extend(parent.name for parent in path.parents)
-
-    for candidate in candidates:
-        match = CASE_UPDATE_FREQUENCY_PATTERN.fullmatch(candidate)
-        if match:
-            update_frequency = float(match.group("u"))
-            require_positive(
-                update_frequency,
-                "case update frequency",
+    old_call = '''        if is_plot_enabled("phase_mad_ratio_online"):
+            plot_online_phase_mad_ratio(
+                iterations,
+                raw,
+                sampling_update,
+                PHASE_MAD_RATIO_CYCLE_WINDOWS,
+                name,
+                pdf,
             )
-            return update_frequency, candidate
-
-    raise ValueError(
-        "No path component matching s#_u# was found for: " + str(path)
-    )
-
-
-def iteration_scaled_mad_window_points(update_frequency):
-    """Convert the configured iteration interval to a raw-row window."""
-    require_positive(update_frequency, "case update frequency")
-    return max(
-        1,
-        int(np.floor(
-            ITERATION_SCALED_MAD_WINDOW / update_frequency
-        )),
-    )
-
-
 '''
-    text = replace_once(
-        text,
-        'def rolling_log10_median_mad(values, window):\n',
-        helpers + 'def rolling_log10_median_mad(values, window):\n',
-        "numerical helper insertion",
-    )
-
-    # This follows the existing gMAD/MAD figure styling: raw scatter and
-    # median on a logarithmic left axis, normalized MAD on a brown right axis,
-    # right-axis horizontal grids, and the standard 12 x 7 layout.
-    plotter = '''def plot_iteration_scaled_raw_normalized_mad_metric(
-    iterations,
-    raw,
-    update_frequency,
-    case_name,
-    name,
-    title,
-    pdf,
-    logy=False,
-):
-    """Plot normalized MAD using a window defined in iteration units."""
-    iterations = np.asarray(iterations, dtype=float)
-    raw = np.asarray(raw, dtype=float)
-
-    validate_history_shape(
-        raw,
-        iterations,
-        f"{name} raw conservation error",
-    )
-
-    window_points = iteration_scaled_mad_window_points(update_frequency)
-    median, _, normalized_mad, _, _ = rolling_median_spread_statistics(
-        raw,
-        window_points,
-        ROLLING_MEDIAN_STAT_MIN_BASELINE_MAGNITUDE,
-    )
-
-    print_section(
-        f"Iteration-scaled raw normalized MAD: {name}",
-        case_name=case_name,
-        update_frequency=update_frequency,
-        requested_iteration_window=ITERATION_SCALED_MAD_WINDOW,
-        calculated_raw_window_points=window_points,
-        raw_value_count=len(raw),
-    )
-
-    fig, raw_axis = plt.subplots(figsize=(12, 7))
-    mad_axis = raw_axis.twinx()
-
-    raw_axis.set_zorder(1)
-    mad_axis.set_zorder(2)
-    mad_axis.patch.set_visible(False)
-
-    raw_artist = raw_axis.scatter(
-        iterations,
-        positive_or_nan(raw),
-        color="0.65",
-        s=9,
-        alpha=0.35,
-        label="Raw absolute conservation error",
-        rasterized=True,
-        zorder=1,
-    )
-
-    median_line, = raw_axis.plot(
-        iterations,
-        positive_or_nan(median),
-        color="tab:green",
-        linewidth=1.7,
-        linestyle="--",
-        alpha=0.90,
-        label=(
-            "Iteration-scaled absolute-error median "
-            f"({window_points} raw points)"
-        ),
-        zorder=2,
-    )
-
-    mad_plot = positive_or_nan(normalized_mad) if logy else normalized_mad
-    mad_line, = mad_axis.plot(
-        iterations,
-        mad_plot,
-        color="tab:brown",
-        linewidth=1.8,
-        alpha=0.90,
-        label=(
-            "Iteration-scaled normalized MAD "
-            f"({window_points} raw points)"
-        ),
-        zorder=4,
-    )
-
-    finite_raw = raw[np.isfinite(raw)]
-    if finite_raw.size and np.all(finite_raw > 0.0):
-        raw_axis.set_yscale("log")
-
-    if logy:
-        mad_axis.set_yscale("log")
-    else:
-        mad_axis.set_ylim(bottom=0.0)
-
-    raw_axis.set_ylabel("Absolute conservation error")
-
-    mad_axis_color = "tab:brown"
-    mad_axis.set_ylabel(
-        "Normalized MAD = MAD / |median|",
-        color=mad_axis_color,
-    )
-    mad_axis.tick_params(axis="y", colors=mad_axis_color)
-    mad_axis.spines["right"].set_color(mad_axis_color)
-
-    title_line_1 = f"{title}: {name}"
-    title_line_2 = (
-        "Iteration-scaled raw normalized MAD "
-        f"[{case_name}, u={update_frequency:g}, "
-        f"window=floor({ITERATION_SCALED_MAD_WINDOW:g}/u)="
-        f"{window_points} raw points]"
-    )
-    raw_axis.set_title(title_line_1 + chr(10) + title_line_2)
-
-    apply_standard_axes(raw_axis)
-
-    raw_axis.grid(False, which="both", axis="y")
-    mad_axis.minorticks_on()
-    mad_axis.grid(
-        which="major",
-        axis="y",
-        linestyle="-",
-        alpha=0.35,
-    )
-    mad_axis.grid(
-        which="minor",
-        axis="y",
-        linestyle=":",
-        alpha=0.20,
-    )
-    mad_axis.set_axisbelow(True)
-
-    raw_axis.legend(
-        handles=[raw_artist, median_line, mad_line],
-        loc="best",
-        fontsize=9,
-    )
-
-    fig.subplots_adjust(right=0.88)
-    pdf.savefig(fig, bbox_inches="tight", dpi=150)
-    plt.close(fig)
-
-
-'''
-    text = replace_once(
-        text,
-        'def plot_log10_mad_metric(\n',
-        plotter + 'def plot_log10_mad_metric(\n',
-        "plot-function insertion",
-    )
-
-    # Only parse s#_u# when this new figure is enabled.
-    text = replace_once(
-        text,
-        '    rom_error_dir = Path(rom_error_dir)\n'
-        '    iterations, values = load_error_signal_file(',
-        '    rom_error_dir = Path(rom_error_dir)\n'
-        '    iteration_scaled_update_frequency = None\n'
-        '    iteration_scaled_case_name = None\n'
-        f'    if is_plot_enabled("{TOGGLE}"):\n'
-        '        (\n'
-        '            iteration_scaled_update_frequency,\n'
-        '            iteration_scaled_case_name,\n'
-        '        ) = find_case_update_frequency(rom_error_dir)\n\n'
-        '    iterations, values = load_error_signal_file(',
-        "case-frequency extraction",
-    )
-
-    # Add one new PDF page for every conservative variable.
-    call = f'''        if is_plot_enabled("{TOGGLE}"):
-            plot_iteration_scaled_raw_normalized_mad_metric(
-                iterations=iterations,
-                raw=raw,
-                update_frequency=iteration_scaled_update_frequency,
-                case_name=iteration_scaled_case_name,
-                name=name,
-                title="ROM Absolute Conservation Error",
-                pdf=pdf,
-                logy=ROLLING_NORMALIZED_MAD_LOGY,
+    new_call = old_call + '''
+        if is_plot_enabled("phase_quarter_mad_ratio_online"):
+            plot_online_quarter_phase_mad_ratio(
+                iterations,
+                raw,
+                sampling_update,
+                PHASE_MAD_RATIO_CYCLE_WINDOWS,
+                name,
+                pdf,
             )
+'''
+    updated = replace_once(updated, old_call, new_call, "quarter-phase plotting call")
 
-        if is_plot_enabled("rolling_log10_mad"):
-            plot_log10_mad_metric('''
-    text = replace_once(
-        text,
-        '        if is_plot_enabled("rolling_log10_mad"):\n'
-        '            plot_log10_mad_metric(',
-        call,
-        "per-variable plot call",
-    )
-
-    # Ensure the ROM conservation-error routine is orchestrated even when this
-    # is the only enabled conservation-error figure.
-    text = replace_once(
-        text,
-        '                "saved_median_scaled_mad",\n'
-        '                "rolling_log10_mad",',
-        '                "saved_median_scaled_mad",\n'
-        f'                "{TOGGLE}",\n'
-        '                "rolling_log10_mad",',
-        "orchestration key",
-    )
-
-    return text
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Add an iteration-scaled raw normalized-MAD figure."
-    )
-    parser.add_argument("target", type=Path)
-    parser.add_argument("-o", "--output", type=Path, default=None)
-    args = parser.parse_args()
-
-    target = args.target.expanduser().resolve()
-    if not target.is_file():
-        raise FileNotFoundError(f"Target does not exist: {target}")
-
-    output = args.output.expanduser().resolve() if args.output else target
-    original = target.read_text(encoding="utf-8")
-    patched = patch_source(original)
-
-    backup = None
-    if output == target:
-        backup = target.with_name(target.name + ".bak")
-        shutil.copy2(target, backup)
-        print(f"Backup: {backup}")
-    else:
-        output.parent.mkdir(parents=True, exist_ok=True)
-
-    output.write_text(patched, encoding="utf-8")
+    backup = path.with_suffix(path.suffix + ".before_quarter_phase_mad.bak")
+    backup.write_text(original, encoding="utf-8")
+    path.write_text(updated, encoding="utf-8")
 
     try:
-        py_compile.compile(str(output), doraise=True)
+        py_compile.compile(str(path), doraise=True)
     except Exception:
-        if backup is not None:
-            shutil.copy2(backup, target)
-            print(f"Restored original: {target}")
-        else:
-            output.unlink(missing_ok=True)
-            print(f"Removed invalid output: {output}")
+        path.write_text(original, encoding="utf-8")
         raise
 
-    print(f"Patched: {output}")
-    print(f'Toggle: PLOT_ENABLED["{TOGGLE}"]')
-    print(
-        "Window: floor(ITERATION_SCALED_MAD_WINDOW / "
-        "case update frequency) raw rows"
-    )
+    print(f"Patched: {path}")
+    print(f"Backup:  {backup}")
 
 
 if __name__ == "__main__":

@@ -1,340 +1,1032 @@
 #!/usr/bin/env python3
-"""Safely add the scaled raw-window normalized-MAD plot.
+"""Compare conservation-error histories across any number of AROM cases.
 
-Usage:
-    python patch_scaled_raw_mad_safe.py error_history.py
-    python patch_scaled_raw_mad_safe.py error_history.py -o patched.py
+Each case argument may be either:
+  1. a case directory named like s0.5_u2, containing
+     AROM_results/error/error_cons.txt; or
+  2. the error_cons.txt file itself, with an ancestor directory named s#_u#.
 
-This patcher avoids nested escape problems by constructing the generated plot
-title with two set_title calls. It never embeds a backslash-n escape in the
-inserted source code.
+For each conservative variable, the output multipage PDF contains:
+  1. all raw conservation-error points for every case;
+  2. only the first error point after each sampling update;
+  3. the causal normalized MAD over approximately 100 simulation iterations,
+     computed from those selected points; and
+  4. the normalized MAD from the raw data of the first specified case compared
+     with the normalized MAD from first-post-update points for the other cases.
+
+The normalized-MAD plots also include a causal 1000-simulation-iteration
+rolling average of each normalized-MAD curve.
+
+Sampling-update points are 11 + k*u, where u is parsed from the case name.
+The MAD is computed from the selected post-update dataset, not the full raw
+history. For each case, the selected-point count is floor(100 / u) + 1, so the
+endpoint-to-endpoint span does not exceed 100 simulation iterations.
 """
+
 from __future__ import annotations
 
 import argparse
-import py_compile
-import shutil
+import re
+from dataclasses import dataclass
 from pathlib import Path
 
-MARKER = "SCALED_RAW_MAD_SAFE_PATCH_V1"
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.backends.backend_pdf import PdfPages
 
 
-def replace_once(text: str, old: str, new: str, label: str) -> str:
-    count = text.count(old)
-    if count != 1:
-        raise RuntimeError(
-            f"Expected exactly one {label} anchor, found {count}. "
-            "Use the clean code version supplied with this patcher."
-        )
-    return text.replace(old, new, 1)
-
-
-def patch_source(text: str) -> str:
-    if MARKER in text:
-        raise RuntimeError("This patch is already present in the target.")
-
-    text = replace_once(
-        text,
-        '    "saved_median_scaled_mad": False,\n    "rolling_log10_mad": False,',
-        '    "saved_median_scaled_mad": False,\n'
-        '    "scaled_raw_window_normalized_mad": True,\n'
-        '    "rolling_log10_mad": False,',
-        "plot toggle",
-    )
-
-    config = '''CONSERVATIVE_FIELD_NAMES = ["Mass", "Momentum", "Energy", "Species"]
-
-# SCALED_RAW_MAD_SAFE_PATCH_V1
-SCALED_RAW_MAD_REFERENCE_ITERATIONS = 100.0
-CASE_UPDATE_FREQUENCY_PATTERN = re.compile(
-    r"^s[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)_u"
-    r"(?P<u>[+-]?(?:\\d+(?:\\.\\d*)?|\\.\\d+))$",
+CONSERVATIVE_FIELD_NAMES = ["Mass", "Momentum", "Energy", "Species"]
+CASE_NAME_PATTERN = re.compile(
+    r"^s(?P<s>[+-]?(?:\d+(?:\.\d*)?|\.\d+))_u"
+    r"(?P<u>[+-]?(?:\d+(?:\.\d*)?|\.\d+))$",
     re.IGNORECASE,
 )
-'''
-    text = replace_once(
-        text,
-        'CONSERVATIVE_FIELD_NAMES = ["Mass", "Momentum", "Energy", "Species"]\n',
-        config,
-        "configuration",
-    )
+DEFAULT_ERROR_FILENAME = "error_cons.txt"
+FIRST_POST_UPDATE_ITERATION = 11.0
+MAD_WINDOW_ITERATIONS = 100.0
+NMAD_AVERAGE_WINDOW_ITERATIONS = 1000.0
+MAD_MIN_BASELINE_MAGNITUDE = 1.0e-30
 
-    text = replace_once(
-        text,
-        '        "saved_median_scaled_mad",\n        "rolling_log10_mad",',
-        '        "saved_median_scaled_mad",\n'
-        '        "scaled_raw_window_normalized_mad",\n'
-        '        "rolling_log10_mad",',
-        "validation key",
-    )
+# Dark, high-contrast colors used by the original data curves.
+CASE_BASE_COLORS = [
+    "#124E78",  # blue
+    "#8C2F00",  # orange
+    "#255C2A",  # green
+    "#7A1E48",  # magenta
+    "#4B2E83",  # purple
+    "#00635D",  # teal
+    "#7A6000",  # gold
+    "#7A1C1C",  # red
+]
 
-    text = replace_once(
-        text,
-        '    require_positive(WINSORIZED_MEAN_WINDOW, "WINSORIZED_MEAN_WINDOW")\n',
-        '    require_positive(\n'
-        '        SCALED_RAW_MAD_REFERENCE_ITERATIONS,\n'
-        '        "SCALED_RAW_MAD_REFERENCE_ITERATIONS",\n'
-        '    )\n\n'
-        '    require_positive(WINSORIZED_MEAN_WINDOW, "WINSORIZED_MEAN_WINDOW")\n',
-        "configuration validation",
-    )
+# Bright colors paired with CASE_BASE_COLORS for moving-average curves.
+CASE_AVERAGE_COLORS = [
+    "#00A6FF",  # bright blue
+    "#FF6D00",  # bright orange
+    "#32D74B",  # bright green
+    "#FF2D95",  # bright magenta
+    "#A855F7",  # bright purple
+    "#00D9C0",  # bright teal
+    "#FFD000",  # bright gold
+    "#FF453A",  # bright red
+]
 
-    helpers = '''def find_case_update_frequency(path):
-    """Extract u from an ancestor directory named s#_u#."""
-    path = Path(path).expanduser().resolve()
-    candidates = [path.name]
+matplotlib.rcParams["axes.prop_cycle"] = matplotlib.cycler(
+    color=CASE_BASE_COLORS
+)
+
+
+@dataclass(frozen=True)
+class CaseData:
+    label: str
+    source: Path
+    update_frequency: float
+    iterations: np.ndarray
+    errors: np.ndarray
+
+
+def positive_float(value: str) -> float:
+    result = float(value)
+    if not np.isfinite(result) or result <= 0.0:
+        raise argparse.ArgumentTypeError("value must be positive and finite")
+    return result
+
+
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Compare raw conservation errors and post-update normalized MAD "
+            "for cases named s#_u#, saving all figures in one PDF."
+        )
+    )
+    parser.add_argument(
+        "cases",
+        nargs="+",
+        type=Path,
+        help=(
+            "Case directories or error_cons.txt files. A case name or one of "
+            "its parent directories must have the form s#_u#, such as s0.5_u2."
+        ),
+    )
+    parser.add_argument(
+        "--iteration-range",
+        "--range",
+        nargs=2,
+        type=float,
+        metavar=("START", "STOP"),
+        required=True,
+        help="Inclusive iteration range to plot.",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        default=Path("case_conservation_error_comparison.pdf"),
+        help="Output multipage PDF (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--delimiter",
+        default=",",
+        help="Input delimiter for error_cons.txt (default: comma).",
+    )
+    parser.add_argument(
+        "--linear-y",
+        action="store_true",
+        help="Use linear axes for raw-error figures. Positive errors use log by default.",
+    )
+    parser.add_argument(
+        "--dpi",
+        type=positive_float,
+        default=150.0,
+        help="Rasterization DPI used when saving PDF pages (default: 150).",
+    )
+    return parser.parse_args()
+
+
+def validate_iteration_range(
+    values: list[float] | tuple[float, float],
+) -> tuple[float, float]:
+    start, stop = map(float, values)
+    if not np.isfinite(start) or not np.isfinite(stop):
+        raise ValueError("Iteration-range bounds must be finite.")
+    if start > stop:
+        raise ValueError(
+            f"Iteration-range start ({start:g}) exceeds stop ({stop:g})."
+        )
+    return start, stop
+
+
+def find_case_name(path: Path) -> tuple[str, float]:
+    candidates = [path.stem if path.is_file() else path.name]
     candidates.extend(parent.name for parent in path.parents)
+
     for candidate in candidates:
-        match = CASE_UPDATE_FREQUENCY_PATTERN.fullmatch(candidate)
+        match = CASE_NAME_PATTERN.fullmatch(candidate)
         if match:
             update_frequency = float(match.group("u"))
-            require_positive(
-                update_frequency,
-                "case sampling update frequency",
-            )
-            return update_frequency, candidate
+            if not np.isfinite(update_frequency) or update_frequency <= 0.0:
+                raise ValueError(
+                    f"Sampling update frequency in {candidate!r} must be positive."
+                )
+            return candidate, update_frequency
+
     raise ValueError(
-        "No ancestor directory named s#_u# was found for: "
-        + str(path)
+        f"Could not find a case name of the form s#_u# in or above: {path}"
     )
 
 
-def scaled_raw_mad_window_points(update_frequency):
-    """Return floor(100/u) raw rows; u=5 gives 20 and u=20 gives 5."""
-    require_positive(
-        update_frequency,
-        "case sampling update frequency",
-    )
-    return max(
-        1,
-        int(np.floor(
-            SCALED_RAW_MAD_REFERENCE_ITERATIONS / update_frequency
-        )),
-    )
+def resolve_error_file(case_path: Path) -> Path:
+    path = case_path.expanduser().resolve()
+    if path.is_file():
+        return path
+    if not path.is_dir():
+        raise FileNotFoundError(f"Case path does not exist: {path}")
 
+    candidates = (
+        path / "AROM_results" / "error" / DEFAULT_ERROR_FILENAME,
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
 
-'''
-    text = replace_once(
-        text,
-        'def rolling_log10_median_mad(values, window):\n',
-        helpers + 'def rolling_log10_median_mad(values, window):\n',
-        "numerical helpers",
+    raise FileNotFoundError(
+        "Could not find error_cons.txt. Checked:\n"
+        + "\n".join(f"  {candidate}" for candidate in candidates)
     )
 
-    # No backslash-n appears anywhere in this generated function. The title is
-    # assembled with chr(10), eliminating nested string-escape interpretation.
-    plotter = '''def plot_scaled_raw_window_normalized_mad_metric(
-    iterations,
-    raw,
-    update_frequency,
-    case_name,
-    name,
-    title,
-    pdf,
-    logy=False,
-):
-    """Plot normalized MAD over all raw rows using floor(100/u) rows."""
-    iterations = np.asarray(iterations, dtype=float)
-    raw = np.asarray(raw, dtype=float)
-    validate_history_shape(
-        raw,
-        iterations,
-        f"{name} raw conservation error",
-    )
 
-    window_points = scaled_raw_mad_window_points(update_frequency)
-    median, _, normalized_mad, _, _ = rolling_median_spread_statistics(
-        raw,
-        window_points,
-        ROLLING_MEDIAN_STAT_MIN_BASELINE_MAGNITUDE,
-    )
+def load_case(
+    case_path: Path,
+    active_range: tuple[float, float],
+    delimiter: str,
+) -> CaseData:
+    error_file = resolve_error_file(case_path)
+    label, update_frequency = find_case_name(case_path.expanduser().resolve())
 
-    print_section(
-        f"Scaled raw-window normalized MAD: {name}",
-        case_name=case_name,
+    data = np.loadtxt(error_file, delimiter=delimiter, ndmin=2)
+    if data.ndim != 2 or data.shape[1] < 2:
+        raise ValueError(
+            f"Expected iteration plus at least one error column in {error_file}; "
+            f"received shape {data.shape}."
+        )
+
+    iterations = np.asarray(data[:, 0], dtype=float)
+    errors = np.abs(np.asarray(data[:, 1:], dtype=float))
+    if not np.all(np.isfinite(iterations)):
+        raise ValueError(f"Non-finite iteration values found in {error_file}.")
+
+    order = np.argsort(iterations, kind="stable")
+    iterations = iterations[order]
+    errors = errors[order]
+    if np.any(np.diff(iterations) == 0.0):
+        raise ValueError(f"Duplicate iterations found in {error_file}.")
+
+    start, stop = active_range
+    mask = (iterations >= start) & (iterations <= stop)
+    if not np.any(mask):
+        raise ValueError(
+            f"No data from {label} fall in iteration range {start:g} to {stop:g}."
+        )
+
+    return CaseData(
+        label=label,
+        source=error_file,
         update_frequency=update_frequency,
-        calculated_window_points=window_points,
-        raw_value_count=len(raw),
+        iterations=iterations[mask],
+        errors=errors[mask],
     )
 
-    fig, raw_axis = plt.subplots(figsize=(12, 7))
-    mad_axis = raw_axis.twinx()
-    raw_axis.set_zorder(1)
-    mad_axis.set_zorder(2)
-    mad_axis.patch.set_visible(False)
 
-    raw_artist = raw_axis.scatter(
+def conservative_names(count: int) -> list[str]:
+    if count == len(CONSERVATIVE_FIELD_NAMES):
+        return list(CONSERVATIVE_FIELD_NAMES)
+    return [
+        CONSERVATIVE_FIELD_NAMES[index]
+        if index < len(CONSERVATIVE_FIELD_NAMES)
+        else f"Conservative field {index + 1}"
+        for index in range(count)
+    ]
+
+
+def apply_standard_axes(
+    axis: plt.Axes,
+    use_log_y: bool,
+    ylabel: str = "Absolute conservation error",
+) -> None:
+    axis.set_xlabel("Iteration")
+    axis.set_ylabel(ylabel)
+    axis.minorticks_on()
+    axis.grid(which="major", axis="both", linestyle="-", alpha=0.35)
+    axis.grid(which="minor", axis="x", linestyle=":", alpha=0.20)
+    if use_log_y:
+        axis.set_yscale("log")
+
+
+def can_use_log_scale(series: list[np.ndarray]) -> bool:
+    finite_values = [
+        values[np.isfinite(values)]
+        for values in series
+        if np.any(np.isfinite(values))
+    ]
+    return bool(finite_values) and all(
+        values.size > 0 and np.all(values > 0.0) for values in finite_values
+    )
+
+
+def first_post_update_mask(
+    iterations: np.ndarray,
+    update_frequency: float,
+) -> np.ndarray:
+    """Select stored iterations matching 11 + k*u."""
+    iterations = np.asarray(iterations, dtype=float)
+    offset = iterations - FIRST_POST_UPDATE_ITERATION
+    cycle = np.rint(offset / update_frequency)
+    expected = FIRST_POST_UPDATE_ITERATION + cycle * update_frequency
+    tolerance = max(1.0e-9, 1.0e-9 * update_frequency)
+    return (cycle >= 0.0) & np.isclose(
         iterations,
-        positive_or_nan(raw),
-        color="0.65",
-        s=9,
-        alpha=0.30,
-        label="Raw absolute conservation error",
-        rasterized=True,
-        zorder=1,
+        expected,
+        rtol=0.0,
+        atol=tolerance,
     )
-    median_line, = raw_axis.plot(
+
+
+def rolling_normalized_mad(
+    values: np.ndarray,
+    window: int,
+    minimum_baseline_magnitude: float = MAD_MIN_BASELINE_MAGNITUDE,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute the old code's causal median, MAD, and normalized MAD.
+
+    For selected-sample index i, use selected values
+    max(0, i-window+1) through i. Non-finite values are removed.
+
+        median = median(window_values)
+        MAD = median(abs(window_values - median))
+        normalized_MAD = MAD / abs(median)
+
+    The first window-1 results use all selected samples available so far,
+    matching the behavior of rolling_median_spread_statistics in the old code.
+    """
+    values = np.asarray(values, dtype=float)
+    if window <= 0:
+        raise ValueError("MAD window must be positive.")
+    if minimum_baseline_magnitude < 0.0:
+        raise ValueError("minimum_baseline_ust be nonnegative.")
+
+    medians = np.full(values.shape, np.nan, dtype=float)
+    mads = np.full(values.shape, np.nan, dtype=float)
+    normalized_mads = np.full(values.shape, np.nan, dtype=float)
+
+    for index in range(len(values)):
+        current = values[max(0, index - window + 1):index + 1]
+        current = current[np.isfinite(current)]
+        if current.size == 0:
+            continue
+
+        center = np.median(current)
+        mad = np.median(np.abs(current - center))
+        medians[index] = center
+        mads[index] = mad
+        if abs(center) > minimum_baseline_magnitude:
+            normalized_mads[index] = mad / abs(center)
+
+    return medians, mads, normalized_mads
+
+
+def rolling_normalized_mad_by_iteration(
+    iterations: np.ndarray,
+    values: np.ndarray,
+    window_iterations: float,
+    minimum_baseline_magnitude: float = MAD_MIN_BASELINE_MAGNITUDE,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute causal normalized MAD using an iteration-based window."""
+    iterations = np.asarray(iterations, dtype=float)
+    values = np.asarray(values, dtype=float)
+
+    medians = np.full(values.shape, np.nan, dtype=float)
+    mads = np.full(values.shape, np.nan, dtype=float)
+    normalized_mads = np.full(values.shape, np.nan, dtype=float)
+
+    window_start = 0
+
+    for index in range(len(values)):
+        minimum_iteration = iterations[index] - window_iterations
+
+        while (
+            window_start < index
+            and iterations[window_start] < minimum_iteration
+        ):
+            window_start += 1
+
+        current = values[window_start:index + 1]
+        current = current[np.isfinite(current)]
+        if current.size == 0:
+            continue
+
+        center = np.median(current)
+        mad = np.median(np.abs(current - center))
+        medians[index] = center
+        mads[index] = mad
+        if abs(center) > minimum_baseline_magnitude:
+            normalized_mads[index] = mad / abs(center)
+
+    return medians, mads, normalized_mads
+
+
+def rolling_average_by_iteration(
+    iterations: np.ndarray,
+    values: np.ndarray,
+    window_iterations: float,
+) -> np.ndarray:
+    """Compute a causal rolling average over a simulation-iteration window."""
+    iterations = np.asarray(iterations, dtype=float)
+    values = np.asarray(values, dtype=float)
+
+    if iterations.shape != values.shape:
+        raise ValueError("iterations and values must have matching shapes.")
+    if not np.isfinite(window_iterations) or window_iterations <= 0.0:
+        raise ValueError(
+            "Rolling-average iteration window must be positive and finite."
+        )
+
+    averages = np.full(values.shape, np.nan, dtype=float)
+    window_start = 0
+
+    for index in range(len(values)):
+        minimum_iteration = iterations[index] - window_iterations
+
+        while (
+            window_start < index
+            and iterations[window_start] < minimum_iteration
+        ):
+            window_start += 1
+
+        current = values[window_start:index + 1]
+        current = current[np.isfinite(current)]
+        if current.size == 0:
+            continue
+
+        averages[index] = np.mean(current)
+
+    return averages
+
+
+def lighten_color(
+    color: str | tuple[float, ...],
+    saturation: float = 1.0,
+    value: float = 1.0,
+) -> tuple[float, float, float]:
+    """Return the distinct bright color paired with a base plot color."""
+    input_rgb = mcolors.to_rgb(color)
+
+    distances = [
+        sum(
+            (input_component - base_component) ** 2
+            for input_component, base_component in zip(
+                input_rgb,
+                mcolors.to_rgb(base_color),
+            )
+        )
+        for base_color in CASE_BASE_COLORS
+    ]
+
+    color_index = min(
+        range(len(distances)),
+        key=distances.__getitem__,
+    )
+    return mcolors.to_rgb(CASE_AVERAGE_COLORS[color_index])
+
+
+def maximum_cycle_relative_difference(
+    iterations: np.ndarray,
+    values: np.ndarray,
+    update_frequency: float,
+    minimum_reference_magnitude: float = MAD_MIN_BASELINE_MAGNITUDE,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute the maximum relative difference within each sampling cycle.
+
+    Each sampling cycle begins at a first-post-update point:
+
+        11 + k*u
+
+    The reported value for each cycle is:
+
+        max(abs(cycle_value - first_cycle_value))
+        / max(abs(first_cycle_value), minimum_reference_magnitude)
+
+    This treats increases and decreases equally and produces a
+    nondimensional nonnegative value.
+    """
+    iterations = np.asarray(iterations, dtype=float)
+    values = np.asarray(values, dtype=float)
+
+    if iterations.shape != values.shape:
+        raise ValueError("iterations and values must have matching shapes.")
+    if minimum_reference_magnitude <= 0.0:
+        raise ValueError(
+            "minimum_reference_magnitude must be positive."
+        )
+
+    cycle_start_mask = first_post_update_mask(
         iterations,
-        positive_or_nan(median),
-        color="tab:green",
-        linewidth=2.0,
-        linestyle="--",
-        alpha=0.95,
-        label=f"Rolling error median ({window_points} raw points)",
-        zorder=2,
+        update_frequency,
+    )
+    cycle_start_indices = np.flatnonzero(cycle_start_mask)
+
+    cycle_iterations = []
+    maximum_relative_differences = []
+
+    for cycle_number, start_index in enumerate(cycle_start_indices):
+        if cycle_number + 1 < len(cycle_start_indices):
+            stop_index = cycle_start_indices[cycle_number + 1]
+        else:
+            stop_index = len(iterations)
+
+        reference_value = values[start_index]
+        if not np.isfinite(reference_value):
+            continue
+
+        cycle_values = values[start_index:stop_index]
+        cycle_values = cycle_values[np.isfinite(cycle_values)]
+        if cycle_values.size == 0:
+            continue
+
+        maximum_absolute_difference = np.max(
+            np.abs(cycle_values - reference_value)
+        )
+        reference_magnitude = max(
+            abs(reference_value),
+            minimum_reference_magnitude,
+        )
+
+        cycle_iterations.append(iterations[start_index])
+        maximum_relative_differences.append(
+            maximum_absolute_difference / reference_magnitude
+        )
+
+    return (
+        np.asarray(cycle_iterations, dtype=float),
+        np.asarray(maximum_relative_differences, dtype=float),
     )
 
-    mad_plot = positive_or_nan(normalized_mad) if logy else normalized_mad
-    mad_line, = mad_axis.plot(
-        iterations,
-        mad_plot,
-        color="tab:brown",
-        linewidth=2.2,
-        alpha=0.95,
-        label=f"Rolling normalized MAD ({window_points} raw points)",
-        zorder=4,
-    )
 
-    finite_raw = raw[np.isfinite(raw)]
-    if finite_raw.size and np.all(finite_raw > 0.0):
-        raw_axis.set_yscale("log")
-    if logy:
-        mad_axis.set_yscale("log")
-    else:
-        mad_axis.set_ylim(bottom=0.0)
-
-    raw_axis.set_ylabel("Absolute conservation error")
-    mad_axis.set_ylabel(
-        "Normalized MAD = MAD / |median|",
-        color="tab:brown",
-    )
-    mad_axis.tick_params(axis="y", colors="tab:brown")
-    mad_axis.spines["right"].set_color("tab:brown")
-
-    title_line_1 = f"{title}: {name}"
-    title_line_2 = (
-        f"Raw-data normalized MAD [{case_name}, "
-        f"u={update_frequency:g}, "
-        f"window=floor(100/u)={window_points} raw points]"
-    )
-    raw_axis.set_title(title_line_1 + chr(10) + title_line_2)
-
-    apply_standard_axes(raw_axis)
-    raw_axis.grid(False, which="both", axis="y")
-    mad_axis.minorticks_on()
-    mad_axis.grid(
-        which="major",
-        axis="y",
-        linestyle="-",
-        alpha=0.35,
-    )
-    mad_axis.grid(
-        which="minor",
-        axis="y",
-        linestyle=":",
-        alpha=0.20,
-    )
-    mad_axis.set_axisbelow(True)
-    raw_axis.legend(
-        handles=[raw_artist, median_line, mad_line],
-        loc="best",
-        fontsize=8,
-    )
-    fig.subplots_adjust(right=0.88)
-    pdf.savefig(fig, bbox_inches="tight", dpi=150)
-    plt.close(fig)
+def save_figure(pdf: PdfPages, figure: plt.Figure, dpi: float) -> None:
+    figure.tight_layout()
+    pdf.savefig(figure, bbox_inches="tight", dpi=dpi)
+    plt.close(figure)
 
 
-'''
-    text = replace_once(
-        text,
-        'def plot_log10_mad_metric(\n',
-        plotter + 'def plot_log10_mad_metric(\n',
-        "plot function",
-    )
+def plot_raw_comparison(
+    cases: list[CaseData],
+    variable_index: int,
+    variable_name: str,
+    active_range: tuple[float, float],
+    pdf: PdfPages,
+    linear_y: bool,
+    dpi: float,
+) -> None:
+    figure, axis = plt.subplots(figsize=(12, 7))
+    plotted = []
+    for case in cases:
+        values = case.errors[:, variable_index]
+        axis.plot(
+            case.iterations,
+            values,
+            linewidth=1.35,
+            alpha=0.9,
+            label=case.label,
+        )
+        plotted.append(values)
 
-    text = replace_once(
-        text,
-        '    rom_error_dir = Path(rom_error_dir)\n'
-        '    iterations, values = load_error_signal_file(',
-        '    rom_error_dir = Path(rom_error_dir)\n'
-        '    scaled_raw_update_frequency = None\n'
-        '    scaled_raw_case_name = None\n'
-        '    if is_plot_enabled("scaled_raw_window_normalized_mad"):\n'
-        '        (\n'
-        '            scaled_raw_update_frequency,\n'
-        '            scaled_raw_case_name,\n'
-        '        ) = find_case_update_frequency(rom_error_dir)\n\n'
-        '    iterations, values = load_error_signal_file(',
-        "frequency extraction",
+    use_log_y = not linear_y and can_use_log_scale(plotted)
+    apply_standard_axes(axis, use_log_y)
+    start, stop = active_range
+    axis.set_title(
+        f"Raw Conservation Error: {variable_name}\n"
+        f"Iterations {start:g} to {stop:g}"
     )
+    axis.legend(loc="best", title="Case")
+    save_figure(pdf, figure, dpi)
 
-    call = '''        if is_plot_enabled("scaled_raw_window_normalized_mad"):
-            plot_scaled_raw_window_normalized_mad_metric(
-                iterations=iterations,
-                raw=raw,
-                update_frequency=scaled_raw_update_frequency,
-                case_name=scaled_raw_case_name,
-                name=name,
-                title="ROM Absolute Conservation Error",
-                pdf=pdf,
-                logy=ROLLING_NORMALIZED_MAD_LOGY,
+
+def plot_first_post_update_comparison(
+    cases: list[CaseData],
+    variable_index: int,
+    variable_name: str,
+    active_range: tuple[float, float],
+    pdf: PdfPages,
+    linear_y: bool,
+    dpi: float,
+) -> None:
+    figure, axis = plt.subplots(figsize=(12, 7))
+    plotted = []
+
+    for case in cases:
+        mask = first_post_update_mask(case.iterations, case.update_frequency)
+        selected_iterations = case.iterations[mask]
+        selected_values = case.errors[mask, variable_index]
+        if selected_iterations.size == 0:
+            print(
+                f"Warning: {case.label} has no stored first-post-update points "
+                f"in the selected range. Expected 11 + k*{case.update_frequency:g}."
+            )
+            continue
+
+        axis.plot(
+            selected_iterations,
+            selected_values,
+            marker="o",
+            markersize=3.5,
+            linewidth=1.25,
+            alpha=0.9,
+            label=f"{case.label} (u={case.update_frequency:g})",
+        )
+        plotted.append(selected_values)
+
+    if not plotted:
+        plt.close(figure)
+        raise RuntimeError(
+            f"No first-post-update points were found for {variable_name}."
+        )
+
+    use_log_y = not linear_y and can_use_log_scale(plotted)
+    apply_standard_axes(axis, use_log_y)
+    start, stop = active_range
+    axis.set_title(
+        f"First Conservation Error Point After Each Sampling Update: {variable_name}\n"
+        f"Iterations {start:g} to {stop:g}; selected points = 11 + k*u"
+    )
+    axis.legend(loc="best", title="Case")
+    save_figure(pdf, figure, dpi)
+
+
+def plot_cycle_relative_difference_comparison(
+    cases: list[CaseData],
+    variable_index: int,
+    variable_name: str,
+    active_range: tuple[float, float],
+    pdf: PdfPages,
+    dpi: float,
+) -> None:
+    """Plot maximum relative conservation-error change in each cycle."""
+    figure, axis = plt.subplots(figsize=(12, 7))
+    plotted_count = 0
+
+    for case in cases:
+        cycle_iterations, relative_differences = (
+            maximum_cycle_relative_difference(
+                case.iterations,
+                case.errors[:, variable_index],
+                case.update_frequency,
+            )
+        )
+
+        relative_difference_average = rolling_average_by_iteration(
+            cycle_iterations,
+            relative_differences,
+            NMAD_AVERAGE_WINDOW_ITERATIONS,
+        )
+
+        finite = (
+            np.isfinite(relative_differences)
+            & (relative_differences > 0.0)
+        )
+        if not np.any(finite):
+            print(
+                f"Warning: {case.label} produced no positive finite "
+                f"cycle-relative difference values for {variable_name}."
+            )
+            continue
+
+        relative_difference_line, = axis.plot(
+            cycle_iterations[finite],
+            relative_differences[finite],
+            marker="o",
+            markersize=3.5,
+            linewidth=1.35,
+            alpha=0.75,
+            zorder=2,
+            label=f"{case.label} (u={case.update_frequency:g})",
+        )
+
+        average_finite = (
+            np.isfinite(relative_difference_average)
+            & (relative_difference_average > 0.0)
+        )
+        if np.any(average_finite):
+            axis.plot(
+                cycle_iterations[average_finite],
+                relative_difference_average[average_finite],
+                color=lighten_color(
+                    relative_difference_line.get_color()
+                ),
+                linewidth=2.4,
+                alpha=1.0,
+                zorder=10,
+                label=(
+                    f"{case.label} "
+                    f"{NMAD_AVERAGE_WINDOW_ITERATIONS:g}-iteration average"
+                ),
             )
 
-        if is_plot_enabled("rolling_log10_mad"):
-            plot_log10_mad_metric('''
-    text = replace_once(
-        text,
-        '        if is_plot_enabled("rolling_log10_mad"):\n'
-        '            plot_log10_mad_metric(',
-        call,
-        "plot call",
+        plotted_count += 1
+
+    if plotted_count == 0:
+        plt.close(figure)
+        raise RuntimeError(
+            "No positive finite cycle-relative conservation-error "
+            f"differences were found for {variable_name}."
+        )
+
+    apply_standard_axes(
+        axis,
+        use_log_y=True,
+        ylabel=(
+            "Maximum |error - first cycle error| / "
+            "|first cycle error|"
+        ),
     )
 
-    text = replace_once(
-        text,
-        '                "saved_median_scaled_mad",\n'
-        '                "rolling_log10_mad",',
-        '                "saved_median_scaled_mad",\n'
-        '                "scaled_raw_window_normalized_mad",\n'
-        '                "rolling_log10_mad",',
-        "orchestration key",
+    start, stop = active_range
+    axis.set_title(
+        f"Maximum Relative Conservation-Error Difference per "
+        f"Sampling Cycle: {variable_name}\\n"
+        f"Iterations {start:g} to {stop:g}; "
+        f"moving-average span = "
+        f"{NMAD_AVERAGE_WINDOW_ITERATIONS:g} iterations"
     )
-    return text
+    axis.legend(loc="best", title="Case")
+    save_figure(pdf, figure, dpi)
+
+
+def plot_post_update_mad_comparison(
+    cases: list[CaseData],
+    variable_index: int,
+    variable_name: str,
+    active_range: tuple[float, float],
+    pdf: PdfPages,
+    dpi: float,
+) -> None:
+    """Plot normalized MAD computed only from first-post-update points."""
+    figure, axis = plt.subplots(figsize=(12, 7))
+    plotted_count = 0
+
+    for case in cases:
+        mask = first_post_update_mask(case.iterations, case.update_frequency)
+        selected_iterations = case.iterations[mask]
+        selected_values = case.errors[mask, variable_index]
+        if selected_iterations.size == 0:
+            continue
+
+        # Convert the common 100-iteration span into a number of selected
+        # post-update data points for this case. The +1 includes both ends:
+        # u=2 -> 51 points spanning 100 iterations
+        # u=5 -> 21 points spanning 100 iterations
+        # u=20 -> 6 points spanning 100 iterations
+        mad_window_points = max(
+            1,
+            int(np.floor(
+                MAD_WINDOW_ITERATIONS / case.update_frequency
+            )) + 1,
+        )
+
+        _, _, normalized_mad = rolling_normalized_mad(
+            selected_values,
+            window=mad_window_points,
+        )
+        normalized_mad_average = rolling_average_by_iteration(
+            selected_iterations,
+            normalized_mad,
+            NMAD_AVERAGE_WINDOW_ITERATIONS,
+        )
+
+        finite = np.isfinite(normalized_mad)
+        if not np.any(finite):
+            print(
+                f"Warning: {case.label} produced no finite normalized MAD "
+                f"values for {variable_name}."
+            )
+            continue
+
+        mad_line, = axis.plot(
+            selected_iterations[finite],
+            normalized_mad[finite],
+            linewidth=1.8,
+            alpha=0.95,
+            zorder=2,
+            label=(
+                f"{case.label} (u={case.update_frequency:g}, "
+                f"window={mad_window_points} points)"
+            ),
+        )
+
+        average_finite = np.isfinite(normalized_mad_average)
+        if np.any(average_finite):
+            axis.plot(
+                selected_iterations[average_finite],
+                normalized_mad_average[average_finite],
+                color=lighten_color(mad_line.get_color()),
+                linewidth=2.4,
+                alpha=1.0,
+                label=(
+                    f"{case.label} "
+                    f"{NMAD_AVERAGE_WINDOW_ITERATIONS:g}-iteration average"
+                ),
+            )
+
+        plotted_count += 1
+
+    if plotted_count == 0:
+        plt.close(figure)
+        raise RuntimeError(
+            f"No finite post-update normalized MAD data were found for {variable_name}."
+        )
+
+    apply_standard_axes(
+        axis,
+        use_log_y=False,
+        ylabel="Normalized MAD = MAD / |median|",
+    )
+    axis.set_ylim(bottom=0.0)
+    start, stop = active_range
+    axis.set_title(
+        f"Post-Update Conservation Error Normalized MAD: {variable_name}\n"
+        f"Causal span = {MAD_WINDOW_ITERATIONS:g} simulation iterations; "
+        f"rolling-average span = "
+        f"{NMAD_AVERAGE_WINDOW_ITERATIONS:g} simulation iterations; "
+        f"iterations {start:g} to {stop:g}"
+    )
+    axis.legend(loc="best", title="Case")
+    save_figure(pdf, figure, dpi)
+
+
+def plot_raw_vs_post_update_mad_comparison(
+    cases: list[CaseData],
+    variable_index: int,
+    variable_name: str,
+    active_range: tuple[float, float],
+    pdf: PdfPages,
+    dpi: float,
+) -> None:
+    """Plot raw-data MAD for the first case and post-update MAD for the others."""
+    figure, axis = plt.subplots(figsize=(12, 7))
+    plotted_count = 0
+
+    first_case = cases[0]
+    raw_values = first_case.errors[:, variable_index]
+
+    _, _, raw_normalized_mad = rolling_normalized_mad_by_iteration(
+        first_case.iterations,
+        raw_values,
+        MAD_WINDOW_ITERATIONS,
+    )
+    raw_normalized_mad_average = rolling_average_by_iteration(
+        first_case.iterations,
+        raw_normalized_mad,
+        NMAD_AVERAGE_WINDOW_ITERATIONS,
+    )
+
+    finite = np.isfinite(raw_normalized_mad)
+    if np.any(finite):
+        raw_line, = axis.plot(
+            first_case.iterations[finite],
+            raw_normalized_mad[finite],
+            linewidth=1.8,
+            alpha=0.95,
+            zorder=2,
+            label=f"{first_case.label} (raw data)",
+        )
+
+        average_finite = np.isfinite(raw_normalized_mad_average)
+        if np.any(average_finite):
+            axis.plot(
+                first_case.iterations[average_finite],
+                raw_normalized_mad_average[average_finite],
+                color=lighten_color(raw_line.get_color()),
+                linewidth=2.4,
+                alpha=1.0,
+                zorder=10,
+                label=(
+                    f"{first_case.label} raw-data "
+                    f"{NMAD_AVERAGE_WINDOW_ITERATIONS:g}-iteration average"
+                ),
+            )
+
+        plotted_count += 1
+
+    for case in cases[1:]:
+        mask = first_post_update_mask(case.iterations, case.update_frequency)
+        selected_iterations = case.iterations[mask]
+        selected_values = case.errors[mask, variable_index]
+        if selected_iterations.size == 0:
+            continue
+
+        mad_window_points = max(
+            1,
+            int(np.floor(
+                MAD_WINDOW_ITERATIONS / case.update_frequency
+            )) + 1,
+        )
+
+        _, _, normalized_mad = rolling_normalized_mad(
+            selected_values,
+            window=mad_window_points,
+        )
+        normalized_mad_average = rolling_average_by_iteration(
+            selected_iterations,
+            normalized_mad,
+            NMAD_AVERAGE_WINDOW_ITERATIONS,
+        )
+
+        finite = np.isfinite(normalized_mad)
+        if not np.any(finite):
+            continue
+
+        mad_line, = axis.plot(
+            selected_iterations[finite],
+            normalized_mad[finite],
+            linewidth=1.8,
+            alpha=0.95,
+            label=(
+                f"{case.label} (u={case.update_frequency:g}, "
+                f"window={mad_window_points} points)"
+            ),
+        )
+
+        average_finite = np.isfinite(normalized_mad_average)
+        if np.any(average_finite):
+            axis.plot(
+                selected_iterations[average_finite],
+                normalized_mad_average[average_finite],
+                color=lighten_color(mad_line.get_color()),
+                linewidth=2.4,
+                alpha=1.0,
+                label=(
+                    f"{case.label} post-update "
+                    f"{NMAD_AVERAGE_WINDOW_ITERATIONS:g}-iteration average"
+                ),
+            )
+
+        plotted_count += 1
+
+    if plotted_count == 0:
+        plt.close(figure)
+        raise RuntimeError(
+            f"No finite normalized MAD data were found for {variable_name}."
+        )
+
+    apply_standard_axes(
+        axis,
+        use_log_y=False,
+        ylabel="Normalized MAD = MAD / |median|",
+    )
+    axis.set_ylim(bottom=0.0)
+    start, stop = active_range
+    axis.set_title(
+        f"Raw vs. Post-Update Conservation Error Normalized MAD: {variable_name}\n"
+        f"Causal span = {MAD_WINDOW_ITERATIONS:g} simulation iterations; "
+        f"rolling-average span = "
+        f"{NMAD_AVERAGE_WINDOW_ITERATIONS:g} simulation iterations; "
+        f"iterations {start:g} to {stop:g}"
+    )
+    axis.legend(loc="best", title="Case")
+    save_figure(pdf, figure, dpi)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("target", type=Path)
-    parser.add_argument("-o", "--output", type=Path, default=None)
-    args = parser.parse_args()
+    args = parse_arguments()
+    active_range = validate_iteration_range(args.iteration_range)
+    cases = [load_case(path, active_range, args.delimiter) for path in args.cases]
 
-    target = args.target.expanduser().resolve()
-    if not target.is_file():
-        raise FileNotFoundError(f"Target does not exist: {target}")
-    output = args.output.expanduser().resolve() if args.output else target
-    original = target.read_text(encoding="utf-8")
-    patched = patch_source(original)
+    column_counts = {case.errors.shape[1] for case in cases}
+    if len(column_counts) != 1:
+        details = ", ".join(
+            f"{case.label}: {case.errors.shape[1]}" for case in cases
+        )
+        raise ValueError(
+            "All cases must contain the same number of conservation-error "
+            f"columns. Received {details}."
+        )
 
-    backup = None
-    if output == target:
-        backup = target.with_name(target.name + ".bak")
-        shutil.copy2(target, backup)
-        print(f"Backup: {backup}")
-    else:
-        output.parent.mkdir(parents=True, exist_ok=True)
+    variable_count = column_counts.pop()
+    names = conservative_names(variable_count)
+    output = args.output.expanduser().resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
 
-    output.write_text(patched, encoding="utf-8")
-    try:
-        py_compile.compile(str(output), doraise=True)
-    except Exception:
-        if backup is not None:
-            shutil.copy2(backup, target)
-            print(f"Restored original: {target}")
-        raise
+    print("=" * 72)
+    print(f"Output PDF: {output}")
+    print(f"Iteration range: {active_range[0]:g} to {active_range[1]:g}")
+    print(
+        f"Post-update MAD span: {MAD_WINDOW_ITERATIONS:g} simulation iterations"
+    )
+    print(
+        "Normalized-MAD rolling-average span: "
+        f"{NMAD_AVERAGE_WINDOW_ITERATIONS:g} simulation iterations"
+    )
+    for case in cases:
+        selected_count = int(
+            np.count_nonzero(
+                first_post_update_mask(case.iterations, case.update_frequency)
+            )
+        )
+        print(
+            f"{case.label}: u={case.update_frequency:g}, "
+            f"raw rows={len(case.iterations)}, selected rows={selected_count}, "
+            f"file={case.source}"
+        )
+    print("=" * 72)
 
-    print(f"Patched: {output}")
-    print('Toggle: PLOT_ENABLED["scaled_raw_window_normalized_mad"]')
+    with PdfPages(output) as pdf:
+        for variable_index, variable_name in enumerate(names):
+            plot_raw_comparison(
+                cases,
+                variable_index,
+                variable_name,
+                active_range,
+                pdf,
+                args.linear_y,
+                args.dpi,
+            )
+            plot_first_post_update_comparison(
+                cases,
+                variable_index,
+                variable_name,
+                active_range,
+                pdf,
+                args.linear_y,
+                args.dpi,
+            )
+            plot_cycle_relative_difference_comparison(
+                cases,
+                variable_index,
+                variable_name,
+                active_range,
+                pdf,
+                args.dpi,
+            )
+            plot_post_update_mad_comparison(
+                cases,
+                variable_index,
+                variable_name,
+                active_range,
+                pdf,
+                args.dpi,
+            )
+            plot_raw_vs_post_update_mad_comparison(
+                cases,
+                variable_index,
+                variable_name,
+                active_range,
+                pdf,
+                args.dpi,
+            )
+
+    print(f"Saved: {output}")
 
 
 if __name__ == "__main__":
