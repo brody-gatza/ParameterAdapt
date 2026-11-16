@@ -23,21 +23,24 @@ PLOT_ENABLED = {
     "sampling_frequency": True,
     "fom_rerun_history": False,
     "primitive_metrics": True,
+    "primitive_peak_location_error": True,
     "conservative_integrals": False,
     "rom_conservation_error_log": False,
     "rom_conservation_error_linear": False,
     "winsorized_mean_comparison": False,
     "histogram_density_band": False,
     "saved_short_mad_moving_average": True,
+    "computed_short_p95_residual": False,
     "saved_first_mad_moving_average": True,
     "rolling_cv": False,
-    "interpolation_error_signals": False,
+    "interpolation_error_signals": True,
     "conservation_error_by_phase": True,
     "conservation_error_phase_mad": True,
-    "conservation_error_phase_quantiles": True,
+    "conservation_error_phase_quantiles": False,
     "conservation_error_phase_tail_body": False,
     "phase_mad_ratio_online": True,
-    "phase_quarter_mad_ratio_online": True,
+    "normalized_phase_mad_ratio_online": True,
+    "phase_quarter_mad_ratio_online": False,
     "signed_conservation_error_cycle_sum": False,
 }
 
@@ -46,9 +49,8 @@ CELL_VOLUME = 1.0
 
 # Inclusive ranges. Use None or [] for one PDF containing all iterations.
 PLOT_ITERATION_RANGES = [(0, 100_000),
-                            (0, 20_000),
-                            (20_000, 60_000),
-                            (80_000, 100_000)]
+                            (0, 200_000),
+                            (0, 20_000)]
 
 PRIMITIVE_FIELD_NAMES = [
     "Density",
@@ -71,12 +73,14 @@ SAMPLING_FREQUENCY_AVERAGE_WINDOW = 1000
 # data collection. This value is used only for plot labels and does
 # not cause the moving average to be recomputed during post-processing.
 SHORT_MAD_MOVING_AVERAGE_WINDOW = 1000
+COMPUTED_P95_RESIDUAL_WINDOW = 100
+ONLINE_PHASE_MAD_RATIO_MOVING_AVERAGE_WINDOW = 1000
 
 # First iteration represented by the conservation-error history.
 CONSERVATION_ERROR_START_ITERATION = 11
 
 # Rolling sampling-cycle windows for the online last/first phase MAD ratio.
-PHASE_MAD_RATIO_CYCLE_WINDOWS = (10, 25, 50, 100)
+PHASE_MAD_RATIO_CYCLE_WINDOWS = (100,)
 
 
 WINSORIZED_MEAN_WINDOW = 1000
@@ -135,12 +139,14 @@ def validate_configuration() -> None:
         "sampling_frequency",
         "fom_rerun_history",
         "primitive_metrics",
+        "primitive_peak_location_error",
         "conservative_integrals",
         "rom_conservation_error_log",
         "rom_conservation_error_linear",
         "winsorized_mean_comparison",
         "histogram_density_band",
         "saved_short_mad_moving_average",
+        "computed_short_p95_residual",
         "saved_first_mad_moving_average",
         "rolling_cv",
         "interpolation_error_signals",
@@ -149,6 +155,7 @@ def validate_configuration() -> None:
         "conservation_error_phase_quantiles",
         "conservation_error_phase_tail_body",
         "phase_mad_ratio_online",
+        "normalized_phase_mad_ratio_online",
         "phase_quarter_mad_ratio_online",
         "signed_conservation_error_cycle_sum",
     }
@@ -383,6 +390,7 @@ def compute_metric_histories(fom_data, rom_data, tolerance=1.0e-14):
     n_time, n_variables, _ = fom_data.shape
     relative_l2 = np.full((n_variables, n_time), np.nan)
     correlation = np.full((n_variables, n_time), np.nan)
+    peak_location_error = np.full((n_variables, n_time), np.nan)
 
     for time_index in range(n_time):
         for variable_index in range(n_variables):
@@ -392,8 +400,17 @@ def compute_metric_histories(fom_data, rom_data, tolerance=1.0e-14):
             if not np.any(valid):
                 continue
 
+            valid_indices = np.flatnonzero(valid)
             fom_valid = fom[valid]
             rom_valid = rom[valid]
+            fom_peak_index = valid_indices[np.argmax(fom_valid)]
+            rom_peak_index = valid_indices[np.argmax(rom_valid)]
+            direct_peak_distance = abs(rom_peak_index - fom_peak_index)
+            periodic_peak_distance = fom.size - direct_peak_distance
+            peak_location_error[variable_index, time_index] = min(
+                direct_peak_distance,
+                periodic_peak_distance,
+            )
             norm = np.linalg.norm(fom_valid)
             if norm > tolerance:
                 relative_l2[variable_index, time_index] = (
@@ -409,7 +426,7 @@ def compute_metric_histories(fom_data, rom_data, tolerance=1.0e-14):
                     rom_valid,
                 )[0, 1]
 
-    return relative_l2, correlation
+    return relative_l2, correlation, peak_location_error
 
 
 def moving_average(values, window):
@@ -726,7 +743,14 @@ def rerun_mask(iterations, rerun_iterations):
 # PLOTTING ROUTINES
 # =============================================================================
 
-def plot_primitive_metrics(iterations, relative_l2, correlation, names, pdf):
+def plot_primitive_metrics(
+    iterations,
+    relative_l2,
+    correlation,
+    peak_location_error,
+    names,
+    pdf,
+):
     if len(names) != relative_l2.shape[0]:
         names = [f"Field {index + 1}" for index in range(relative_l2.shape[0])]
 
@@ -747,6 +771,29 @@ def plot_primitive_metrics(iterations, relative_l2, correlation, names, pdf):
             linewidth=1.5,
             label="Pearson correlation",
         )
+        handles = [error_line, correlation_line]
+
+        if is_plot_enabled("primitive_peak_location_error"):
+            peak_axis = error_axis.twinx()
+            peak_axis.spines["right"].set_position(("axes", 1.13))
+            peak_axis.patch.set_visible(False)
+            peak_line, = peak_axis.plot(
+                iterations,
+                peak_location_error[index],
+                color="tab:green",
+                linewidth=1.8,
+                label="Peak-location error",
+            )
+            peak_axis.set_ylabel(
+                "Absolute peak-location error [cell index]",
+                color="tab:green",
+            )
+            peak_axis.tick_params(axis="y", labelcolor="tab:green")
+            peak_axis.spines["right"].set_color("tab:green")
+            peak_axis.set_ylim(bottom=0.0)
+            peak_axis.grid(False, which="both", axis="both")
+            handles.append(peak_line)
+
         error_axis.set_ylabel(r"Relative $L_2$ error [%]", color="tab:red")
         correlation_axis.set_ylabel("Pearson correlation", color="tab:blue")
         error_axis.tick_params(axis="y", labelcolor="tab:red")
@@ -754,30 +801,19 @@ def plot_primitive_metrics(iterations, relative_l2, correlation, names, pdf):
         correlation_axis.set_ylim(1, 0)
         error_axis.set_title(name)
         apply_standard_axes(error_axis)
-
-        # Use the Pearson-correlation axis for horizontal gridlines.
-        # Keep the vertical gridlines from the shared iteration axis.
         error_axis.grid(False, which="both", axis="y")
         correlation_axis.minorticks_on()
-        correlation_axis.grid(
-            which="major",
-            axis="y",
-            linestyle="-",
-            alpha=0.35,
-        )
-        correlation_axis.grid(
-            which="minor",
-            axis="y",
-            linestyle=":",
-            alpha=0.20,
-        )
+        correlation_axis.grid(which="major", axis="y", linestyle="-", alpha=0.35)
+        correlation_axis.grid(which="minor", axis="y", linestyle=":", alpha=0.20)
         correlation_axis.set_axisbelow(True)
+        error_axis.legend(handles=handles, loc="best")
 
-        error_axis.legend(
-            handles=[error_line, correlation_line],
-            loc="best",
-        )
-        save_figure(pdf, fig)
+        if is_plot_enabled("primitive_peak_location_error"):
+            fig.subplots_adjust(right=0.80)
+            pdf.savefig(fig, bbox_inches="tight")
+            plt.close(fig)
+        else:
+            save_figure(pdf, fig)
 
 
 def plot_sampling_frequency(error_dir, pdf, active_range, delimiter):
@@ -1113,6 +1149,105 @@ def plot_saved_mad_moving_average(
         bbox_inches="tight",
         dpi=150,
     )
+    plt.close(fig)
+
+
+
+def plot_computed_short_p95_residual(
+    iterations,
+    raw,
+    name,
+    title,
+    pdf,
+):
+    iterations = np.asarray(iterations, dtype=float)
+    raw = np.asarray(raw, dtype=float)
+    validate_history_shape(
+        raw,
+        iterations,
+        f"{name} raw conservation error",
+    )
+
+    window = int(COMPUTED_P95_RESIDUAL_WINDOW)
+    center = np.full(raw.shape, np.nan, dtype=float)
+    p95_residual = np.full(raw.shape, np.nan, dtype=float)
+
+    for index in range(window - 1, len(raw)):
+        current = raw[index - window + 1:index + 1]
+        if not np.all(np.isfinite(current)):
+            continue
+
+        current_center = np.median(current)
+        center[index] = current_center
+        if abs(current_center) > 0.0:
+            normalized_residuals = (
+                np.abs(current - current_center)
+            )
+            p95_residual[index] = np.quantile(
+                normalized_residuals,
+                0.95,
+            )
+
+    fig, raw_axis = plt.subplots(figsize=(12, 7))
+    metric_axis = raw_axis.twinx()
+    raw_axis.set_zorder(1)
+    metric_axis.set_zorder(2)
+    metric_axis.patch.set_visible(False)
+
+    raw_artist = raw_axis.scatter(
+        iterations,
+        positive_or_nan(raw),
+        color="0.65",
+        s=9,
+        alpha=0.30,
+        label="Raw absolute conservation error",
+        rasterized=True,
+        zorder=1,
+    )
+    center_line, = raw_axis.plot(
+        iterations,
+        positive_or_nan(center),
+        color="tab:green",
+        linewidth=2.0,
+        linestyle="--",
+        label=f"Computed window median ({window})",
+        zorder=2,
+    )
+    p95_line, = metric_axis.plot(
+        iterations,
+        p95_residual,
+        color="tab:purple",
+        linewidth=2.4,
+        label="Computed normalized P95 residual",
+        zorder=5,
+    )
+
+    raw_axis.set_yscale("log")
+    raw_axis.set_ylabel("Absolute conservation error")
+    metric_axis.set_ylabel(
+        "95th quantile of absolute residual",
+        color="tab:purple",
+    )
+    metric_axis.tick_params(axis="y", colors="tab:purple")
+    metric_axis.spines["right"].set_color("tab:purple")
+    metric_axis.set_ylim(bottom=0.0)
+    raw_axis.set_title(
+        f"{title}: {name}\n"
+        f"Computed median center and normalized P95 residual (window={window})"
+    )
+    apply_standard_axes(raw_axis)
+    raw_axis.grid(False, which="both", axis="y")
+    metric_axis.minorticks_on()
+    metric_axis.grid(which="major", axis="y", linestyle="-", alpha=0.35)
+    metric_axis.grid(which="minor", axis="y", linestyle=":", alpha=0.20)
+    metric_axis.set_axisbelow(True)
+    raw_axis.legend(
+        handles=[raw_artist, center_line, p95_line],
+        loc="best",
+        fontsize=8,
+    )
+    fig.subplots_adjust(right=0.88)
+    pdf.savefig(fig, bbox_inches="tight", dpi=150)
     plt.close(fig)
 
 
@@ -1468,8 +1603,8 @@ def plot_conservation_error_phase_quantiles(
         sampling_update,
         name,
     )
-    quantiles = (0.95, 0.90, 0.85, 0.80)
-    colors = ("tab:purple", "tab:orange", "tab:green", "tab:blue")
+    quantiles = (0.95, 0.96, 0.97, 0.98)
+    colors = ("tab:blue", "tab:orange", "tab:green", "tab:purple")
 
     fig, axis = plt.subplots(figsize=(12, 7))
     raw_artist = plot_phase_raw_baseline(axis, phases, valid, raw)
@@ -1494,7 +1629,7 @@ def plot_conservation_error_phase_quantiles(
     finish_phase_axes(axis, sampling_update)
     axis.set_title(
         f"ROM Absolute Conservation Error by Sampling Phase: {name}\n"
-        f"Sampling update u{sampling_update}; upper quantiles"
+        f"Sampling update u{sampling_update}; P95, P96, P97, and P98"
     )
     axis.legend(handles=handles, loc="best", fontsize=8)
     save_figure(pdf, fig, 150)
@@ -1607,7 +1742,22 @@ def plot_online_phase_mad_ratio(
             ratios,
             color="black",
             linewidth=2.0,
+            alpha=1.0,
             label=f"Phase-{last_phase} MAD / phase-1 MAD",
+        )
+        ratio_average = moving_average(
+            ratios,
+            ONLINE_PHASE_MAD_RATIO_MOVING_AVERAGE_WINDOW,
+        )
+        ratio_average_line, = ratio_axis.plot(
+            ratio_iterations,
+            ratio_average,
+            color="tab:green",
+            linewidth=2.8,
+            label=(
+                "Moving average of phase-MAD ratio "
+                f"({ONLINE_PHASE_MAD_RATIO_MOVING_AVERAGE_WINDOW})"
+            ),
         )
         ratio_axis.axhline(
             1.0,
@@ -1618,10 +1768,6 @@ def plot_online_phase_mad_ratio(
         mad_axis.set_yscale("log")
         mad_axis.set_ylabel("Rolling phase MAD")
         ratio_axis.set_ylabel("Last-phase MAD / first-phase MAD")
-        ratio_axis.set_ylim(
-            0.0,
-            1.05 * max(1.0, float(np.max(ratios))),
-        )
         mad_axis.set_title(
             f"Online Phase-MAD Ratio: {name}\n"
             f"Rolling window = {cycle_window} sampling cycles; "
@@ -1632,7 +1778,209 @@ def plot_online_phase_mad_ratio(
             xlabel="Iteration at completion of last phase",
         )
         mad_axis.legend(
-            handles=[first_line, last_line, ratio_line],
+            handles=[
+                first_line,
+                last_line,
+                ratio_line,
+                ratio_average_line,
+            ],
+            loc="best",
+            fontsize=8,
+        )
+        fig.subplots_adjust(right=0.88)
+        pdf.savefig(fig, bbox_inches="tight", dpi=150)
+        plt.close(fig)
+
+
+
+def plot_online_normalized_phase_mad_ratio(
+    iterations,
+    raw,
+    sampling_update,
+    cycle_windows,
+    name,
+    pdf,
+):
+    iterations = np.asarray(iterations, dtype=float)
+    raw = np.asarray(raw, dtype=float)
+    validate_history_shape(raw, iterations, f"{name} raw conservation error")
+
+    rounded_iterations = np.rint(iterations)
+    if not np.allclose(iterations, rounded_iterations, atol=1.0e-9):
+        raise ValueError(
+            "Online normalized phase-MAD plotting requires integer iterations."
+        )
+
+    integer_iterations = rounded_iterations.astype(np.int64)
+    phases = (
+        integer_iterations
+        - CONSERVATION_ERROR_START_ITERATION
+        + 1
+    ) % sampling_update
+    first_phase = 1
+    last_phase = sampling_update - 1
+
+    for cycle_window in cycle_windows:
+        require_positive(
+            cycle_window,
+            "online normalized phase-MAD cycle window",
+        )
+        cycle_window = int(cycle_window)
+        first_values = deque(maxlen=cycle_window)
+        last_values = deque(maxlen=cycle_window)
+        ratio_iterations = []
+        ratios = []
+        first_normalized_mads = []
+        last_normalized_mads = []
+
+        for index in range(len(integer_iterations)):
+            iteration = integer_iterations[index]
+            value = raw[index]
+            phase = phases[index]
+
+            if (
+                iteration < CONSERVATION_ERROR_START_ITERATION
+                or not np.isfinite(value)
+                or value <= 0.0
+                or phase == 0
+            ):
+                continue
+
+            if phase == first_phase:
+                first_values.append(value)
+            elif phase == last_phase:
+                last_values.append(value)
+
+                if (
+                    len(first_values) < cycle_window
+                    or len(last_values) < cycle_window
+                ):
+                    continue
+
+                first_array = np.asarray(first_values, dtype=float)
+                last_array = np.asarray(last_values, dtype=float)
+                first_median = np.median(first_array)
+                last_median = np.median(last_array)
+                first_mad = np.median(
+                    np.abs(first_array - first_median)
+                )
+                last_mad = np.median(
+                    np.abs(last_array - last_median)
+                )
+
+                if (
+                    not np.isfinite(first_median)
+                    or not np.isfinite(last_median)
+                    or first_median <= 0.0
+                    or last_median <= 0.0
+                ):
+                    continue
+
+                first_normalized_mad = first_mad / first_median
+                last_normalized_mad = last_mad / last_median
+                if (
+                    not np.isfinite(first_normalized_mad)
+                    or not np.isfinite(last_normalized_mad)
+                    or first_normalized_mad <= 0.0
+                ):
+                    continue
+
+                ratio_iterations.append(iteration)
+                ratios.append(
+                    last_normalized_mad / first_normalized_mad
+                )
+                first_normalized_mads.append(first_normalized_mad)
+                last_normalized_mads.append(last_normalized_mad)
+
+        if not ratios:
+            print(
+                f"Warning: no finite online normalized phase-MAD ratios "
+                f"for {name} with N={cycle_window}."
+            )
+            continue
+
+        ratio_iterations = np.asarray(ratio_iterations, dtype=float)
+        ratios = np.asarray(ratios, dtype=float)
+        first_normalized_mads = np.asarray(
+            first_normalized_mads,
+            dtype=float,
+        )
+        last_normalized_mads = np.asarray(
+            last_normalized_mads,
+            dtype=float,
+        )
+
+        fig, normalized_mad_axis = plt.subplots(figsize=(12, 7))
+        ratio_axis = normalized_mad_axis.twinx()
+        first_line, = normalized_mad_axis.plot(
+            ratio_iterations,
+            positive_or_nan(first_normalized_mads),
+            color="tab:blue",
+            linewidth=1.8,
+            label="Rolling phase-1 MAD / phase-1 median",
+        )
+        last_line, = normalized_mad_axis.plot(
+            ratio_iterations,
+            positive_or_nan(last_normalized_mads),
+            color="tab:orange",
+            linewidth=1.8,
+            label=(
+                f"Rolling phase-{last_phase} MAD / "
+                f"phase-{last_phase} median"
+            ),
+        )
+        ratio_line, = ratio_axis.plot(
+            ratio_iterations,
+            ratios,
+            color="black",
+            linewidth=2.0,
+            label=(
+                f"Phase-{last_phase} normalized MAD / "
+                "phase-1 normalized MAD"
+            ),
+        )
+        ratio_average = moving_average(
+            ratios,
+            ONLINE_PHASE_MAD_RATIO_MOVING_AVERAGE_WINDOW,
+        )
+        ratio_average_line, = ratio_axis.plot(
+            ratio_iterations,
+            ratio_average,
+            color="tab:green",
+            linewidth=2.8,
+            label=(
+                "Moving average of normalized phase-MAD ratio "
+                f"({ONLINE_PHASE_MAD_RATIO_MOVING_AVERAGE_WINDOW})"
+            ),
+        )
+        ratio_axis.axhline(
+            1.0,
+            color="0.35",
+            linewidth=0.9,
+            linestyle=":",
+        )
+        normalized_mad_axis.set_yscale("log")
+        normalized_mad_axis.set_ylabel("Rolling MAD / rolling phase median")
+        ratio_axis.set_ylabel(
+            "Last-phase normalized MAD / first-phase normalized MAD"
+        )
+        normalized_mad_axis.set_title(
+            f"Online Normalized Phase-MAD Ratio: {name}\n"
+            f"Rolling window = {cycle_window} sampling cycles; "
+            f"(phase {last_phase} MAD / median) / "
+            "(phase 1 MAD / median)"
+        )
+        apply_standard_axes(
+            normalized_mad_axis,
+            xlabel="Iteration at completion of last phase",
+        )
+        normalized_mad_axis.legend(
+            handles=[
+                first_line,
+                last_line,
+                ratio_line,
+                ratio_average_line,
+            ],
             loc="best",
             fontsize=8,
         )
@@ -1665,7 +2013,7 @@ def plot_online_quarter_phase_mad_ratio(
     ) % sampling_update
 
     populated_phase_count = sampling_update - 1
-    quarter_phase_count = max(1, int(np.ceil(0.25 * populated_phase_count)))
+    quarter_phase_count = max(1, int(np.ceil(0.15 * populated_phase_count)))
     first_phases = np.arange(1, quarter_phase_count + 1)
     last_phases = np.arange(
         sampling_update - quarter_phase_count,
@@ -1773,9 +2121,24 @@ def plot_online_quarter_phase_mad_ratio(
         ratio_line, = ratio_axis.plot(
             ratio_iterations,
             ratios,
-            color="tab:green",
+            color="black",
             linewidth=2.2,
+            alpha=1.0,
             label="Last-25% MAD / first-25% MAD",
+        )
+        ratio_average = moving_average(
+            ratios,
+            ONLINE_PHASE_MAD_RATIO_MOVING_AVERAGE_WINDOW,
+        )
+        ratio_average_line, = ratio_axis.plot(
+            ratio_iterations,
+            ratio_average,
+            color="tab:purple",
+            linewidth=2.8,
+            label=(
+                "Moving average of phase-group MAD ratio "
+                f"({ONLINE_PHASE_MAD_RATIO_MOVING_AVERAGE_WINDOW})"
+            ),
         )
         ratio_axis.axhline(
             1.0,
@@ -1792,10 +2155,6 @@ def plot_online_quarter_phase_mad_ratio(
         )
         ratio_axis.tick_params(axis="y", colors="tab:green")
         ratio_axis.spines["right"].set_color("tab:green")
-        ratio_axis.set_ylim(
-            0.0,
-            1.05 * max(1.0, float(np.max(ratios))),
-        )
         mad_axis.set_title(
             f"Online First/Last Quarter Phase-MAD Ratio: {name}\n"
             f"Rolling window = {cycle_window} sampling cycles; "
@@ -1806,7 +2165,12 @@ def plot_online_quarter_phase_mad_ratio(
             xlabel="Iteration at completion of last phase",
         )
         mad_axis.legend(
-            handles=[first_line, last_line, ratio_line],
+            handles=[
+                first_line,
+                last_line,
+                ratio_line,
+                ratio_average_line,
+            ],
             loc="best",
             fontsize=8,
         )
@@ -2140,6 +2504,7 @@ def plot_rom_conservation_errors(
                 "conservation_error_phase_quantiles",
                 "conservation_error_phase_tail_body",
                 "phase_mad_ratio_online",
+                "normalized_phase_mad_ratio_online",
                 "phase_quarter_mad_ratio_online",
                 "signed_conservation_error_cycle_sum",
             )
@@ -2424,6 +2789,15 @@ def plot_rom_conservation_errors(
                 pdf=pdf,
             )
 
+        if is_plot_enabled("computed_short_p95_residual"):
+            plot_computed_short_p95_residual(
+                iterations=iterations,
+                raw=raw,
+                name=name,
+                title="ROM Absolute Conservation Error",
+                pdf=pdf,
+            )
+
         if is_plot_enabled("conservation_error_by_phase"):
             plot_conservation_error_by_phase(
                 iterations,
@@ -2462,6 +2836,16 @@ def plot_rom_conservation_errors(
 
         if is_plot_enabled("phase_mad_ratio_online"):
             plot_online_phase_mad_ratio(
+                iterations,
+                raw,
+                sampling_update,
+                PHASE_MAD_RATIO_CYCLE_WINDOWS,
+                name,
+                pdf,
+            )
+
+        if is_plot_enabled("normalized_phase_mad_ratio_online"):
+            plot_online_normalized_phase_mad_ratio(
                 iterations,
                 raw,
                 sampling_update,
@@ -2855,7 +3239,7 @@ def run_range(args, active_range):
         active_range,
         "primitive",
     )
-    relative_l2, correlation = compute_metric_histories(
+    relative_l2, correlation, peak_location_error = compute_metric_histories(
         fom_primitive,
         rom_primitive,
     )
@@ -2923,6 +3307,7 @@ def run_range(args, active_range):
                 primitive_iterations,
                 relative_l2,
                 correlation,
+                peak_location_error,
                 PRIMITIVE_FIELD_NAMES,
                 pdf,
             )
@@ -2943,6 +3328,7 @@ def run_range(args, active_range):
                 "winsorized_mean_comparison",
                 "histogram_density_band",
                 "saved_short_mad_moving_average",
+                "computed_short_p95_residual",
                 "saved_first_mad_moving_average",
                 "rolling_cv",
                 "conservation_error_by_phase",
@@ -2950,6 +3336,7 @@ def run_range(args, active_range):
                 "conservation_error_phase_quantiles",
                 "conservation_error_phase_tail_body",
                 "phase_mad_ratio_online",
+                "normalized_phase_mad_ratio_online",
                 "phase_quarter_mad_ratio_online",
                 "signed_conservation_error_cycle_sum",
             )
