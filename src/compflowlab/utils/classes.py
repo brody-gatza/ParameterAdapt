@@ -80,3 +80,64 @@ class MedianAbsoluteDeviation:
         self.count = 0
         self.center[:] = np.nan
         self.MAD[:] = np.nan
+
+class MovingAveragePhase:
+    def __init__(self, window_size, num_var):
+        self.window_size = window_size
+        self.window = np.zeros((num_var, 0))
+        self.count = 0
+        self.sum = np.zeros(num_var)
+        self.avg = np.full_like(self.sum, np.nan)
+
+    def update(self, value):
+        if np.any(np.isnan(value)):
+            return
+
+        if self.count == self.window_size:
+            self.sum -= self.window[:, 0]
+            self.window = self.window[:, 1:]
+        else:
+            self.count += 1            
+
+        self.window = np.column_stack((self.window, value))
+        self.sum += value
+
+        self.avg = self.sum / self.count
+
+    def reset(self):
+        self.window = self.window[:, :0]
+        self.count = 0
+        self.sum[:] = 0.0
+        self.avg[:] = np.nan
+
+class MedianAbsoluteDeviationPhase:
+    def __init__(self, window_size, num_var):
+        self.window_size = window_size
+        self.window = np.zeros((num_var, 0))
+        self.count = 0
+        self.center = np.zeros(num_var)
+        self.MAD = np.full_like(self.center, np.nan)
+
+    def update(self, value):
+        if self.count == self.window_size:
+            self.window = self.window[:, 1:]
+        else:
+            self.count += 1
+
+        self.window = np.column_stack((self.window, value))
+
+        self.center = np.median(self.window, axis=1)
+        res = self.window - self.center[:, None]
+        if self.count == self.window_size:
+            self.MAD = np.median(np.abs(res), axis=1)
+        else:
+            self.MAD = np.full_like(self.center, np.nan)
+
+        # res_median = np.median(np.abs(res), axis=1)
+        # self.MAD = res_median / np.abs(self.center)
+
+    def reset(self):
+        self.window = self.window[:, :0]
+        self.count = 0
+        self.center[:] = np.nan
+        self.MAD[:] = np.nan

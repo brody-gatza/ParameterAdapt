@@ -7,7 +7,7 @@ from compflowlab.boundary_condition import bc_func
 from compflowlab.rom.basis_func import adapt_basis
 from compflowlab.rom.sampling_func import hyper_precompute
 
-from ..utils.classes import MovingAverage, MedianAbsoluteDeviation
+from ..utils.classes import MovingAverage, MedianAbsoluteDeviation, MovingAveragePhase, MedianAbsoluteDeviationPhase
 import copy
 
 def update_sampling_list(solver_param, iter, next_sample):
@@ -143,6 +143,7 @@ def _get_error_output_file_names(include_sampling_freq=True):
         "error_cons_perct_ma",
         "error_cons_mad",
         "error_cons_first_mad",
+        "phase_mad",
         "error_cons_fom_iter_counter",
     ])
 
@@ -162,9 +163,15 @@ def _write_error_output_array_map(state, iter, output_array_map):
     sampling_freq is intentionally excluded because it is scalar-formatted
     separately.
     """
+
+    conditional_output_names = {
+            "error_cons_first_mad",
+            "phase_mad",
+        }
+
     for name in _get_error_output_file_names(include_sampling_freq=False):
         if name not in output_array_map:
-            if name == "error_cons_first_mad":
+            if name in conditional_output_names:
                 continue
 
             raise KeyError(
@@ -1282,6 +1289,11 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                     rom_param['error_cons_mad_ma'] = MovingAverage(1000, solver_param['num_state_var'])
                     rom_param['error_cons_first_mad'] = MedianAbsoluteDeviation(100, solver_param['num_state_var'])
                     rom_param['error_cons_first_mad_ma'] = MovingAverage(1000, solver_param['num_state_var'])
+                    rom_param['phase_1_mad'] = MedianAbsoluteDeviationPhase(100, solver_param['num_state_var'])
+                    rom_param['phase_1_mad_ma'] = MovingAveragePhase(100, solver_param['num_state_var'])
+                    rom_param['phase_n_mad'] = MedianAbsoluteDeviationPhase(100, solver_param['num_state_var'])
+                    rom_param['phase_n_mad_ma'] = MovingAveragePhase(100, solver_param['num_state_var'])
+                    rom_param['phase_mad_ratio_ma'] = MovingAveragePhase(100, solver_param['num_state_var'])
 
                     rom_param['error_cons_perct_ma'] = MovingAverage(5000, solver_param['num_state_var'])
                     rom_param['error_cons_fom_iter_counter'] = 0
@@ -1395,9 +1407,22 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                 # Update the conservation error MAD
                 rom_param['error_cons_mad'].update(iter, error_cons)
                 rom_param['error_cons_mad_ma'].update(iter, rom_param['error_cons_mad'].MAD)
+
+                # Update the first phase of the sampling cycle
                 if np.any(iter - 1 == solver_param['resample_iter_list']):
                     rom_param['error_cons_first_mad'].update(iter, error_cons)
                     rom_param['error_cons_first_mad_ma'].update(iter, rom_param['error_cons_first_mad'].MAD)
+
+                    rom_param['phase_1_mad'].update(error_cons)
+                    rom_param['phase_1_mad_ma'].update(rom_param['phase_1_mad'].MAD)
+
+                # Update the final phase of the sampling cycle
+                if np.any(iter + 1 == solver_param['resample_iter_list']):
+                    rom_param['phase_n_mad'].update(error_cons)
+                    rom_param['phase_n_mad_ma'].update(rom_param['phase_n_mad'].MAD)
+
+                    rom_param['phase_mad_ratio'] = rom_param['phase_n_mad'].MAD / rom_param['phase_1_mad'].MAD
+                    rom_param['phase_mad_ratio_ma'].update(rom_param['phase_mad_ratio'])
 
                 # Write rolling medians first, followed by normalized MAD values and rolling averages
                 error_cons_mad_output = np.concatenate((
@@ -1411,6 +1436,18 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                         rom_param['error_cons_first_mad'].center,
                         rom_param['error_cons_first_mad'].MAD,
                         rom_param['error_cons_first_mad_ma'].avg,
+                    ))
+
+                if np.any(iter + 1 == solver_param['resample_iter_list']):
+                    phase_mad_output = np.concatenate((
+                        rom_param['phase_1_mad'].center,
+                        rom_param['phase_1_mad'].MAD,
+                        rom_param['phase_1_mad_ma'].avg,
+                        rom_param['phase_n_mad'].center,
+                        rom_param['phase_n_mad'].MAD,
+                        rom_param['phase_n_mad_ma'].avg,
+                        rom_param['phase_mad_ratio'],
+                        rom_param['phase_mad_ratio_ma'].avg,
                     ))
 
                 # Update the conservation error moving average
@@ -1541,7 +1578,7 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                     "prim_proj_avg_slope_ratio":   prim_proj_avg_slope_ratio,
                 }
 
-                if np.any(iter - 1 == solver_param['resample_iter_list']):
+                if (np.any(iter - 1 == solver_param['resample_iter_list']) and np.any(iter + 1 == solver_param['resample_iter_list'])):
                     output_array_map = {
                         "error_cons": error_cons,
                         "error_cons_perct": error_cons_perct,
@@ -1550,6 +1587,33 @@ def advance_one_time_step(solver_param,state,physics,time_integration,rom_param=
                         ),
                         "error_cons_mad": error_cons_mad_output,
                         "error_cons_first_mad": error_cons_first_mad_output,
+                        "phase_mad": phase_mad_output,
+                        "error_cons_fom_iter_counter": rom_param.get(
+                            "error_cons_fom_iter_counter", 0
+                        ),
+                    }
+                elif np.any(iter - 1 == solver_param['resample_iter_list']):
+                    output_array_map = {
+                        "error_cons": error_cons,
+                        "error_cons_perct": error_cons_perct,
+                        "error_cons_perct_ma": (
+                            rom_param["error_cons_perct_ma"].avg.copy()
+                        ),
+                        "error_cons_mad": error_cons_mad_output,
+                        "error_cons_first_mad": error_cons_first_mad_output,
+                        "error_cons_fom_iter_counter": rom_param.get(
+                            "error_cons_fom_iter_counter", 0
+                        ),
+                    }
+                elif np.any(iter + 1 == solver_param['resample_iter_list']):
+                    output_array_map = {
+                        "error_cons": error_cons,
+                        "error_cons_perct": error_cons_perct,
+                        "error_cons_perct_ma": (
+                            rom_param["error_cons_perct_ma"].avg.copy()
+                        ),
+                        "error_cons_mad": error_cons_mad_output,
+                        "phase_mad": phase_mad_output,
                         "error_cons_fom_iter_counter": rom_param.get(
                             "error_cons_fom_iter_counter", 0
                         ),
